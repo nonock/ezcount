@@ -1,0 +1,8 @@
+# Bun configuration for ezcount
+# Refer to documentation: https://bun.com/docs/runtime/bunfig
+
+[install]
+# Security: Only install packages published at least 7 days ago.
+# Protects against zero-day supply chain attacks and compromised releases.
+# 7 days * 24h * 60m * 60s = 604800 seconds
+minimumReleaseAge = 604800
