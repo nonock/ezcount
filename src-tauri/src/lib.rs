@@ -85,6 +85,18 @@ fn get_settlements(
     }
 }
 
+#[tauri::command]
+fn record_reimbursement(
+    state: State<AppState>,
+    group_id: String,
+    from_id: String,
+    to_id: String,
+    amount_cents: i64,
+    notes: Option<String>,
+) -> Result<Group, String> {
+    state.record_reimbursement(&group_id, from_id, to_id, amount_cents, notes)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -106,6 +118,7 @@ pub fn run() {
             add_participant,
             add_expense,
             delete_expense,
+            record_reimbursement,
             get_balances,
             get_settlements
         ])

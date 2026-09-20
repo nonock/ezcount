@@ -16,6 +16,8 @@ pub struct Expense {
     pub paid_by: String,          // Participant ID
     pub split_among: Vec<String>, // List of Participant IDs
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub is_reimbursement: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

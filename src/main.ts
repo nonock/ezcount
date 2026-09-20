@@ -17,6 +17,7 @@ export interface Expense {
   paid_by: string;
   split_among: string[];
   created_at: string;
+  is_reimbursement?: boolean;
 }
 
 export interface Group {
@@ -78,6 +79,7 @@ function getLocalMockGroups(): Group[] {
               paid_by: "p1",
               split_among: ["p1", "p2", "p3"],
               created_at: new Date(Date.now() - 86400000).toISOString(),
+              is_reimbursement: false,
             },
             {
               id: "e2",
@@ -87,6 +89,7 @@ function getLocalMockGroups(): Group[] {
               paid_by: "p2",
               split_among: ["p1", "p2", "p3"],
               created_at: new Date().toISOString(),
+              is_reimbursement: false,
             },
           ],
         },
@@ -271,6 +274,48 @@ const api = {
       paid_by: paidBy,
       split_among: splitAmong,
       created_at: new Date().toISOString(),
+      is_reimbursement: false,
+    });
+    saveLocalMockGroups(groups);
+    return group;
+  },
+
+  async recordReimbursement(
+    groupId: string,
+    fromId: string,
+    toId: string,
+    amountCents: number,
+    notes?: string
+  ): Promise<Group> {
+    if (isTauri) {
+      return await invoke("record_reimbursement", {
+        groupId,
+        fromId,
+        toId,
+        amountCents,
+        notes: notes || null,
+      });
+    }
+    const groups = getLocalMockGroups();
+    const group = groups.find((g) => g.id === groupId);
+    if (!group) throw new Error("Group not found");
+    const fromMember = group.participants.find((p) => p.id === fromId);
+    const toMember = group.participants.find((p) => p.id === toId);
+    const fromName = fromMember ? fromMember.name : "Unknown";
+    const toName = toMember ? toMember.name : "Unknown";
+    const title = notes?.trim()
+      ? `Payment: ${fromName} → ${toName} (${notes.trim()})`
+      : `Payment: ${fromName} → ${toName}`;
+
+    group.expenses.push({
+      id: `exp_${Math.random().toString(36).substring(2, 9)}`,
+      group_id: groupId,
+      title,
+      amount_cents: amountCents,
+      paid_by: fromId,
+      split_among: [toId],
+      created_at: new Date().toISOString(),
+      is_reimbursement: true,
     });
     saveLocalMockGroups(groups);
     return group;
@@ -368,7 +413,9 @@ async function loadDashboard() {
   emptyState.classList.add("hidden");
   grid.innerHTML = groups
     .map((g) => {
-      const totalCents = g.expenses.reduce((sum, e) => sum + e.amount_cents, 0);
+      const totalCents = g.expenses
+        .filter((e) => !e.is_reimbursement)
+        .reduce((sum, e) => sum + e.amount_cents, 0);
       const participantPills = g.participants
         .slice(0, 4)
         .map(
@@ -390,11 +437,11 @@ async function loadDashboard() {
 
           <div class="flex items-baseline justify-between border-t border-slate-800/80 pt-3 mt-4">
             <div>
-              <span class="text-[11px] text-slate-500 block">Total Spent</span>
+              <span class="text-[11px] text-slate-500 block">Group Spending</span>
               <span class="text-sm font-bold text-slate-200">${formatMoney(totalCents, g.currency)}</span>
             </div>
             <div class="text-right">
-              <span class="text-[11px] text-slate-500 block">Expenses</span>
+              <span class="text-[11px] text-slate-500 block">Transactions</span>
               <span class="text-xs font-semibold text-slate-300">${g.expenses.length}</span>
             </div>
           </div>
@@ -444,8 +491,10 @@ async function openGroup(groupId: string) {
   if (currEl) currEl.textContent = group.currency;
   if (dateEl) dateEl.textContent = `Created on ${formatDate(group.created_at)}`;
 
-  // Quick stats
-  const totalCents = group.expenses.reduce((sum, e) => sum + e.amount_cents, 0);
+  // Quick stats: Spending excludes direct reimbursements to represent true group costs
+  const totalCents = group.expenses
+    .filter((e) => !e.is_reimbursement)
+    .reduce((sum, e) => sum + e.amount_cents, 0);
   const totalSpentEl = document.getElementById("stat-total-spent");
   const expCountEl = document.getElementById("stat-expense-count");
   const partCountEl = document.getElementById("stat-participant-count");
@@ -490,6 +539,42 @@ async function renderExpensesTab(group: Group) {
   container.innerHTML = sortedExpenses
     .map((e) => {
       const payerName = nameMap.get(e.paid_by) || "Unknown";
+      const isReimbursement = !!e.is_reimbursement;
+
+      if (isReimbursement) {
+        const recipientName = nameMap.get(e.split_among[0]) || "Unknown";
+        return `
+          <div class="flex items-center justify-between p-4 rounded-xl border border-emerald-500/20 bg-emerald-950/10 hover:bg-emerald-950/20 transition group">
+            <div class="flex items-center gap-3.5">
+              <div class="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-base">
+                🤝
+              </div>
+              <div>
+                <div class="flex items-center gap-2">
+                  <h4 class="text-sm font-semibold text-white">${e.title}</h4>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Reimbursement</span>
+                </div>
+                <p class="text-xs text-slate-400 mt-0.5">
+                  <span class="font-medium text-slate-200">${payerName}</span> paid <span class="font-medium text-slate-200">${recipientName}</span> directly
+                </p>
+                <p class="text-[11px] text-slate-500 mt-0.5">${formatDate(e.created_at)}</p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <div class="text-right">
+                <span class="text-sm font-bold text-emerald-400">${formatMoney(e.amount_cents, group.currency)}</span>
+              </div>
+              <button data-expense-id="${e.id}" class="btn-delete-expense opacity-40 group-hover:opacity-100 p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer" title="Delete reimbursement">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
       const splitNames = e.split_among.map((id) => nameMap.get(id) || "Unknown").join(", ");
       const sharePerPerson = formatMoney(
         Math.floor(e.amount_cents / (e.split_among.length || 1)),
@@ -530,7 +615,7 @@ async function renderExpensesTab(group: Group) {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       const eid = btn.getAttribute("data-expense-id");
-      if (eid && currentGroup && confirm("Are you sure you want to delete this expense?")) {
+      if (eid && currentGroup && confirm("Are you sure you want to delete this record?")) {
         const updated = await api.deleteExpense(currentGroup.id, eid);
         currentGroup = updated;
         openGroup(updated.id);
@@ -590,10 +675,31 @@ async function renderBalancesTab(group: Group) {
             <span>Paid: <strong class="text-slate-200">${formatMoney(b.paid_cents, group.currency)}</strong></span>
             <span>Consumed: <strong class="text-slate-200">${formatMoney(b.owed_cents, group.currency)}</strong></span>
           </div>
+
+          ${
+            isNegative
+              ? `
+            <div class="pt-1">
+              <button data-participant-id="${b.participant_id}" data-amount="${(Math.abs(b.net_cents) / 100).toFixed(2)}" class="btn-balance-reimburse w-full py-1.5 rounded-lg text-xs font-semibold bg-slate-800/80 hover:bg-emerald-950/50 text-slate-300 hover:text-emerald-300 border border-slate-700 hover:border-emerald-500/40 transition flex items-center justify-center gap-1.5 cursor-pointer">
+                <span>Reimburse debt</span>
+                <span class="text-[10px] text-slate-400 font-mono font-normal">(${formatMoney(Math.abs(b.net_cents), group.currency)})</span>
+              </button>
+            </div>
+          `
+              : ""
+          }
         </div>
       `;
     })
     .join("");
+
+  for (const btn of container.querySelectorAll(".btn-balance-reimburse")) {
+    btn.addEventListener("click", () => {
+      const pid = btn.getAttribute("data-participant-id") || undefined;
+      const amount = btn.getAttribute("data-amount") || undefined;
+      openReimburseModal(pid, undefined, amount);
+    });
+  }
 }
 
 async function renderSettlementsTab(group: Group) {
@@ -613,7 +719,7 @@ async function renderSettlementsTab(group: Group) {
   container.innerHTML = settlements
     .map(
       (s) => `
-      <div class="flex items-center justify-between p-4 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900/80 transition">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900/80 transition">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center text-xs font-bold">
             ${s.from_name.charAt(0).toUpperCase()}
@@ -628,15 +734,29 @@ async function renderSettlementsTab(group: Group) {
           </div>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
           <span class="text-base font-bold text-emerald-400 font-mono">
             ${formatMoney(s.amount_cents, group.currency)}
           </span>
+          <button data-from-id="${s.from_id}" data-to-id="${s.to_id}" data-amount="${(s.amount_cents / 100).toFixed(2)}" class="btn-mark-paid inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 transition cursor-pointer active:scale-95">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+            <span>Mark as Paid</span>
+          </button>
         </div>
       </div>
     `
     )
     .join("");
+
+  // Attach click listeners to Mark as Paid buttons to open pre-filled reimbursement modal
+  for (const btn of container.querySelectorAll(".btn-mark-paid")) {
+    btn.addEventListener("click", () => {
+      const fromId = btn.getAttribute("data-from-id") || undefined;
+      const toId = btn.getAttribute("data-to-id") || undefined;
+      const amount = btn.getAttribute("data-amount") || undefined;
+      openReimburseModal(fromId, toId, amount);
+    });
+  }
 }
 
 function switchTab(tab: "expenses" | "balances" | "settle") {
@@ -694,6 +814,37 @@ function closeModal(modalId: string) {
   document.getElementById(modalId)?.classList.add("hidden");
 }
 
+function openReimburseModal(fromId?: string, toId?: string, amount?: string) {
+  if (!currentGroup) return;
+  openModal("modal-record-reimbursement");
+
+  const currSuffix = document.getElementById("reimburse-modal-currency-suffix");
+  if (currSuffix) currSuffix.textContent = currentGroup.currency;
+
+  const fromSelect = document.getElementById("select-reimburse-from") as HTMLSelectElement;
+  const toSelect = document.getElementById("select-reimburse-to") as HTMLSelectElement;
+  const amountInput = document.getElementById("input-reimburse-amount") as HTMLInputElement;
+  const notesInput = document.getElementById("input-reimburse-notes") as HTMLInputElement;
+
+  if (fromSelect && toSelect) {
+    const options = currentGroup.participants
+      .map((p) => `<option value="${p.id}">${p.name}</option>`)
+      .join("");
+    fromSelect.innerHTML = options;
+    toSelect.innerHTML = options;
+
+    if (fromId) fromSelect.value = fromId;
+    if (toId) {
+      toSelect.value = toId;
+    } else if (currentGroup.participants.length > 1) {
+      toSelect.selectedIndex = fromSelect.selectedIndex === 0 ? 1 : 0;
+    }
+  }
+
+  if (amountInput) amountInput.value = amount || "";
+  if (notesInput) notesInput.value = "";
+}
+
 function setupModalsAndForms() {
   // Close buttons
   for (const btn of document.querySelectorAll(".modal-close-btn")) {
@@ -701,6 +852,7 @@ function setupModalsAndForms() {
       closeModal("modal-create-group");
       closeModal("modal-add-member");
       closeModal("modal-add-expense");
+      closeModal("modal-record-reimbursement");
     });
   }
 
@@ -845,6 +997,51 @@ function setupModalsAndForms() {
       closeModal("modal-add-expense");
       titleInput.value = "";
       amountInput.value = "";
+      openGroup(updated.id);
+    }
+  });
+
+  // Open Record Reimbursement buttons
+  document.getElementById("btn-open-reimburse")?.addEventListener("click", () => {
+    openReimburseModal();
+  });
+  document.getElementById("btn-open-reimburse-nav")?.addEventListener("click", () => {
+    openReimburseModal();
+  });
+
+  // Handle Record Reimbursement submit
+  document.getElementById("form-record-reimbursement")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!currentGroup) return;
+
+    const fromSelect = document.getElementById("select-reimburse-from") as HTMLSelectElement;
+    const toSelect = document.getElementById("select-reimburse-to") as HTMLSelectElement;
+    const amountInput = document.getElementById("input-reimburse-amount") as HTMLInputElement;
+    const notesInput = document.getElementById("input-reimburse-notes") as HTMLInputElement;
+
+    const fromId = fromSelect.value;
+    const toId = toSelect.value;
+    const amountDecimal = Number.parseFloat(amountInput.value);
+    const amountCents = Math.round(amountDecimal * 100);
+    const notes = notesInput.value.trim();
+
+    if (fromId === toId) {
+      alert("The sender and recipient cannot be the same person.");
+      return;
+    }
+
+    if (amountCents > 0) {
+      const updated = await api.recordReimbursement(
+        currentGroup.id,
+        fromId,
+        toId,
+        amountCents,
+        notes
+      );
+      currentGroup = updated;
+      closeModal("modal-record-reimbursement");
+      amountInput.value = "";
+      notesInput.value = "";
       openGroup(updated.id);
     }
   });

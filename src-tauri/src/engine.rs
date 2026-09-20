@@ -161,6 +161,7 @@ mod tests {
             paid_by: "p1".to_string(),
             split_among: vec!["p1".to_string(), "p2".to_string(), "p3".to_string()],
             created_at: Utc::now(),
+            is_reimbursement: false,
         });
         // Bob pays 30.00 for Alice & Bob
         group.expenses.push(Expense {
@@ -171,6 +172,7 @@ mod tests {
             paid_by: "p2".to_string(),
             split_among: vec!["p1".to_string(), "p2".to_string()],
             created_at: Utc::now(),
+            is_reimbursement: false,
         });
 
         let balances = calculate_balances(&group);
@@ -210,10 +212,55 @@ mod tests {
             paid_by: "p1".to_string(),
             split_among: vec!["p1".to_string(), "p2".to_string(), "p3".to_string()],
             created_at: Utc::now(),
+            is_reimbursement: false,
         });
 
         let balances = calculate_balances(&group);
         let total_owed: i64 = balances.iter().map(|b| b.owed_cents).sum();
         assert_eq!(total_owed, 1000, "No cents lost in division");
+    }
+
+    #[test]
+    fn test_reimbursement_settles_debt() {
+        let mut group = setup_test_group();
+        // Alice pays 60.00 for all 3 (Bob owes 20, Charlie owes 20)
+        group.expenses.push(Expense {
+            id: "e1".to_string(),
+            group_id: "group_1".to_string(),
+            title: "Dinner".to_string(),
+            amount_cents: 6000,
+            paid_by: "p1".to_string(),
+            split_among: vec!["p1".to_string(), "p2".to_string(), "p3".to_string()],
+            created_at: Utc::now(),
+            is_reimbursement: false,
+        });
+
+        // Bob reimburses Alice 20.00
+        group.expenses.push(Expense {
+            id: "e2".to_string(),
+            group_id: "group_1".to_string(),
+            title: "Payment: Bob -> Alice".to_string(),
+            amount_cents: 2000,
+            paid_by: "p2".to_string(),
+            split_among: vec!["p1".to_string()],
+            created_at: Utc::now(),
+            is_reimbursement: true,
+        });
+
+        let balances = calculate_balances(&group);
+        let bob = balances.iter().find(|b| b.participant_id == "p2").unwrap();
+        assert_eq!(bob.net_cents, 0, "Bob is fully settled up");
+
+        let charlie = balances.iter().find(|b| b.participant_id == "p3").unwrap();
+        assert_eq!(charlie.net_cents, -2000, "Charlie still owes 20.00");
+
+        let alice = balances.iter().find(|b| b.participant_id == "p1").unwrap();
+        assert_eq!(alice.net_cents, 2000, "Alice is owed 20.00");
+
+        let settlements = calculate_settlements(&group);
+        assert_eq!(settlements.len(), 1, "Only 1 transfer remains");
+        assert_eq!(settlements[0].from_name, "Charlie");
+        assert_eq!(settlements[0].to_name, "Alice");
+        assert_eq!(settlements[0].amount_cents, 2000);
     }
 }

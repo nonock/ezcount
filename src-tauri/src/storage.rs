@@ -147,6 +147,67 @@ impl AppState {
             paid_by,
             split_among,
             created_at: Utc::now(),
+            is_reimbursement: false,
+        };
+
+        group.expenses.push(expense);
+        let updated = group.clone();
+        self.persist(&groups)?;
+
+        Ok(updated)
+    }
+
+    pub fn record_reimbursement(
+        &self,
+        group_id: &str,
+        from_id: String,
+        to_id: String,
+        amount_cents: i64,
+        notes: Option<String>,
+    ) -> Result<Group, String> {
+        if amount_cents <= 0 {
+            return Err("Reimbursement amount must be greater than zero".to_string());
+        }
+        if from_id == to_id {
+            return Err("Sender and recipient cannot be the same person".to_string());
+        }
+
+        let mut groups = self.groups.lock().unwrap();
+        let group = groups
+            .iter_mut()
+            .find(|g| g.id == group_id)
+            .ok_or_else(|| "Group not found".to_string())?;
+
+        let from_name = group
+            .participants
+            .iter()
+            .find(|p| p.id == from_id)
+            .map(|p| p.name.clone())
+            .ok_or_else(|| "Sender participant not found".to_string())?;
+
+        let to_name = group
+            .participants
+            .iter()
+            .find(|p| p.id == to_id)
+            .map(|p| p.name.clone())
+            .ok_or_else(|| "Recipient participant not found".to_string())?;
+
+        let title = match notes {
+            Some(n) if !n.trim().is_empty() => {
+                format!("Payment: {} → {} ({})", from_name, to_name, n.trim())
+            }
+            _ => format!("Payment: {} → {}", from_name, to_name),
+        };
+
+        let expense = Expense {
+            id: Uuid::new_v4().to_string(),
+            group_id: group_id.to_string(),
+            title,
+            amount_cents,
+            paid_by: from_id,
+            split_among: vec![to_id],
+            created_at: Utc::now(),
+            is_reimbursement: true,
         };
 
         group.expenses.push(expense);
