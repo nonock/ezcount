@@ -1,0 +1,30 @@
+# Lefthook configuration for ezcount (Tauri v2 + Vite + TypeScript)
+# Refer to documentation: https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  commands:
+    # 1. Biome: Lint and format frontend code, JSON configs, and CSS
+    biome-check:
+      glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc,css}"
+      run: bunx @biomejs/biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true
+
+    # 2. TypeScript: Type checking across src/
+    typecheck:
+      glob: "src/**/*.{ts,tsx}"
+      run: bunx tsc --noEmit
+
+    # 3. Rust: Format check
+    cargo-fmt:
+      glob: "src-tauri/**/*.rs"
+      run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+    # 4. Rust: Clippy linter
+    cargo-clippy:
+      glob: "src-tauri/**/*.rs"
+      run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+    # 5. Git Hygiene: Trailing whitespace check
+    trailing-whitespace:
+      run: git diff --check --cached
