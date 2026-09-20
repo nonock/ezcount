@@ -6,7 +6,17 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignoreUnknown": false
+    "ignoreUnknown": false,
+    "include": [
+      "src/**",
+      "index.html",
+      "vite.config.ts",
+      "package.json",
+      "tsconfig.json",
+      "biome.json",
+      "src-tauri/tauri.conf.json",
+      "src-tauri/capabilities/**"
+    ]
   },
   "formatter": {
     "enabled": true,
