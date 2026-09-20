@@ -7,5 +7,8 @@
   },
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  },
+  "terminal.integrated.env.windows": {
+    "PATH": "${env:USERPROFILE}\\.bun\\bin;${env:USERPROFILE}\\.cargo\\bin;${env:PATH}"
   }
 }
