@@ -32,8 +32,7 @@ pub struct Expense {
     pub paid_by: String, // Participant ID
     pub splits: Vec<ExpenseSplit>,
     pub created_at: DateTime<Utc>,
-    #[serde(default)]
-    pub updated_at: Option<DateTime<Utc>>,
+    pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub history: Vec<ExpenseHistoryEntry>,
     #[serde(default)]

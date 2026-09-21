@@ -41,7 +41,7 @@ export const ExpenseHistoryModal: React.FC<ExpenseHistoryModalProps> = ({
             <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400">
               Current Version
             </span>
-            {expense.updated_at ? (
+            {historyEntries.length > 0 ? (
               <span className="text-[11px] text-slate-400">
                 Last modified {formatDateTime(expense.updated_at)}
               </span>

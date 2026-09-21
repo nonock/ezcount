@@ -142,6 +142,7 @@ impl AppState {
             .find(|g| g.id == group_id)
             .ok_or_else(|| "Group not found".to_string())?;
 
+        let now = Utc::now();
         let expense = Expense {
             id: Uuid::new_v4().to_string(),
             group_id: group_id.to_string(),
@@ -149,8 +150,8 @@ impl AppState {
             amount_cents,
             paid_by,
             splits,
-            created_at: Utc::now(),
-            updated_at: None,
+            created_at: now,
+            updated_at: now,
             history: Vec::new(),
             is_reimbursement: false,
         };
@@ -244,7 +245,7 @@ impl AppState {
         };
 
         expense.history.push(history_entry);
-        expense.updated_at = Some(Utc::now());
+        expense.updated_at = Utc::now();
         expense.title = trimmed_title.to_string();
         expense.amount_cents = amount_cents;
         expense.paid_by = paid_by;
@@ -298,6 +299,7 @@ impl AppState {
             _ => format!("Payment: {} → {}", from_name, to_name),
         };
 
+        let now = Utc::now();
         let expense = Expense {
             id: Uuid::new_v4().to_string(),
             group_id: group_id.to_string(),
@@ -308,8 +310,8 @@ impl AppState {
                 participant_id: to_id,
                 shares: 1,
             }],
-            created_at: Utc::now(),
-            updated_at: None,
+            created_at: now,
+            updated_at: now,
             history: Vec::new(),
             is_reimbursement: true,
         };

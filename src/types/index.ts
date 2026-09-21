@@ -25,7 +25,7 @@ export interface Expense {
   paid_by: string; // Participant ID
   splits: ExpenseSplit[];
   created_at: string; // ISO 8601 string
-  updated_at?: string | null;
+  updated_at: string; // ISO 8601 string
   history?: ExpenseHistoryEntry[];
   is_reimbursement?: boolean;
 }

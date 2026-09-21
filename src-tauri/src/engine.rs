@@ -189,7 +189,7 @@ mod tests {
                 },
             ],
             created_at: Utc::now(),
-            updated_at: None,
+            updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
         });
@@ -211,7 +211,7 @@ mod tests {
                 },
             ],
             created_at: Utc::now(),
-            updated_at: None,
+            updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
         });
@@ -266,7 +266,7 @@ mod tests {
                 },
             ],
             created_at: Utc::now(),
-            updated_at: None,
+            updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
         });
@@ -300,7 +300,7 @@ mod tests {
                 },
             ],
             created_at: Utc::now(),
-            updated_at: None,
+            updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
         });
@@ -352,7 +352,7 @@ mod tests {
                 },
             ],
             created_at: Utc::now(),
-            updated_at: None,
+            updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
         });
@@ -369,7 +369,7 @@ mod tests {
                 shares: 1,
             }],
             created_at: Utc::now(),
-            updated_at: None,
+            updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: true,
         });
