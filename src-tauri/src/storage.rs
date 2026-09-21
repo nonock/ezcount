@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use crate::models::{Expense, ExpenseSplit, Group, Participant};
+use crate::models::{Expense, ExpenseHistoryEntry, ExpenseSplit, Group, Participant};
 
 pub struct AppState {
     pub groups: Mutex<Vec<Group>>,
@@ -150,10 +150,106 @@ impl AppState {
             paid_by,
             splits,
             created_at: Utc::now(),
+            updated_at: None,
+            history: Vec::new(),
             is_reimbursement: false,
         };
 
         group.expenses.push(expense);
+        let updated = group.clone();
+        self.persist(&groups)?;
+
+        Ok(updated)
+    }
+
+    pub fn update_expense(
+        &self,
+        group_id: &str,
+        expense_id: &str,
+        title: String,
+        amount_cents: i64,
+        paid_by: String,
+        splits: Vec<ExpenseSplit>,
+    ) -> Result<Group, String> {
+        if amount_cents <= 0 {
+            return Err("Amount must be greater than zero".to_string());
+        }
+        if splits.is_empty() {
+            return Err("Expense must be split among at least one participant".to_string());
+        }
+        if splits.iter().any(|s| s.shares == 0) {
+            return Err("Shares must be at least 1".to_string());
+        }
+
+        let mut groups = self.groups.lock().unwrap();
+        let group = groups
+            .iter_mut()
+            .find(|g| g.id == group_id)
+            .ok_or_else(|| "Group not found".to_string())?;
+
+        let expense = group
+            .expenses
+            .iter_mut()
+            .find(|e| e.id == expense_id)
+            .ok_or_else(|| "Expense not found".to_string())?;
+
+        // Build human-readable change summary
+        let mut changes = Vec::new();
+        let trimmed_title = title.trim();
+        if expense.title != trimmed_title {
+            changes.push(format!(
+                "Title changed from '{}' to '{}'",
+                expense.title, trimmed_title
+            ));
+        }
+        if expense.amount_cents != amount_cents {
+            changes.push(format!(
+                "Amount changed from {:.2} to {:.2}",
+                expense.amount_cents as f64 / 100.0,
+                amount_cents as f64 / 100.0
+            ));
+        }
+        if expense.paid_by != paid_by {
+            let old_payer = group
+                .participants
+                .iter()
+                .find(|p| p.id == expense.paid_by)
+                .map(|p| p.name.as_str())
+                .unwrap_or("Unknown");
+            let new_payer = group
+                .participants
+                .iter()
+                .find(|p| p.id == paid_by)
+                .map(|p| p.name.as_str())
+                .unwrap_or("Unknown");
+            changes.push(format!("Payer changed from {} to {}", old_payer, new_payer));
+        }
+        if expense.splits != splits {
+            changes.push("Participants / parts allocation updated".to_string());
+        }
+
+        let summary = if changes.is_empty() {
+            "Updated without major changes".to_string()
+        } else {
+            changes.join("; ")
+        };
+
+        let history_entry = ExpenseHistoryEntry {
+            edited_at: Utc::now(),
+            previous_title: expense.title.clone(),
+            previous_amount_cents: expense.amount_cents,
+            previous_paid_by: expense.paid_by.clone(),
+            previous_splits: expense.splits.clone(),
+            summary,
+        };
+
+        expense.history.push(history_entry);
+        expense.updated_at = Some(Utc::now());
+        expense.title = trimmed_title.to_string();
+        expense.amount_cents = amount_cents;
+        expense.paid_by = paid_by;
+        expense.splits = splits;
+
         let updated = group.clone();
         self.persist(&groups)?;
 
@@ -213,6 +309,8 @@ impl AppState {
                 shares: 1,
             }],
             created_at: Utc::now(),
+            updated_at: None,
+            history: Vec::new(),
             is_reimbursement: true,
         };
 

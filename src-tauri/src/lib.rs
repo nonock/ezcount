@@ -55,6 +55,19 @@ fn add_expense(
 }
 
 #[tauri::command]
+fn update_expense(
+    state: State<AppState>,
+    group_id: String,
+    expense_id: String,
+    title: String,
+    amount_cents: i64,
+    paid_by: String,
+    splits: Vec<ExpenseSplit>,
+) -> Result<Group, String> {
+    state.update_expense(&group_id, &expense_id, title, amount_cents, paid_by, splits)
+}
+
+#[tauri::command]
 fn delete_expense(
     state: State<AppState>,
     group_id: String,
@@ -117,6 +130,7 @@ pub fn run() {
             delete_group,
             add_participant,
             add_expense,
+            update_expense,
             delete_expense,
             record_reimbursement,
             get_balances,

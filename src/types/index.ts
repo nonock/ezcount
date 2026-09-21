@@ -8,6 +8,15 @@ export interface ExpenseSplit {
   shares: number;
 }
 
+export interface ExpenseHistoryEntry {
+  edited_at: string;
+  previous_title: string;
+  previous_amount_cents: number;
+  previous_paid_by: string;
+  previous_splits: ExpenseSplit[];
+  summary: string;
+}
+
 export interface Expense {
   id: string;
   group_id: string;
@@ -16,6 +25,8 @@ export interface Expense {
   paid_by: string; // Participant ID
   splits: ExpenseSplit[];
   created_at: string; // ISO 8601 string
+  updated_at?: string | null;
+  history?: ExpenseHistoryEntry[];
   is_reimbursement?: boolean;
 }
 

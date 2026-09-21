@@ -1,5 +1,5 @@
 import type React from "react";
-import type { Group } from "../../types";
+import type { Expense, Group } from "../../types";
 import { formatDate, formatMoney } from "../../utils/formatters";
 
 interface ExpensesTabProps {
@@ -7,6 +7,8 @@ interface ExpensesTabProps {
   onOpenAddExpense: () => void;
   onOpenReimburse: () => void;
   onDeleteExpense: (expenseId: string) => void;
+  onEditExpense: (expense: Expense) => void;
+  onViewHistory: (expense: Expense) => void;
 }
 
 export const ExpensesTab: React.FC<ExpensesTabProps> = ({
@@ -14,6 +16,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   onOpenAddExpense,
   onOpenReimburse,
   onDeleteExpense,
+  onEditExpense,
+  onViewHistory,
 }) => {
   const nameMap = new Map(group.participants.map((p) => [p.id, p.name]));
 
@@ -78,6 +82,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
           {group.expenses.map((e) => {
             const payerName = nameMap.get(e.paid_by) || "Unknown";
             const isReimbursement = !!e.is_reimbursement;
+            const hasHistory = Boolean(e.history && e.history.length > 0);
 
             if (isReimbursement) {
               const recipientId = e.splits?.[0]?.participant_id;
@@ -92,11 +97,21 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                       🤝
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h4 className="text-sm font-semibold text-white">{e.title}</h4>
                         <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                           Reimbursement
                         </span>
+                        {hasHistory && (
+                          <button
+                            type="button"
+                            onClick={() => onViewHistory(e)}
+                            className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition cursor-pointer"
+                            title="View edit history"
+                          >
+                            Edited ({e.history?.length})
+                          </button>
+                        )}
                       </div>
                       <p className="text-xs text-slate-400 mt-0.5">
                         <span className="font-medium text-slate-200">{payerName}</span> paid{" "}
@@ -108,12 +123,32 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
+                  <div className="flex items-center gap-2">
+                    <div className="text-right mr-1">
                       <span className="text-sm font-bold text-emerald-400 font-mono">
                         {formatMoney(e.amount_cents, group.currency)}
                       </span>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => onEditExpense(e)}
+                      className="opacity-40 group-hover:opacity-100 p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 transition cursor-pointer"
+                      title="Edit reimbursement"
+                    >
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+                        />
+                      </svg>
+                    </button>
                     <button
                       type="button"
                       onClick={() => onDeleteExpense(e.id)}
@@ -163,7 +198,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                     {e.title.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-white">{e.title}</h4>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-sm font-semibold text-white">{e.title}</h4>
+                      {hasHistory && (
+                        <button
+                          type="button"
+                          onClick={() => onViewHistory(e)}
+                          className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition cursor-pointer"
+                          title="View edit history"
+                        >
+                          Edited ({e.history?.length})
+                        </button>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-400 mt-0.5">
                       Paid by <span className="font-medium text-slate-300">{payerName}</span> •{" "}
                       {hasWeightedShares
@@ -176,12 +223,32 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="text-right">
+                <div className="flex items-center gap-2">
+                  <div className="text-right mr-1">
                     <span className="text-sm font-bold text-white font-mono">
                       {formatMoney(e.amount_cents, group.currency)}
                     </span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => onEditExpense(e)}
+                    className="opacity-40 group-hover:opacity-100 p-1.5 rounded-lg text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 transition cursor-pointer"
+                    title="Edit expense"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"
+                      />
+                    </svg>
+                  </button>
                   <button
                     type="button"
                     onClick={() => onDeleteExpense(e.id)}

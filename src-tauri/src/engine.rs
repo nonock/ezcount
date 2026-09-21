@@ -189,6 +189,8 @@ mod tests {
                 },
             ],
             created_at: Utc::now(),
+            updated_at: None,
+            history: vec![],
             is_reimbursement: false,
         });
         // Bob pays 30.00 for Alice & Bob
@@ -209,6 +211,8 @@ mod tests {
                 },
             ],
             created_at: Utc::now(),
+            updated_at: None,
+            history: vec![],
             is_reimbursement: false,
         });
 
@@ -262,6 +266,8 @@ mod tests {
                 },
             ],
             created_at: Utc::now(),
+            updated_at: None,
+            history: vec![],
             is_reimbursement: false,
         });
 
@@ -294,6 +300,8 @@ mod tests {
                 },
             ],
             created_at: Utc::now(),
+            updated_at: None,
+            history: vec![],
             is_reimbursement: false,
         });
 
@@ -344,6 +352,8 @@ mod tests {
                 },
             ],
             created_at: Utc::now(),
+            updated_at: None,
+            history: vec![],
             is_reimbursement: false,
         });
 
@@ -359,6 +369,8 @@ mod tests {
                 shares: 1,
             }],
             created_at: Utc::now(),
+            updated_at: None,
+            history: vec![],
             is_reimbursement: true,
         });
 

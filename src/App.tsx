@@ -5,13 +5,21 @@ import { GroupDashboard } from "./components/dashboard/GroupDashboard";
 import { AddExpenseModal } from "./components/modals/AddExpenseModal";
 import { AddMemberModal } from "./components/modals/AddMemberModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
+import { ExpenseHistoryModal } from "./components/modals/ExpenseHistoryModal";
 import { RecordReimbursementModal } from "./components/modals/RecordReimbursementModal";
 import { BalancesTab } from "./components/workspace/BalancesTab";
 import { ExpensesTab } from "./components/workspace/ExpensesTab";
 import { GroupHeader } from "./components/workspace/GroupHeader";
 import { SettleUpTab } from "./components/workspace/SettleUpTab";
 import { api } from "./services/api";
-import type { ExpenseSplit, Group, ParticipantBalance, SettlementTransfer, TabType } from "./types";
+import type {
+  Expense,
+  ExpenseSplit,
+  Group,
+  ParticipantBalance,
+  SettlementTransfer,
+  TabType,
+} from "./types";
 
 export const App: React.FC = () => {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -26,6 +34,8 @@ export const App: React.FC = () => {
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
   const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [historyExpense, setHistoryExpense] = useState<Expense | null>(null);
   const [isReimburseOpen, setIsReimburseOpen] = useState(false);
   const [reimbursePrefill, setReimbursePrefill] = useState<{
     fromId?: string;
@@ -127,6 +137,41 @@ export const App: React.FC = () => {
       await refreshActiveGroup(updated.id);
       await refreshGroups();
     }
+  };
+
+  const handleOpenAddExpense = () => {
+    setEditingExpense(null);
+    setIsAddExpenseOpen(true);
+  };
+
+  const handleEditExpense = (expense: Expense) => {
+    setEditingExpense(expense);
+    setIsAddExpenseOpen(true);
+  };
+
+  const handleUpdateExpense = async (
+    expenseId: string,
+    title: string,
+    amountCents: number,
+    paidBy: string,
+    splits: ExpenseSplit[]
+  ) => {
+    if (!currentGroup) return;
+    const updated = await api.updateExpense(
+      currentGroup.id,
+      expenseId,
+      title,
+      amountCents,
+      paidBy,
+      splits
+    );
+    setCurrentGroup(updated);
+    await refreshActiveGroup(updated.id);
+    await refreshGroups();
+  };
+
+  const handleViewHistory = (expense: Expense) => {
+    setHistoryExpense(expense);
   };
 
   const handleRecordReimbursement = async (
@@ -281,9 +326,11 @@ export const App: React.FC = () => {
             {activeTab === "expenses" && (
               <ExpensesTab
                 group={currentGroup}
-                onOpenAddExpense={() => setIsAddExpenseOpen(true)}
+                onOpenAddExpense={handleOpenAddExpense}
                 onOpenReimburse={() => handleOpenReimburseModal()}
                 onDeleteExpense={handleDeleteExpense}
+                onEditExpense={handleEditExpense}
+                onViewHistory={handleViewHistory}
               />
             )}
 
@@ -328,9 +375,14 @@ export const App: React.FC = () => {
 
           <AddExpenseModal
             isOpen={isAddExpenseOpen}
-            onClose={() => setIsAddExpenseOpen(false)}
+            onClose={() => {
+              setIsAddExpenseOpen(false);
+              setEditingExpense(null);
+            }}
             group={currentGroup}
             onAddExpense={handleAddExpense}
+            editingExpense={editingExpense}
+            onUpdateExpense={handleUpdateExpense}
           />
 
           <RecordReimbursementModal
@@ -341,6 +393,14 @@ export const App: React.FC = () => {
             initialToId={reimbursePrefill.toId}
             initialAmount={reimbursePrefill.amount}
             onRecordReimbursement={handleRecordReimbursement}
+          />
+
+          <ExpenseHistoryModal
+            isOpen={Boolean(historyExpense)}
+            onClose={() => setHistoryExpense(null)}
+            expense={historyExpense}
+            currency={currentGroup.currency}
+            participants={currentGroup.participants}
           />
         </>
       )}

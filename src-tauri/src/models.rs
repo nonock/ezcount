@@ -14,6 +14,16 @@ pub struct ExpenseSplit {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExpenseHistoryEntry {
+    pub edited_at: DateTime<Utc>,
+    pub previous_title: String,
+    pub previous_amount_cents: i64,
+    pub previous_paid_by: String,
+    pub previous_splits: Vec<ExpenseSplit>,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Expense {
     pub id: String,
     pub group_id: String,
@@ -22,6 +32,10 @@ pub struct Expense {
     pub paid_by: String, // Participant ID
     pub splits: Vec<ExpenseSplit>,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub history: Vec<ExpenseHistoryEntry>,
     #[serde(default)]
     pub is_reimbursement: bool,
 }

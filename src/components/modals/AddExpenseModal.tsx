@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useState } from "react";
-import type { ExpenseSplit, Group } from "../../types";
+import type { Expense, ExpenseSplit, Group } from "../../types";
 import { formatMoney } from "../../utils/formatters";
 import { Modal } from "../common/Modal";
 
@@ -9,6 +9,14 @@ interface AddExpenseModalProps {
   onClose: () => void;
   group: Group;
   onAddExpense: (
+    title: string,
+    amountCents: number,
+    paidBy: string,
+    splits: ExpenseSplit[]
+  ) => Promise<void>;
+  editingExpense?: Expense | null;
+  onUpdateExpense?: (
+    expenseId: string,
     title: string,
     amountCents: number,
     paidBy: string,
@@ -26,6 +34,8 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   onClose,
   group,
   onAddExpense,
+  editingExpense,
+  onUpdateExpense,
 }) => {
   const [title, setTitle] = useState("");
   const [amountStr, setAmountStr] = useState("");
@@ -33,20 +43,37 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [splitsState, setSplitsState] = useState<Record<string, SplitItemState>>({});
   const [submitting, setSubmitting] = useState(false);
 
-  // Initialize defaults when modal opens or group changes
+  // Initialize or reset form state when modal opens or editingExpense changes
   useEffect(() => {
-    if (isOpen && group.participants.length > 0) {
-      setPaidBy((prev) =>
-        prev && group.participants.some((p) => p.id === prev) ? prev : group.participants[0].id
-      );
+    if (!isOpen) return;
+
+    if (editingExpense) {
+      setTitle(editingExpense.title);
+      setAmountStr((editingExpense.amount_cents / 100).toFixed(2));
+      setPaidBy(editingExpense.paid_by);
 
       const initialSplits: Record<string, SplitItemState> = {};
       for (const p of group.participants) {
-        initialSplits[p.id] = { included: true, shares: 1 };
+        const match = editingExpense.splits.find((s) => s.participant_id === p.id);
+        initialSplits[p.id] = {
+          included: !!match,
+          shares: match ? match.shares : 1,
+        };
       }
       setSplitsState(initialSplits);
+    } else {
+      setTitle("");
+      setAmountStr("");
+      if (group.participants.length > 0) {
+        setPaidBy(group.participants[0].id);
+        const initialSplits: Record<string, SplitItemState> = {};
+        for (const p of group.participants) {
+          initialSplits[p.id] = { included: true, shares: 1 };
+        }
+        setSplitsState(initialSplits);
+      }
     }
-  }, [isOpen, group]);
+  }, [isOpen, editingExpense, group]);
 
   const handleToggleParticipant = (id: string) => {
     setSplitsState((prev) => ({
@@ -117,23 +144,29 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
 
     setSubmitting(true);
     try {
-      await onAddExpense(trimmedTitle, amountCents, paidBy, splits);
+      if (editingExpense && onUpdateExpense) {
+        await onUpdateExpense(editingExpense.id, trimmedTitle, amountCents, paidBy, splits);
+      } else {
+        await onAddExpense(trimmedTitle, amountCents, paidBy, splits);
+      }
       setTitle("");
       setAmountStr("");
       onClose();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to add expense");
+      alert(err instanceof Error ? err.message : "Failed to save expense");
     } finally {
       setSubmitting(false);
     }
   };
 
+  const isEditing = Boolean(editingExpense);
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Add New Expense"
-      icon="🧾"
+      title={isEditing ? "Edit Expense" : "Add New Expense"}
+      icon={isEditing ? "✏️" : "🧾"}
       maxWidthClass="max-w-lg"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -317,7 +350,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
             disabled={submitting}
             className="px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition cursor-pointer disabled:opacity-50"
           >
-            {submitting ? "Saving..." : "Save Expense"}
+            {submitting ? "Saving..." : isEditing ? "Save Changes" : "Save Expense"}
           </button>
         </div>
       </form>
