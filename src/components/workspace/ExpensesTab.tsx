@@ -4,6 +4,7 @@ import { formatDate, formatMoney } from "../../utils/formatters";
 
 interface ExpensesTabProps {
   group: Group;
+  hasOutstandingDebt?: boolean;
   onOpenAddExpense: () => void;
   onOpenReimburse: () => void;
   onDeleteExpense: (expenseId: string) => void;
@@ -13,6 +14,7 @@ interface ExpensesTabProps {
 
 export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   group,
+  hasOutstandingDebt = false,
   onOpenAddExpense,
   onOpenReimburse,
   onDeleteExpense,
@@ -27,22 +29,24 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-300">Transaction History</h3>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onOpenReimburse}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 hover:border-emerald-500/50 transition active:scale-95 cursor-pointer"
-          >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth="2"
+          {hasOutstandingDebt && (
+            <button
+              type="button"
+              onClick={onOpenReimburse}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 hover:border-emerald-500/50 transition active:scale-95 cursor-pointer"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-            </svg>
-            <span>Reimburse</span>
-          </button>
+              <svg
+                className="w-3.5 h-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+              </svg>
+              <span>Reimburse</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onOpenAddExpense}

@@ -331,6 +331,7 @@ export const App: React.FC = () => {
             {activeTab === "expenses" && (
               <ExpensesTab
                 group={currentGroup}
+                hasOutstandingDebt={currentGroup.expenses.length > 0 && settlements.length > 0}
                 onOpenAddExpense={handleOpenAddExpense}
                 onOpenReimburse={() => handleOpenReimburseModal()}
                 onDeleteExpense={handleDeleteExpense}

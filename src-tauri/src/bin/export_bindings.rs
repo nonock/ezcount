@@ -4,7 +4,8 @@ fn main() {
     let content = builder
         .export_str(
             specta_typescript::Typescript::default()
-                .bigint(specta_typescript::BigIntExportBehavior::Number),
+                .bigint(specta_typescript::BigIntExportBehavior::Number)
+                .header("// @ts-nocheck\n"),
         )
         .expect("Failed to export typescript bindings");
 

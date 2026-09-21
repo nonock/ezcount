@@ -36,6 +36,8 @@ test.describe("Group Lifecycle & Selection (Regression Test)", () => {
     await expect(page.getByText("Alice")).toBeVisible();
     await expect(page.getByText("Bob")).toBeVisible();
     await expect(page.getByText("Charlie")).toBeVisible();
+    // Reimburse button should be hidden when there are 0 expenses / 0 balance
+    await expect(page.getByRole("button", { name: "Reimburse" })).not.toBeVisible();
 
     // Navigate back to the dashboard
     await page.getByRole("button", { name: "← Back to All Groups" }).click();
@@ -54,6 +56,7 @@ test.describe("Group Lifecycle & Selection (Regression Test)", () => {
     await expect(page.getByText("Bob")).toBeVisible();
     await expect(page.getByText("Charlie")).toBeVisible();
     await expect(page.getByText("No expenses recorded yet")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reimburse" })).not.toBeVisible();
   });
 });
 
@@ -76,6 +79,8 @@ test.describe("Expense & Settlement Lifecycle", () => {
 
     await page.getByRole("button", { name: "Create Group", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Ski Trip 2026" })).toBeVisible();
+    // 0 expenses -> Reimburse button hidden
+    await expect(page.getByRole("button", { name: "Reimburse" })).not.toBeVisible();
 
     // Add first expense
     await page.getByRole("button", { name: "Add Expense", exact: true }).click();
@@ -85,6 +90,9 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await page.locator("#input-expense-amount").fill("200.00");
     // Default payer is Alice
     await page.getByRole("button", { name: "Save Expense" }).click();
+
+    // After expense is recorded with non-zero debt -> Reimburse button becomes visible
+    await expect(page.getByRole("button", { name: "Reimburse" })).toBeVisible();
 
     // Verify expense appears in list
     const expenseCard = page.locator(".space-y-2\\.5 > div").first();
