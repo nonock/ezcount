@@ -17,19 +17,34 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
         // Payer is credited the full expense amount
         *paid_map.entry(expense.paid_by.clone()).or_default() += expense.amount_cents;
 
-        let count = expense.split_among.len() as i64;
-        if count > 0 {
-            // Integer division with exact remainder distribution so no cents are lost
-            let base_share = expense.amount_cents / count;
-            let remainder = (expense.amount_cents % count) as usize;
+        let total_shares: i64 = expense.splits.iter().map(|s| s.shares as i64).sum();
+        if total_shares > 0 {
+            // Integer division with exact remainder distribution using Largest Remainder Method
+            let mut allocated: Vec<(i64, i64, usize)> = expense
+                .splits
+                .iter()
+                .enumerate()
+                .map(|(idx, s)| {
+                    let shares = s.shares as i64;
+                    let base = (expense.amount_cents * shares) / total_shares;
+                    let rem = (expense.amount_cents * shares) % total_shares;
+                    (base, rem, idx)
+                })
+                .collect();
 
-            for (idx, member_id) in expense.split_among.iter().enumerate() {
-                let share = if idx < remainder {
-                    base_share + 1
-                } else {
-                    base_share
-                };
-                *owed_map.entry(member_id.clone()).or_default() += share;
+            let total_allocated: i64 = allocated.iter().map(|(base, _, _)| *base).sum();
+            let remainder_cents = (expense.amount_cents - total_allocated) as usize;
+
+            // Sort indices by remainder descending to give leftover cents to highest fractional remainders
+            let mut order: Vec<usize> = (0..allocated.len()).collect();
+            order.sort_by(|&a, &b| allocated[b].1.cmp(&allocated[a].1));
+
+            for &idx in order.iter().take(remainder_cents) {
+                allocated[idx].0 += 1;
+            }
+
+            for (idx, s) in expense.splits.iter().enumerate() {
+                *owed_map.entry(s.participant_id.clone()).or_default() += allocated[idx].0;
             }
         }
     }
@@ -122,7 +137,7 @@ pub fn calculate_settlements(group: &Group) -> Vec<SettlementTransfer> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Expense, Participant};
+    use crate::models::{Expense, ExpenseSplit, Participant};
     use chrono::Utc;
 
     fn setup_test_group() -> Group {
@@ -159,7 +174,20 @@ mod tests {
             title: "Dinner".to_string(),
             amount_cents: 6000,
             paid_by: "p1".to_string(),
-            split_among: vec!["p1".to_string(), "p2".to_string(), "p3".to_string()],
+            splits: vec![
+                ExpenseSplit {
+                    participant_id: "p1".to_string(),
+                    shares: 1,
+                },
+                ExpenseSplit {
+                    participant_id: "p2".to_string(),
+                    shares: 1,
+                },
+                ExpenseSplit {
+                    participant_id: "p3".to_string(),
+                    shares: 1,
+                },
+            ],
             created_at: Utc::now(),
             is_reimbursement: false,
         });
@@ -170,7 +198,16 @@ mod tests {
             title: "Taxi".to_string(),
             amount_cents: 3000,
             paid_by: "p2".to_string(),
-            split_among: vec!["p1".to_string(), "p2".to_string()],
+            splits: vec![
+                ExpenseSplit {
+                    participant_id: "p1".to_string(),
+                    shares: 1,
+                },
+                ExpenseSplit {
+                    participant_id: "p2".to_string(),
+                    shares: 1,
+                },
+            ],
             created_at: Utc::now(),
             is_reimbursement: false,
         });
@@ -210,7 +247,20 @@ mod tests {
             title: "Snacks".to_string(),
             amount_cents: 1000,
             paid_by: "p1".to_string(),
-            split_among: vec!["p1".to_string(), "p2".to_string(), "p3".to_string()],
+            splits: vec![
+                ExpenseSplit {
+                    participant_id: "p1".to_string(),
+                    shares: 1,
+                },
+                ExpenseSplit {
+                    participant_id: "p2".to_string(),
+                    shares: 1,
+                },
+                ExpenseSplit {
+                    participant_id: "p3".to_string(),
+                    shares: 1,
+                },
+            ],
             created_at: Utc::now(),
             is_reimbursement: false,
         });
@@ -218,6 +268,55 @@ mod tests {
         let balances = calculate_balances(&group);
         let total_owed: i64 = balances.iter().map(|b| b.owed_cents).sum();
         assert_eq!(total_owed, 1000, "No cents lost in division");
+    }
+
+    #[test]
+    fn test_weighted_parts_division() {
+        let mut group = setup_test_group();
+        // Alice pays 10.00 EUR (1000 cents) split: Alice 1 part, Bob 2 parts (Bob pays for 2)
+        // Total = 3 parts.
+        // Base: Alice 1000*1/3 = 333 (rem 1), Bob 1000*2/3 = 666 (rem 2)
+        // Remainder 1000 - 999 = 1 cent goes to Bob (larger remainder) -> Bob owes 667, Alice owes 333
+        group.expenses.push(Expense {
+            id: "e1".to_string(),
+            group_id: "group_1".to_string(),
+            title: "Groceries".to_string(),
+            amount_cents: 1000,
+            paid_by: "p1".to_string(),
+            splits: vec![
+                ExpenseSplit {
+                    participant_id: "p1".to_string(),
+                    shares: 1,
+                },
+                ExpenseSplit {
+                    participant_id: "p2".to_string(),
+                    shares: 2,
+                },
+            ],
+            created_at: Utc::now(),
+            is_reimbursement: false,
+        });
+
+        let balances = calculate_balances(&group);
+        let alice = balances.iter().find(|b| b.participant_id == "p1").unwrap();
+        let bob = balances.iter().find(|b| b.participant_id == "p2").unwrap();
+
+        assert_eq!(alice.owed_cents, 333, "Alice owes 1 share (3.33 €)");
+        assert_eq!(bob.owed_cents, 667, "Bob owes 2 shares (6.67 €)");
+        assert_eq!(
+            alice.owed_cents + bob.owed_cents,
+            1000,
+            "Exact total preserved"
+        );
+
+        let sum_net: i64 = balances.iter().map(|b| b.net_cents).sum();
+        assert_eq!(sum_net, 0, "Zero sum invariant preserved");
+
+        let settlements = calculate_settlements(&group);
+        assert_eq!(settlements.len(), 1);
+        assert_eq!(settlements[0].from_id, "p2");
+        assert_eq!(settlements[0].to_id, "p1");
+        assert_eq!(settlements[0].amount_cents, 667);
     }
 
     #[test]
@@ -230,7 +329,20 @@ mod tests {
             title: "Dinner".to_string(),
             amount_cents: 6000,
             paid_by: "p1".to_string(),
-            split_among: vec!["p1".to_string(), "p2".to_string(), "p3".to_string()],
+            splits: vec![
+                ExpenseSplit {
+                    participant_id: "p1".to_string(),
+                    shares: 1,
+                },
+                ExpenseSplit {
+                    participant_id: "p2".to_string(),
+                    shares: 1,
+                },
+                ExpenseSplit {
+                    participant_id: "p3".to_string(),
+                    shares: 1,
+                },
+            ],
             created_at: Utc::now(),
             is_reimbursement: false,
         });
@@ -242,7 +354,10 @@ mod tests {
             title: "Payment: Bob -> Alice".to_string(),
             amount_cents: 2000,
             paid_by: "p2".to_string(),
-            split_among: vec!["p1".to_string()],
+            splits: vec![ExpenseSplit {
+                participant_id: "p1".to_string(),
+                shares: 1,
+            }],
             created_at: Utc::now(),
             is_reimbursement: true,
         });

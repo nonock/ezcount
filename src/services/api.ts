@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Group, ParticipantBalance, SettlementTransfer } from "../types";
+import type { ExpenseSplit, Group, ParticipantBalance, SettlementTransfer } from "../types";
 
 const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -28,7 +28,11 @@ function getMockGroups(): Group[] {
               title: "Airbnb Rental",
               amount_cents: 30000,
               paid_by: "p1",
-              split_among: ["p1", "p2", "p3"],
+              splits: [
+                { participant_id: "p1", shares: 1 },
+                { participant_id: "p2", shares: 1 },
+                { participant_id: "p3", shares: 1 },
+              ],
               created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
               is_reimbursement: false,
             },
@@ -38,7 +42,11 @@ function getMockGroups(): Group[] {
               title: "Tapas & Sangria",
               amount_cents: 9000,
               paid_by: "p2",
-              split_among: ["p1", "p2", "p3"],
+              splits: [
+                { participant_id: "p1", shares: 1 },
+                { participant_id: "p2", shares: 1 },
+                { participant_id: "p3", shares: 1 },
+              ],
               created_at: new Date(Date.now() - 86400000).toISOString(),
               is_reimbursement: false,
             },
@@ -70,16 +78,28 @@ function computeBalancesMock(group: Group): ParticipantBalance[] {
       payer.paid += exp.amount_cents;
     }
 
-    if (exp.split_among.length > 0) {
-      const n = exp.split_among.length;
-      const base = Math.floor(exp.amount_cents / n);
-      const rem = exp.amount_cents % n;
+    if (exp.splits && exp.splits.length > 0) {
+      const totalShares = exp.splits.reduce((sum, s) => sum + s.shares, 0);
+      if (totalShares > 0) {
+        const allocated = exp.splits.map((s, idx) => {
+          const base = Math.floor((exp.amount_cents * s.shares) / totalShares);
+          const rem = (exp.amount_cents * s.shares) % totalShares;
+          return { base, rem, idx, pid: s.participant_id };
+        });
 
-      for (let i = 0; i < exp.split_among.length; i++) {
-        const pid = exp.split_among[i];
-        const debtor = map.get(pid);
-        if (debtor) {
-          debtor.owed += base + (i < rem ? 1 : 0);
+        const totalAllocated = allocated.reduce((sum, a) => sum + a.base, 0);
+        const remainderCents = exp.amount_cents - totalAllocated;
+
+        const order = [...allocated.keys()].sort((a, b) => allocated[b].rem - allocated[a].rem);
+        for (let i = 0; i < remainderCents; i++) {
+          allocated[order[i]].base += 1;
+        }
+
+        for (const item of allocated) {
+          const debtor = map.get(item.pid);
+          if (debtor) {
+            debtor.owed += item.base;
+          }
         }
       }
     }
@@ -205,7 +225,7 @@ export const api = {
     title: string,
     amountCents: number,
     paidBy: string,
-    splitAmong: string[]
+    splits: ExpenseSplit[]
   ): Promise<Group> {
     if (isTauri()) {
       return invoke<Group>("add_expense", {
@@ -213,7 +233,7 @@ export const api = {
         title,
         amountCents,
         paidBy,
-        splitAmong,
+        splits,
       });
     }
     const groups = getMockGroups();
@@ -225,7 +245,7 @@ export const api = {
       title,
       amount_cents: amountCents,
       paid_by: paidBy,
-      split_among: splitAmong,
+      splits,
       created_at: new Date().toISOString(),
       is_reimbursement: false,
     });
@@ -280,7 +300,7 @@ export const api = {
       title,
       amount_cents: amountCents,
       paid_by: fromId,
-      split_among: [toId],
+      splits: [{ participant_id: toId, shares: 1 }],
       created_at: new Date().toISOString(),
       is_reimbursement: true,
     });

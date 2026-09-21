@@ -1,6 +1,6 @@
 import type React from "react";
 import { useEffect, useState } from "react";
-import type { Group } from "../../types";
+import type { ExpenseSplit, Group } from "../../types";
 import { formatMoney } from "../../utils/formatters";
 import { Modal } from "../common/Modal";
 
@@ -12,8 +12,13 @@ interface AddExpenseModalProps {
     title: string,
     amountCents: number,
     paidBy: string,
-    splitAmong: string[]
+    splits: ExpenseSplit[]
   ) => Promise<void>;
+}
+
+interface SplitItemState {
+  included: boolean;
+  shares: number;
 }
 
 export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
@@ -25,7 +30,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [title, setTitle] = useState("");
   const [amountStr, setAmountStr] = useState("");
   const [paidBy, setPaidBy] = useState("");
-  const [splitAmong, setSplitAmong] = useState<string[]>([]);
+  const [splitsState, setSplitsState] = useState<Record<string, SplitItemState>>({});
   const [submitting, setSubmitting] = useState(false);
 
   // Initialize defaults when modal opens or group changes
@@ -34,29 +39,59 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setPaidBy((prev) =>
         prev && group.participants.some((p) => p.id === prev) ? prev : group.participants[0].id
       );
-      setSplitAmong(group.participants.map((p) => p.id));
+
+      const initialSplits: Record<string, SplitItemState> = {};
+      for (const p of group.participants) {
+        initialSplits[p.id] = { included: true, shares: 1 };
+      }
+      setSplitsState(initialSplits);
     }
   }, [isOpen, group]);
 
   const handleToggleParticipant = (id: string) => {
-    if (splitAmong.includes(id)) {
-      setSplitAmong(splitAmong.filter((x) => x !== id));
-    } else {
-      setSplitAmong([...splitAmong, id]);
-    }
+    setSplitsState((prev) => ({
+      ...prev,
+      [id]: {
+        included: !prev[id]?.included,
+        shares: prev[id]?.shares || 1,
+      },
+    }));
   };
 
+  const handleUpdateShares = (id: string, newShares: number) => {
+    if (newShares < 1) return;
+    setSplitsState((prev) => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        shares: newShares,
+      },
+    }));
+  };
+
+  const includedParticipants = group.participants.filter((p) => splitsState[p.id]?.included);
+  const totalShares = includedParticipants.reduce(
+    (sum, p) => sum + (splitsState[p.id]?.shares || 1),
+    0
+  );
+
   const handleToggleAll = () => {
-    if (splitAmong.length === group.participants.length) {
-      setSplitAmong([]);
-    } else {
-      setSplitAmong(group.participants.map((p) => p.id));
-    }
+    const allIncluded = includedParticipants.length === group.participants.length;
+    setSplitsState((prev) => {
+      const next: Record<string, SplitItemState> = {};
+      for (const p of group.participants) {
+        next[p.id] = {
+          included: !allIncluded,
+          shares: prev[p.id]?.shares || 1,
+        };
+      }
+      return next;
+    });
   };
 
   const amountDecimal = Number.parseFloat(amountStr);
   const amountCents = !Number.isNaN(amountDecimal) ? Math.round(amountDecimal * 100) : 0;
-  const perPersonCents = splitAmong.length > 0 ? Math.floor(amountCents / splitAmong.length) : 0;
+  const perShareCents = totalShares > 0 ? Math.floor(amountCents / totalShares) : 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,14 +105,19 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       alert("Please enter a valid positive amount");
       return;
     }
-    if (splitAmong.length === 0) {
+    if (includedParticipants.length === 0) {
       alert("Please select at least one participant to split the bill with");
       return;
     }
 
+    const splits: ExpenseSplit[] = includedParticipants.map((p) => ({
+      participant_id: p.id,
+      shares: splitsState[p.id]?.shares || 1,
+    }));
+
     setSubmitting(true);
     try {
-      await onAddExpense(trimmedTitle, amountCents, paidBy, splitAmong);
+      await onAddExpense(trimmedTitle, amountCents, paidBy, splits);
       setTitle("");
       setAmountStr("");
       onClose();
@@ -89,7 +129,13 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add New Expense" icon="🧾">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Add New Expense"
+      icon="🧾"
+      maxWidthClass="max-w-lg"
+    >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label
@@ -157,48 +203,104 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
           </div>
         </div>
 
+        {/* Split Section with Weighted Parts */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="block text-xs font-semibold text-slate-300">
-              Split between ({splitAmong.length}/{group.participants.length})
+              Split between ({includedParticipants.length}/{group.participants.length} selected,{" "}
+              {totalShares} parts)
             </span>
             <button
               type="button"
               onClick={handleToggleAll}
               className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold transition cursor-pointer"
             >
-              {splitAmong.length === group.participants.length ? "Deselect All" : "Select All"}
+              {includedParticipants.length === group.participants.length
+                ? "Deselect All"
+                : "Select All"}
             </button>
           </div>
 
-          <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+          <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
             {group.participants.map((p) => {
-              const checked = splitAmong.includes(p.id);
+              const state = splitsState[p.id] || { included: false, shares: 1 };
+              const isIncluded = state.included;
+              const userShares = state.shares;
+              const userOwed =
+                totalShares > 0 && amountCents > 0
+                  ? Math.round((amountCents * userShares) / totalShares)
+                  : 0;
+
               return (
-                <label
+                <div
                   key={p.id}
-                  className="flex items-center gap-3 p-2 rounded-xl border border-slate-800 bg-slate-950/60 hover:bg-slate-950 transition cursor-pointer"
+                  className={`flex items-center justify-between p-2.5 rounded-xl border transition ${
+                    isIncluded
+                      ? "border-slate-800 bg-slate-900/80"
+                      : "border-slate-850 bg-slate-950/40 opacity-55"
+                  }`}
                 >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => handleToggleParticipant(p.id)}
-                    className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
-                  />
-                  <span className="text-xs font-medium text-slate-200">{p.name}</span>
-                </label>
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={isIncluded}
+                      onChange={() => handleToggleParticipant(p.id)}
+                      className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                    />
+                    <span className="text-xs font-medium text-slate-200">{p.name}</span>
+                  </label>
+
+                  {isIncluded && (
+                    <div className="flex items-center gap-2.5">
+                      {amountCents > 0 && totalShares > 0 && (
+                        <span className="text-xs font-mono font-semibold text-indigo-300">
+                          {formatMoney(userOwed, group.currency)}
+                        </span>
+                      )}
+
+                      {/* Stepper for parts */}
+                      <div className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateShares(p.id, userShares - 1)}
+                          disabled={userShares <= 1}
+                          className="w-5 h-5 flex items-center justify-center text-xs font-bold text-slate-400 hover:text-white disabled:opacity-30 transition cursor-pointer disabled:cursor-not-allowed"
+                          title="Decrease parts"
+                        >
+                          -
+                        </button>
+                        <span className="px-1.5 text-[11px] font-bold text-slate-200 min-w-14 text-center">
+                          {userShares} {userShares === 1 ? "part" : "parts"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateShares(p.id, userShares + 1)}
+                          className="w-5 h-5 flex items-center justify-center text-xs font-bold text-slate-400 hover:text-white transition cursor-pointer"
+                          title="Increase parts"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
 
-          {amountCents > 0 && splitAmong.length > 0 && (
-            <p className="text-[11px] text-slate-400 mt-2 text-right">
-              Approx.{" "}
-              <strong className="text-indigo-300 font-mono">
-                {formatMoney(perPersonCents, group.currency)}
-              </strong>{" "}
-              per selected person
-            </p>
+          {amountCents > 0 && totalShares > 0 && (
+            <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 px-1">
+              <span>
+                Total: <strong className="text-slate-200">{totalShares} parts</strong>
+              </span>
+              <span>
+                Approx.{" "}
+                <strong className="text-indigo-300 font-mono">
+                  {formatMoney(perShareCents, group.currency)}
+                </strong>{" "}
+                per part
+              </span>
+            </div>
           )}
         </div>
 

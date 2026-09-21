@@ -5,7 +5,7 @@ mod storage;
 use std::path::PathBuf;
 use tauri::{Manager, State};
 
-use crate::models::{Group, ParticipantBalance, SettlementTransfer};
+use crate::models::{ExpenseSplit, Group, ParticipantBalance, SettlementTransfer};
 use crate::storage::AppState;
 
 #[tauri::command]
@@ -49,9 +49,9 @@ fn add_expense(
     title: String,
     amount_cents: i64,
     paid_by: String,
-    split_among: Vec<String>,
+    splits: Vec<ExpenseSplit>,
 ) -> Result<Group, String> {
-    state.add_expense(&group_id, title, amount_cents, paid_by, split_among)
+    state.add_expense(&group_id, title, amount_cents, paid_by, splits)
 }
 
 #[tauri::command]

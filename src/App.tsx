@@ -11,7 +11,7 @@ import { ExpensesTab } from "./components/workspace/ExpensesTab";
 import { GroupHeader } from "./components/workspace/GroupHeader";
 import { SettleUpTab } from "./components/workspace/SettleUpTab";
 import { api } from "./services/api";
-import type { Group, ParticipantBalance, SettlementTransfer, TabType } from "./types";
+import type { ExpenseSplit, Group, ParticipantBalance, SettlementTransfer, TabType } from "./types";
 
 export const App: React.FC = () => {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -110,10 +110,10 @@ export const App: React.FC = () => {
     title: string,
     amountCents: number,
     paidBy: string,
-    splitAmong: string[]
+    splits: ExpenseSplit[]
   ) => {
     if (!currentGroup) return;
-    const updated = await api.addExpense(currentGroup.id, title, amountCents, paidBy, splitAmong);
+    const updated = await api.addExpense(currentGroup.id, title, amountCents, paidBy, splits);
     setCurrentGroup(updated);
     await refreshActiveGroup(updated.id);
     await refreshGroups();

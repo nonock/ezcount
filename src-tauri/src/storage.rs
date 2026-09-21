@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use crate::models::{Expense, Group, Participant};
+use crate::models::{Expense, ExpenseSplit, Group, Participant};
 
 pub struct AppState {
     pub groups: Mutex<Vec<Group>>,
@@ -124,13 +124,16 @@ impl AppState {
         title: String,
         amount_cents: i64,
         paid_by: String,
-        split_among: Vec<String>,
+        splits: Vec<ExpenseSplit>,
     ) -> Result<Group, String> {
         if amount_cents <= 0 {
             return Err("Amount must be greater than zero".to_string());
         }
-        if split_among.is_empty() {
+        if splits.is_empty() {
             return Err("Expense must be split among at least one participant".to_string());
+        }
+        if splits.iter().any(|s| s.shares == 0) {
+            return Err("Shares must be at least 1".to_string());
         }
 
         let mut groups = self.groups.lock().unwrap();
@@ -145,7 +148,7 @@ impl AppState {
             title: title.trim().to_string(),
             amount_cents,
             paid_by,
-            split_among,
+            splits,
             created_at: Utc::now(),
             is_reimbursement: false,
         };
@@ -205,7 +208,10 @@ impl AppState {
             title,
             amount_cents,
             paid_by: from_id,
-            split_among: vec![to_id],
+            splits: vec![ExpenseSplit {
+                participant_id: to_id,
+                shares: 1,
+            }],
             created_at: Utc::now(),
             is_reimbursement: true,
         };

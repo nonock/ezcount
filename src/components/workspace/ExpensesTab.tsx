@@ -80,7 +80,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
             const isReimbursement = !!e.is_reimbursement;
 
             if (isReimbursement) {
-              const recipientName = nameMap.get(e.split_among[0]) || "Unknown";
+              const recipientId = e.splits?.[0]?.participant_id;
+              const recipientName = recipientId ? nameMap.get(recipientId) || "Unknown" : "Unknown";
               return (
                 <div
                   key={e.id}
@@ -138,9 +139,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               );
             }
 
-            const splitNames = e.split_among.map((id) => nameMap.get(id) || "Unknown").join(", ");
+            const totalShares = e.splits.reduce((sum, s) => sum + s.shares, 0);
+            const hasWeightedShares = e.splits.some((s) => s.shares > 1);
+            const splitSummary = e.splits
+              .map((s) => {
+                const name = nameMap.get(s.participant_id) || "Unknown";
+                return s.shares > 1 ? `${name} (${s.shares} parts)` : name;
+              })
+              .join(", ");
+
             const sharePerPerson = formatMoney(
-              Math.floor(e.amount_cents / (e.split_among.length || 1)),
+              Math.floor(e.amount_cents / (totalShares || 1)),
               group.currency
             );
 
@@ -156,11 +165,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
                   <div>
                     <h4 className="text-sm font-semibold text-white">{e.title}</h4>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Paid by <span className="font-medium text-slate-300">{payerName}</span> • for{" "}
-                      {e.split_among.length} members ({sharePerPerson} each)
+                      Paid by <span className="font-medium text-slate-300">{payerName}</span> •{" "}
+                      {hasWeightedShares
+                        ? `for ${e.splits.length} members (${totalShares} parts, ${sharePerPerson}/part)`
+                        : `for ${e.splits.length} members (${sharePerPerson} each)`}
                     </p>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      {formatDate(e.created_at)} • [{splitNames}]
+                      {formatDate(e.created_at)} • [{splitSummary}]
                     </p>
                   </div>
                 </div>

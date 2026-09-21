@@ -3,13 +3,18 @@ export interface Participant {
   name: string;
 }
 
+export interface ExpenseSplit {
+  participant_id: string;
+  shares: number;
+}
+
 export interface Expense {
   id: string;
   group_id: string;
   title: string;
   amount_cents: number;
   paid_by: string; // Participant ID
-  split_among: string[]; // List of Participant IDs
+  splits: ExpenseSplit[];
   created_at: string; // ISO 8601 string
   is_reimbursement?: boolean;
 }

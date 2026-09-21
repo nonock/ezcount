@@ -8,13 +8,19 @@ pub struct Participant {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExpenseSplit {
+    pub participant_id: String,
+    pub shares: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Expense {
     pub id: String,
     pub group_id: String,
     pub title: String,
     pub amount_cents: i64,
-    pub paid_by: String,          // Participant ID
-    pub split_among: Vec<String>, // List of Participant IDs
+    pub paid_by: String, // Participant ID
+    pub splits: Vec<ExpenseSplit>,
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub is_reimbursement: bool,
