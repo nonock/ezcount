@@ -63,6 +63,7 @@ export const App: React.FC = () => {
       setSettlements(set);
     } catch (err) {
       console.error("Failed to load active group:", err);
+      alert(`Failed to open group: ${err instanceof Error ? err.message : String(err)}`);
       setSelectedGroupId(null);
       setCurrentGroup(null);
     }
@@ -95,9 +96,13 @@ export const App: React.FC = () => {
   };
 
   const handleCreateGroup = async (name: string, currency: string, participants: string[]) => {
-    const newGroup = await api.createGroup(name, currency, participants);
-    await refreshGroups();
-    setSelectedGroupId(newGroup.id);
+    try {
+      const newGroup = await api.createGroup(name, currency, participants);
+      await refreshGroups();
+      setSelectedGroupId(newGroup.id);
+    } catch (err) {
+      alert(`Failed to create group: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const handleDeleteGroup = async () => {

@@ -1,6 +1,6 @@
 mod engine;
-mod models;
-mod storage;
+pub mod models;
+pub mod storage;
 
 use std::path::PathBuf;
 use tauri::{Manager, State};
@@ -9,16 +9,21 @@ use crate::models::{ExpenseSplit, Group, ParticipantBalance, SettlementTransfer}
 use crate::storage::AppState;
 
 #[tauri::command]
+#[specta::specta]
 fn get_groups(state: State<AppState>) -> Vec<Group> {
     state.get_groups()
 }
 
 #[tauri::command]
-fn get_group(state: State<AppState>, group_id: String) -> Option<Group> {
-    state.get_group(&group_id)
+#[specta::specta]
+fn get_group(state: State<AppState>, group_id: String) -> Result<Group, String> {
+    state
+        .get_group(&group_id)
+        .ok_or_else(|| "Group not found".to_string())
 }
 
 #[tauri::command]
+#[specta::specta]
 fn create_group(
     state: State<AppState>,
     name: String,
@@ -29,11 +34,13 @@ fn create_group(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn delete_group(state: State<AppState>, group_id: String) -> Result<bool, String> {
     state.delete_group(&group_id)
 }
 
 #[tauri::command]
+#[specta::specta]
 fn add_participant(
     state: State<AppState>,
     group_id: String,
@@ -43,6 +50,7 @@ fn add_participant(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn add_expense(
     state: State<AppState>,
     group_id: String,
@@ -55,6 +63,7 @@ fn add_expense(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn update_expense(
     state: State<AppState>,
     group_id: String,
@@ -68,6 +77,7 @@ fn update_expense(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn delete_expense(
     state: State<AppState>,
     group_id: String,
@@ -77,6 +87,7 @@ fn delete_expense(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn get_balances(
     state: State<AppState>,
     group_id: String,
@@ -88,6 +99,7 @@ fn get_balances(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn get_settlements(
     state: State<AppState>,
     group_id: String,
@@ -99,6 +111,7 @@ fn get_settlements(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn record_reimbursement(
     state: State<AppState>,
     group_id: String,
@@ -110,8 +123,35 @@ fn record_reimbursement(
     state.record_reimbursement(&group_id, from_id, to_id, amount_cents, notes)
 }
 
+pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
+    tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
+        get_groups,
+        get_group,
+        create_group,
+        delete_group,
+        add_participant,
+        add_expense,
+        update_expense,
+        delete_expense,
+        record_reimbursement,
+        get_balances,
+        get_settlements
+    ])
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let builder = create_specta_builder();
+
+    #[cfg(all(debug_assertions, not(mobile)))]
+    builder
+        .export(
+            specta_typescript::Typescript::default()
+                .bigint(specta_typescript::BigIntExportBehavior::Number),
+            "../src/bindings.ts",
+        )
+        .expect("Failed to export typescript bindings");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -123,19 +163,7 @@ pub fn run() {
             app.manage(AppState::new(file_path));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            get_groups,
-            get_group,
-            create_group,
-            delete_group,
-            add_participant,
-            add_expense,
-            update_expense,
-            delete_expense,
-            record_reimbursement,
-            get_balances,
-            get_settlements
-        ])
+        .invoke_handler(builder.invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -1,25 +1,30 @@
-import { invoke } from "@tauri-apps/api/core";
+import { type Result, commands } from "../bindings";
 import type { ExpenseSplit, Group, ParticipantBalance, SettlementTransfer } from "../types";
+
+function unwrap<T>(result: Result<T, string>): T {
+  if (result.status === "ok") return result.data;
+  throw new Error(result.error);
+}
 
 export const api = {
   async getGroups(): Promise<Group[]> {
-    return invoke<Group[]>("get_groups");
+    return commands.getGroups();
   },
 
-  async getGroup(id: string): Promise<Group> {
-    return invoke<Group>("get_group", { id });
+  async getGroup(groupId: string): Promise<Group> {
+    return unwrap(await commands.getGroup(groupId));
   },
 
   async createGroup(name: string, currency: string, participants: string[]): Promise<Group> {
-    return invoke<Group>("create_group", { name, currency, participants });
+    return unwrap(await commands.createGroup(name, currency, participants));
   },
 
-  async deleteGroup(id: string): Promise<void> {
-    return invoke<void>("delete_group", { id });
+  async deleteGroup(groupId: string): Promise<void> {
+    unwrap(await commands.deleteGroup(groupId));
   },
 
   async addParticipant(groupId: string, name: string): Promise<Group> {
-    return invoke<Group>("add_participant", { groupId, name });
+    return unwrap(await commands.addParticipant(groupId, name));
   },
 
   async addExpense(
@@ -29,13 +34,7 @@ export const api = {
     paidBy: string,
     splits: ExpenseSplit[]
   ): Promise<Group> {
-    return invoke<Group>("add_expense", {
-      groupId,
-      title,
-      amountCents,
-      paidBy,
-      splits,
-    });
+    return unwrap(await commands.addExpense(groupId, title, amountCents, paidBy, splits));
   },
 
   async updateExpense(
@@ -46,18 +45,13 @@ export const api = {
     paidBy: string,
     splits: ExpenseSplit[]
   ): Promise<Group> {
-    return invoke<Group>("update_expense", {
-      groupId,
-      expenseId,
-      title,
-      amountCents,
-      paidBy,
-      splits,
-    });
+    return unwrap(
+      await commands.updateExpense(groupId, expenseId, title, amountCents, paidBy, splits)
+    );
   },
 
   async deleteExpense(groupId: string, expenseId: string): Promise<Group> {
-    return invoke<Group>("delete_expense", { groupId, expenseId });
+    return unwrap(await commands.deleteExpense(groupId, expenseId));
   },
 
   async recordReimbursement(
@@ -67,20 +61,16 @@ export const api = {
     amountCents: number,
     notes?: string
   ): Promise<Group> {
-    return invoke<Group>("record_reimbursement", {
-      groupId,
-      fromId,
-      toId,
-      amountCents,
-      notes: notes || null,
-    });
+    return unwrap(
+      await commands.recordReimbursement(groupId, fromId, toId, amountCents, notes || null)
+    );
   },
 
   async getBalances(groupId: string): Promise<ParticipantBalance[]> {
-    return invoke<ParticipantBalance[]>("get_balances", { groupId });
+    return unwrap(await commands.getBalances(groupId));
   },
 
   async getSettlements(groupId: string): Promise<SettlementTransfer[]> {
-    return invoke<SettlementTransfer[]>("get_settlements", { groupId });
+    return unwrap(await commands.getSettlements(groupId));
   },
 };

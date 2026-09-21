@@ -1,19 +1,20 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct Participant {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct ExpenseSplit {
     pub participant_id: String,
     pub shares: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct ExpenseHistoryEntry {
     pub edited_at: DateTime<Utc>,
     pub previous_title: String,
@@ -23,7 +24,7 @@ pub struct ExpenseHistoryEntry {
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct Expense {
     pub id: String,
     pub group_id: String,
@@ -39,7 +40,7 @@ pub struct Expense {
     pub is_reimbursement: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct Group {
     pub id: String,
     pub name: String,
@@ -49,7 +50,7 @@ pub struct Group {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct ParticipantBalance {
     pub participant_id: String,
     pub participant_name: String,
@@ -58,7 +59,7 @@ pub struct ParticipantBalance {
     pub net_cents: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct SettlementTransfer {
     pub from_id: String,
     pub from_name: String,

@@ -16,7 +16,8 @@
       "biome.json",
       "src-tauri/tauri.conf.json",
       "src-tauri/capabilities/**"
-    ]
+    ],
+    "ignore": ["src/bindings.ts"]
   },
   "formatter": {
     "enabled": true,

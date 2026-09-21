@@ -2,29 +2,33 @@
 # Refer to documentation: https://github.com/evilmartians/lefthook
 
 pre-commit:
-  parallel: true
   commands:
-    # 1. Biome: Lint and format frontend code, JSON configs, and CSS
+    # 1. Generate & verify TypeScript bindings from Rust
+    tauri-bindings:
+      glob: "src-tauri/**/*.{rs,toml}"
+      run: cargo run --manifest-path src-tauri/Cargo.toml --bin export_bindings && git add src/bindings.ts
+
+    # 2. Rust: Format check
+    cargo-fmt:
+      glob: "src-tauri/**/*.rs"
+      run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+    # 3. Rust: Clippy linter
+    cargo-clippy:
+      glob: "src-tauri/**/*.rs"
+      run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+    # 4. Biome: Lint and format frontend code, JSON configs, and CSS
     biome-check:
       glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc,css}"
       run: bunx @biomejs/biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
       stage_fixed: true
 
-    # 2. TypeScript: Type checking across src/
+    # 5. TypeScript: Type checking across src/
     typecheck:
       glob: "src/**/*.{ts,tsx}"
       run: bunx tsc --noEmit
 
-    # 3. Rust: Format check
-    cargo-fmt:
-      glob: "src-tauri/**/*.rs"
-      run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
-
-    # 4. Rust: Clippy linter
-    cargo-clippy:
-      glob: "src-tauri/**/*.rs"
-      run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
-
-    # 5. Git Hygiene: Trailing whitespace check
+    # 6. Git Hygiene: Trailing whitespace check
     trailing-whitespace:
       run: git diff --check --cached

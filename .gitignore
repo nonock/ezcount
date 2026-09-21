@@ -26,3 +26,7 @@ dist-ssr
 
 # Lefthook local overrides
 lefthook-local.yml
+
+# Playwright
+test-results/
+playwright-report/
