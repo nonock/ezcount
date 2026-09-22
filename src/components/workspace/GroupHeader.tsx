@@ -1,4 +1,5 @@
 import type React from "react";
+import { useMemo } from "react";
 import type { Group, ParticipantBalance } from "../../types";
 import { formatMoney } from "../../utils/formatters";
 
@@ -19,12 +20,24 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
   onOpenAddMember,
   onDeleteGroup,
 }) => {
-  const totalCents = group.expenses.reduce((sum, e) => sum + e.amount_cents, 0);
+  const totalCents = useMemo(
+    () => group.expenses.reduce((sum, e) => sum + e.amount_cents, 0),
+    [group.expenses]
+  );
 
-  const currentUserBalance = balances.find((b) => b.participant_id === currentUserId);
-  const userPaidCents = group.expenses
-    .filter((e) => e.paid_by === currentUserId && !e.is_reimbursement)
-    .reduce((sum, e) => sum + e.amount_cents, 0);
+  const currentUserBalance = useMemo(
+    () => balances.find((b) => b.participant_id === currentUserId),
+    [balances, currentUserId]
+  );
+
+  const userPaidCents = useMemo(
+    () =>
+      group.expenses
+        .filter((e) => e.paid_by === currentUserId && !e.is_reimbursement)
+        .reduce((sum, e) => sum + e.amount_cents, 0),
+    [group.expenses, currentUserId]
+  );
+
   const userShareCents = currentUserBalance?.owed_cents || 0;
   const userNetCents = currentUserBalance?.net_cents || 0;
 

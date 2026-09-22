@@ -34,13 +34,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   onEditExpense,
   onViewHistory,
 }) => {
-  const nameMap = new Map(group.participants.map((p) => [p.id, p.name]));
+  const nameMap = useMemo(
+    () => new Map(group.participants.map((p) => [p.id, p.name])),
+    [group.participants]
+  );
+
   // 1. Sort transactions descending (newest first)
-  const sortedExpenses = [...group.expenses].sort((a, b) => {
-    const timeA = new Date(a.created_at).getTime() || 0;
-    const timeB = new Date(b.created_at).getTime() || 0;
-    return timeB - timeA;
-  });
+  const sortedExpenses = useMemo(() => {
+    return [...group.expenses].sort((a, b) => {
+      const timeA = new Date(a.created_at).getTime() || 0;
+      const timeB = new Date(b.created_at).getTime() || 0;
+      return timeB - timeA;
+    });
+  }, [group.expenses]);
 
   // 2. Infinite loader state (batch 10 by 10)
   const [visibleCount, setVisibleCount] = useState(10);
@@ -52,7 +58,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     }
   }, [group.id]);
 
-  const visibleExpenses = sortedExpenses.slice(0, visibleCount);
+  const visibleExpenses = useMemo(
+    () => sortedExpenses.slice(0, visibleCount),
+    [sortedExpenses, visibleCount]
+  );
 
   const hasMore = visibleCount < sortedExpenses.length;
   const remainingCount = sortedExpenses.length - visibleCount;
@@ -102,7 +111,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
     return Array.from(map.values());
   }, [visibleExpenses]);
 
-  const totalCents = group.expenses.reduce((sum, e) => sum + e.amount_cents, 0);
+  const totalCents = useMemo(
+    () => group.expenses.reduce((sum, e) => sum + e.amount_cents, 0),
+    [group.expenses]
+  );
 
   return (
     <div className="space-y-5">

@@ -1,4 +1,5 @@
 import type React from "react";
+import { useMemo } from "react";
 import type { Group, ParticipantBalance } from "../../types";
 import { formatMoney } from "../../utils/formatters";
 
@@ -13,7 +14,10 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
   balances,
   onReimburseParticipant,
 }) => {
-  const maxAbs = Math.max(...balances.map((b) => Math.abs(b.net_cents)), 1);
+  const maxAbs = useMemo(
+    () => Math.max(...balances.map((b) => Math.abs(b.net_cents)), 1),
+    [balances]
+  );
 
   return (
     <div className="space-y-4">
