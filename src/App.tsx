@@ -29,6 +29,7 @@ export const App: React.FC = () => {
   const [balances, setBalances] = useState<ParticipantBalance[]>([]);
   const [settlements, setSettlements] = useState<SettlementTransfer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Modal open states
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
@@ -80,10 +81,34 @@ export const App: React.FC = () => {
       setCurrentGroup(null);
       setBalances([]);
       setSettlements([]);
+      setCurrentUserId(null);
     }
   }, [selectedGroupId, refreshActiveGroup]);
 
+  useEffect(() => {
+    if (!currentGroup || currentGroup.participants.length === 0) {
+      setCurrentUserId(null);
+      return;
+    }
+
+    const saved = localStorage.getItem(`ezcount_user_${currentGroup.id}`);
+    if (saved && currentGroup.participants.some((p) => p.id === saved)) {
+      setCurrentUserId(saved);
+    } else {
+      const defaultUser = currentGroup.participants[0].id;
+      setCurrentUserId(defaultUser);
+      localStorage.setItem(`ezcount_user_${currentGroup.id}`, defaultUser);
+    }
+  }, [currentGroup]);
+
   // Actions
+  const handleSelectCurrentUser = (userId: string) => {
+    setCurrentUserId(userId);
+    if (currentGroup) {
+      localStorage.setItem(`ezcount_user_${currentGroup.id}`, userId);
+    }
+  };
+
   const handleSelectGroup = (groupId: string) => {
     setSelectedGroupId(groupId);
     setActiveTab("expenses");
@@ -125,10 +150,18 @@ export const App: React.FC = () => {
     title: string,
     amountCents: number,
     paidBy: string,
-    splits: ExpenseSplit[]
+    splits: ExpenseSplit[],
+    createdAt?: string | null
   ) => {
     if (!currentGroup) return;
-    const updated = await api.addExpense(currentGroup.id, title, amountCents, paidBy, splits);
+    const updated = await api.addExpense(
+      currentGroup.id,
+      title,
+      amountCents,
+      paidBy,
+      splits,
+      createdAt
+    );
     setCurrentGroup(updated);
     await refreshActiveGroup(updated.id);
     await refreshGroups();
@@ -159,7 +192,8 @@ export const App: React.FC = () => {
     title: string,
     amountCents: number,
     paidBy: string,
-    splits: ExpenseSplit[]
+    splits: ExpenseSplit[],
+    createdAt?: string | null
   ) => {
     if (!currentGroup) return;
     const updated = await api.updateExpense(
@@ -168,7 +202,8 @@ export const App: React.FC = () => {
       title,
       amountCents,
       paidBy,
-      splits
+      splits,
+      createdAt
     );
     setCurrentGroup(updated);
     await refreshActiveGroup(updated.id);
@@ -235,6 +270,9 @@ export const App: React.FC = () => {
 
             <GroupHeader
               group={currentGroup}
+              balances={balances}
+              currentUserId={currentUserId}
+              onSelectCurrentUser={handleSelectCurrentUser}
               onOpenAddMember={() => setIsAddMemberOpen(true)}
               onDeleteGroup={handleDeleteGroup}
             />
@@ -386,6 +424,7 @@ export const App: React.FC = () => {
               setEditingExpense(null);
             }}
             group={currentGroup}
+            currentUserId={currentUserId}
             onAddExpense={handleAddExpense}
             editingExpense={editingExpense}
             onUpdateExpense={handleUpdateExpense}

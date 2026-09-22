@@ -32,9 +32,12 @@ export const api = {
     title: string,
     amountCents: number,
     paidBy: string,
-    splits: ExpenseSplit[]
+    splits: ExpenseSplit[],
+    createdAt?: string | null
   ): Promise<Group> {
-    return unwrap(await commands.addExpense(groupId, title, amountCents, paidBy, splits));
+    return unwrap(
+      await commands.addExpense(groupId, title, amountCents, paidBy, splits, createdAt || null)
+    );
   },
 
   async updateExpense(
@@ -43,10 +46,19 @@ export const api = {
     title: string,
     amountCents: number,
     paidBy: string,
-    splits: ExpenseSplit[]
+    splits: ExpenseSplit[],
+    createdAt?: string | null
   ): Promise<Group> {
     return unwrap(
-      await commands.updateExpense(groupId, expenseId, title, amountCents, paidBy, splits)
+      await commands.updateExpense(
+        groupId,
+        expenseId,
+        title,
+        amountCents,
+        paidBy,
+        splits,
+        createdAt || null
+      )
     );
   },
 

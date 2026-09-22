@@ -4,6 +4,8 @@ import type { Expense, ExpenseSplit, Group } from "../../types";
 import { formatMoney } from "../../utils/formatters";
 import { Modal } from "../common/Modal";
 
+import { formatDateInput } from "../../utils/formatters";
+
 interface AddExpenseModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -12,7 +14,8 @@ interface AddExpenseModalProps {
     title: string,
     amountCents: number,
     paidBy: string,
-    splits: ExpenseSplit[]
+    splits: ExpenseSplit[],
+    createdAt?: string | null
   ) => Promise<void>;
   editingExpense?: Expense | null;
   onUpdateExpense?: (
@@ -20,8 +23,10 @@ interface AddExpenseModalProps {
     title: string,
     amountCents: number,
     paidBy: string,
-    splits: ExpenseSplit[]
+    splits: ExpenseSplit[],
+    createdAt?: string | null
   ) => Promise<void>;
+  currentUserId?: string | null;
 }
 
 interface SplitItemState {
@@ -36,10 +41,12 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   onAddExpense,
   editingExpense,
   onUpdateExpense,
+  currentUserId,
 }) => {
   const [title, setTitle] = useState("");
   const [amountStr, setAmountStr] = useState("");
   const [paidBy, setPaidBy] = useState("");
+  const [expenseDate, setExpenseDate] = useState<string>(formatDateInput());
   const [splitsState, setSplitsState] = useState<Record<string, SplitItemState>>({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -51,6 +58,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setTitle(editingExpense.title);
       setAmountStr((editingExpense.amount_cents / 100).toFixed(2));
       setPaidBy(editingExpense.paid_by);
+      setExpenseDate(formatDateInput(editingExpense.created_at));
 
       const initialSplits: Record<string, SplitItemState> = {};
       for (const p of group.participants) {
@@ -64,16 +72,19 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     } else {
       setTitle("");
       setAmountStr("");
-      if (group.participants.length > 0) {
-        setPaidBy(group.participants[0].id);
-        const initialSplits: Record<string, SplitItemState> = {};
-        for (const p of group.participants) {
-          initialSplits[p.id] = { included: true, shares: 1 };
-        }
-        setSplitsState(initialSplits);
+      setExpenseDate(formatDateInput());
+      const defaultPayer =
+        currentUserId && group.participants.some((p) => p.id === currentUserId)
+          ? currentUserId
+          : group.participants[0]?.id || "";
+      setPaidBy(defaultPayer);
+      const initialSplits: Record<string, SplitItemState> = {};
+      for (const p of group.participants) {
+        initialSplits[p.id] = { included: true, shares: 1 };
       }
+      setSplitsState(initialSplits);
     }
-  }, [isOpen, editingExpense, group]);
+  }, [isOpen, editingExpense, group, currentUserId]);
 
   const handleToggleParticipant = (id: string) => {
     setSplitsState((prev) => ({
@@ -142,15 +153,31 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       shares: splitsState[p.id]?.shares || 1,
     }));
 
+    let createdAtIso: string | null = null;
+    if (expenseDate) {
+      const [year, month, day] = expenseDate.split("-").map(Number);
+      const d = new Date();
+      d.setFullYear(year, month - 1, day);
+      createdAtIso = d.toISOString();
+    }
+
     setSubmitting(true);
     try {
       if (editingExpense && onUpdateExpense) {
-        await onUpdateExpense(editingExpense.id, trimmedTitle, amountCents, paidBy, splits);
+        await onUpdateExpense(
+          editingExpense.id,
+          trimmedTitle,
+          amountCents,
+          paidBy,
+          splits,
+          createdAtIso
+        );
       } else {
-        await onAddExpense(trimmedTitle, amountCents, paidBy, splits);
+        await onAddExpense(trimmedTitle, amountCents, paidBy, splits, createdAtIso);
       }
       setTitle("");
       setAmountStr("");
+      setExpenseDate(formatDateInput());
       onClose();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to save expense");
@@ -188,7 +215,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label
               htmlFor="input-expense-amount"
@@ -206,12 +233,29 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
                 value={amountStr}
                 onChange={(e) => setAmountStr(e.target.value)}
                 placeholder="0.00"
-                className="w-full pl-3.5 pr-14 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-semibold text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+                className="w-full pl-3.5 pr-12 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-semibold text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition font-mono tabular-nums"
               />
-              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 pointer-events-none">
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 pointer-events-none">
                 {group.currency}
               </div>
             </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="input-expense-date"
+              className="block text-xs font-semibold text-slate-300 mb-1.5"
+            >
+              Date *
+            </label>
+            <input
+              id="input-expense-date"
+              type="date"
+              required
+              value={expenseDate}
+              onChange={(e) => setExpenseDate(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition [color-scheme:dark]"
+            />
           </div>
 
           <div>
@@ -230,6 +274,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
               {group.participants.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
+                  {p.id === currentUserId ? " (You)" : ""}
                 </option>
               ))}
             </select>

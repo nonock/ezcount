@@ -1,19 +1,32 @@
 import type React from "react";
-import type { Group } from "../../types";
+import type { Group, ParticipantBalance } from "../../types";
 import { formatMoney } from "../../utils/formatters";
 
 interface GroupHeaderProps {
   group: Group;
+  balances: ParticipantBalance[];
+  currentUserId: string | null;
+  onSelectCurrentUser: (id: string) => void;
   onOpenAddMember: () => void;
   onDeleteGroup: () => void;
 }
 
 export const GroupHeader: React.FC<GroupHeaderProps> = ({
   group,
+  balances,
+  currentUserId,
+  onSelectCurrentUser,
   onOpenAddMember,
   onDeleteGroup,
 }) => {
   const totalCents = group.expenses.reduce((sum, e) => sum + e.amount_cents, 0);
+
+  const currentUserBalance = balances.find((b) => b.participant_id === currentUserId);
+  const userPaidCents = group.expenses
+    .filter((e) => e.paid_by === currentUserId && !e.is_reimbursement)
+    .reduce((sum, e) => sum + e.amount_cents, 0);
+  const userShareCents = currentUserBalance?.owed_cents || 0;
+  const userNetCents = currentUserBalance?.net_cents || 0;
 
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 sm:p-5 backdrop-blur-md space-y-4">
@@ -25,11 +38,17 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
               {group.currency}
             </span>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
-            {group.participants.length} participants • Total:{" "}
-            <strong className="text-slate-200 font-mono tabular-nums">
-              {formatMoney(totalCents, group.currency)}
-            </strong>
+          <p className="text-xs text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
+            <span>{group.participants.length} participants</span>
+            <span aria-hidden="true" className="text-slate-600">
+              •
+            </span>
+            <span>
+              Group Total:{" "}
+              <strong className="text-slate-200 font-mono tabular-nums">
+                {formatMoney(totalCents, group.currency)}
+              </strong>
+            </span>
           </p>
         </div>
 
@@ -94,6 +113,67 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
           </span>
         ))}
       </div>
+
+      {/* Active User Summary Bar */}
+      {group.participants.length > 0 && (
+        <div className="pt-3 border-t border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-400 font-medium">Viewing as:</span>
+            <select
+              aria-label="Select active participant"
+              value={currentUserId || ""}
+              onChange={(e) => onSelectCurrentUser(e.target.value)}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-950 text-slate-100 border border-slate-700/80 font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 transition cursor-pointer text-xs"
+            >
+              {group.participants.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-3.5 flex-wrap">
+            <div>
+              <span className="text-slate-400">Your expenses: </span>
+              <strong className="text-white font-mono tabular-nums font-semibold">
+                {formatMoney(userShareCents, group.currency)}
+              </strong>
+            </div>
+
+            <span aria-hidden="true" className="text-slate-700 hidden sm:inline">
+              •
+            </span>
+
+            <div>
+              <span className="text-slate-400">Paid by you: </span>
+              <strong className="text-white font-mono tabular-nums font-semibold">
+                {formatMoney(userPaidCents, group.currency)}
+              </strong>
+            </div>
+
+            <span aria-hidden="true" className="text-slate-700 hidden sm:inline">
+              •
+            </span>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">Net: </span>
+              <span
+                className={`px-2 py-0.5 rounded-md font-mono tabular-nums font-bold ${
+                  userNetCents > 0
+                    ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                    : userNetCents < 0
+                      ? "bg-rose-500/15 text-rose-300 border border-rose-500/30"
+                      : "bg-slate-800 text-slate-300 border border-slate-700"
+                }`}
+              >
+                {userNetCents > 0 ? "+" : ""}
+                {formatMoney(userNetCents, group.currency)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

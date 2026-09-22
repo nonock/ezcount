@@ -47,3 +47,48 @@ export function formatDateTime(isoString: string): string {
     return isoString;
   }
 }
+
+export function formatDateInput(date: Date | string = new Date()): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "";
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function getLocalDateKey(isoString: string): string {
+  return formatDateInput(isoString);
+}
+
+export function formatDateGroupHeader(isoString: string): string {
+  try {
+    const d = new Date(isoString);
+    if (Number.isNaN(d.getTime())) return isoString;
+
+    const now = new Date();
+    const todayKey = formatDateInput(now);
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayKey = formatDateInput(yesterday);
+
+    const itemKey = formatDateInput(d);
+
+    if (itemKey === todayKey) {
+      return "Today";
+    }
+    if (itemKey === yesterdayKey) {
+      return "Yesterday";
+    }
+
+    const isCurrentYear = d.getFullYear() === now.getFullYear();
+    return d.toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      ...(isCurrentYear ? {} : { year: "numeric" }),
+    });
+  } catch {
+    return isoString;
+  }
+}

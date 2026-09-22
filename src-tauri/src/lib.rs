@@ -2,6 +2,7 @@ mod engine;
 pub mod models;
 pub mod storage;
 
+use chrono::{DateTime, Utc};
 use std::path::PathBuf;
 use tauri::{Manager, State};
 
@@ -58,12 +59,14 @@ fn add_expense(
     amount_cents: i64,
     paid_by: String,
     splits: Vec<ExpenseSplit>,
+    created_at: Option<DateTime<Utc>>,
 ) -> Result<Group, String> {
-    state.add_expense(&group_id, title, amount_cents, paid_by, splits)
+    state.add_expense(&group_id, title, amount_cents, paid_by, splits, created_at)
 }
 
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::too_many_arguments)]
 fn update_expense(
     state: State<AppState>,
     group_id: String,
@@ -72,8 +75,17 @@ fn update_expense(
     amount_cents: i64,
     paid_by: String,
     splits: Vec<ExpenseSplit>,
+    created_at: Option<DateTime<Utc>>,
 ) -> Result<Group, String> {
-    state.update_expense(&group_id, &expense_id, title, amount_cents, paid_by, splits)
+    state.update_expense(
+        &group_id,
+        &expense_id,
+        title,
+        amount_cents,
+        paid_by,
+        splits,
+        created_at,
+    )
 }
 
 #[tauri::command]

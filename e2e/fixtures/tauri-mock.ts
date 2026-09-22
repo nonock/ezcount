@@ -38,7 +38,13 @@ export interface MockGroup {
 }
 
 export function installTauriMock() {
-  const groups: MockGroup[] = [];
+  let groups: MockGroup[] | null = null;
+  function getGroups(): MockGroup[] {
+    if (!groups) {
+      groups = (window as any).__SEED_GROUPS__ ? JSON.parse(JSON.stringify((window as any).__SEED_GROUPS__)) : [];
+    }
+    return groups;
+  }
 
   function computeBalances(group: MockGroup) {
     const map = new Map<string, { paid: number; owed: number }>();
@@ -122,19 +128,23 @@ export function installTauriMock() {
     return transfers;
   }
 
+  function clone<T>(val: T): T {
+    return JSON.parse(JSON.stringify(val));
+  }
+
   (window as any).__TAURI_INTERNALS__ = {
     invoke: async (cmd: string, args?: any) => {
       switch (cmd) {
         case "get_groups":
-          return groups;
+          return clone(getGroups());
 
         case "get_group": {
           if (!args || typeof args.groupId !== "string") {
             throw new Error("missing required argument `group_id`");
           }
-          const g = groups.find((x) => x.id === args.groupId);
+          const g = getGroups().find((x) => x.id === args.groupId);
           if (!g) throw new Error("Group not found");
-          return g;
+          return clone(g);
         }
 
         case "create_group": {
@@ -153,30 +163,31 @@ export function installTauriMock() {
             expenses: [],
             created_at: now,
           };
-          groups.unshift(newGroup);
-          return newGroup;
+          getGroups().unshift(newGroup);
+          return clone(newGroup);
         }
 
         case "delete_group": {
           if (!args || typeof args.groupId !== "string") {
             throw new Error("missing required argument `group_id`");
           }
-          const idx = groups.findIndex((x) => x.id === args.groupId);
-          if (idx !== -1) groups.splice(idx, 1);
+          const idx = getGroups().findIndex((x) => x.id === args.groupId);
+          if (idx !== -1) getGroups().splice(idx, 1);
           return true;
         }
 
         case "add_participant": {
-          const g = groups.find((x) => x.id === args?.groupId);
+          const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
           g.participants.push({ id: `p-${Date.now()}`, name: args.name });
-          return g;
+          return clone(g);
         }
 
         case "add_expense": {
-          const g = groups.find((x) => x.id === args?.groupId);
+          const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
           const now = new Date().toISOString();
+          const createdAt = args?.createdAt || now;
           const exp: MockExpense = {
             id: `exp-${Date.now()}`,
             group_id: args.groupId,
@@ -184,17 +195,17 @@ export function installTauriMock() {
             amount_cents: args.amountCents,
             paid_by: args.paidBy,
             splits: args.splits,
-            created_at: now,
+            created_at: createdAt,
             updated_at: now,
             history: [],
             is_reimbursement: false,
           };
           g.expenses.unshift(exp);
-          return g;
+          return clone(g);
         }
 
         case "update_expense": {
-          const g = groups.find((x) => x.id === args?.groupId);
+          const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
           const exp = g.expenses.find((x) => x.id === args?.expenseId);
           if (!exp) throw new Error("Expense not found");
@@ -218,19 +229,22 @@ export function installTauriMock() {
           exp.amount_cents = args.amountCents;
           exp.paid_by = args.paidBy;
           exp.splits = args.splits;
+          if (args?.createdAt) {
+            exp.created_at = args.createdAt;
+          }
           exp.updated_at = new Date().toISOString();
-          return g;
+          return clone(g);
         }
 
         case "delete_expense": {
-          const g = groups.find((x) => x.id === args?.groupId);
+          const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
           g.expenses = g.expenses.filter((x) => x.id !== args?.expenseId);
-          return g;
+          return clone(g);
         }
 
         case "record_reimbursement": {
-          const g = groups.find((x) => x.id === args?.groupId);
+          const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
           const fromP = g.participants.find((p) => p.id === args.fromId)?.name || "Unknown";
           const toP = g.participants.find((p) => p.id === args.toId)?.name || "Unknown";
@@ -247,19 +261,19 @@ export function installTauriMock() {
             history: [],
             is_reimbursement: true,
           });
-          return g;
+          return clone(g);
         }
 
         case "get_balances": {
-          const g = groups.find((x) => x.id === args?.groupId);
+          const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
-          return computeBalances(g);
+          return clone(computeBalances(g));
         }
 
         case "get_settlements": {
-          const g = groups.find((x) => x.id === args?.groupId);
+          const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
-          return computeSettlements(g);
+          return clone(computeSettlements(g));
         }
 
         default:

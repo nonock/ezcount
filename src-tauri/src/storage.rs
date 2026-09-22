@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -125,6 +125,7 @@ impl AppState {
         amount_cents: i64,
         paid_by: String,
         splits: Vec<ExpenseSplit>,
+        created_at: Option<DateTime<Utc>>,
     ) -> Result<Group, String> {
         if amount_cents <= 0 {
             return Err("Amount must be greater than zero".to_string());
@@ -143,6 +144,7 @@ impl AppState {
             .ok_or_else(|| "Group not found".to_string())?;
 
         let now = Utc::now();
+        let expense_created_at = created_at.unwrap_or(now);
         let expense = Expense {
             id: Uuid::new_v4().to_string(),
             group_id: group_id.to_string(),
@@ -150,7 +152,7 @@ impl AppState {
             amount_cents,
             paid_by,
             splits,
-            created_at: now,
+            created_at: expense_created_at,
             updated_at: now,
             history: Vec::new(),
             is_reimbursement: false,
@@ -163,6 +165,7 @@ impl AppState {
         Ok(updated)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update_expense(
         &self,
         group_id: &str,
@@ -171,6 +174,7 @@ impl AppState {
         amount_cents: i64,
         paid_by: String,
         splits: Vec<ExpenseSplit>,
+        created_at: Option<DateTime<Utc>>,
     ) -> Result<Group, String> {
         if amount_cents <= 0 {
             return Err("Amount must be greater than zero".to_string());
@@ -227,6 +231,16 @@ impl AppState {
         }
         if expense.splits != splits {
             changes.push("Participants / parts allocation updated".to_string());
+        }
+        if let Some(new_created_at) = created_at {
+            if expense.created_at != new_created_at {
+                changes.push(format!(
+                    "Date changed from {} to {}",
+                    expense.created_at.format("%Y-%m-%d"),
+                    new_created_at.format("%Y-%m-%d")
+                ));
+                expense.created_at = new_created_at;
+            }
         }
 
         let summary = if changes.is_empty() {
