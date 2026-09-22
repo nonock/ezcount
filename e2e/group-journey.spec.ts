@@ -95,7 +95,7 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await expect(page.getByRole("button", { name: "Reimburse" })).toBeVisible();
 
     // Verify expense appears in list
-    const expenseCard = page.locator(".space-y-2\\.5 > div").first();
+    const expenseCard = page.locator(".space-y-2\\.5 > li, .space-y-2\\.5 > div").first();
     await expect(expenseCard).toBeVisible();
     await expect(expenseCard.getByRole("heading", { name: "Chalet Rental" })).toBeVisible();
     await expect(expenseCard.getByText("200.00 €")).toBeVisible();

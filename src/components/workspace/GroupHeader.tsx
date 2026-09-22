@@ -27,7 +27,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
           </div>
           <p className="text-xs text-slate-400 mt-1">
             {group.participants.length} participants • Total:{" "}
-            <strong className="text-slate-200 font-mono">
+            <strong className="text-slate-200 font-mono tabular-nums">
               {formatMoney(totalCents, group.currency)}
             </strong>
           </p>
@@ -37,7 +37,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
           <button
             type="button"
             onClick={onOpenAddMember}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 transition cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 transition-colors duration-150 cursor-pointer touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
           >
             <svg
               className="w-3.5 h-3.5"
@@ -45,6 +45,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
               viewBox="0 0 24 24"
               stroke="currentColor"
               strokeWidth="2"
+              aria-hidden="true"
             >
               <path
                 strokeLinecap="round"
@@ -57,7 +58,8 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
           <button
             type="button"
             onClick={onDeleteGroup}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+            aria-label={`Delete group: ${group.name}`}
+            className="p-2 sm:p-1.5 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors duration-150 cursor-pointer touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
             title="Delete group"
           >
             <svg
@@ -66,6 +68,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
               viewBox="0 0 24 24"
               stroke="currentColor"
               strokeWidth="2"
+              aria-hidden="true"
             >
               <path
                 strokeLinecap="round"

@@ -60,7 +60,7 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                   </div>
                 </div>
                 <div
-                  className={`px-2.5 py-1 rounded-lg border text-xs font-bold font-mono ${badgeColor}`}
+                  className={`px-2.5 py-1 rounded-lg border text-xs font-bold font-mono tabular-nums ${badgeColor}`}
                 >
                   {formatMoney(b.net_cents, group.currency)}
                 </div>
@@ -77,13 +77,13 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
               <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/60">
                 <span>
                   Paid:{" "}
-                  <strong className="text-slate-200 font-mono">
+                  <strong className="text-slate-200 font-mono tabular-nums">
                     {formatMoney(b.paid_cents, group.currency)}
                   </strong>
                 </span>
                 <span>
                   Consumed:{" "}
-                  <strong className="text-slate-200 font-mono">
+                  <strong className="text-slate-200 font-mono tabular-nums">
                     {formatMoney(b.owed_cents, group.currency)}
                   </strong>
                 </span>
@@ -99,10 +99,10 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                         (Math.abs(b.net_cents) / 100).toFixed(2)
                       )
                     }
-                    className="w-full py-1.5 rounded-lg text-xs font-semibold bg-slate-800/80 hover:bg-emerald-950/50 text-slate-300 hover:text-emerald-300 border border-slate-700 hover:border-emerald-500/40 transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                    className="w-full py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-semibold bg-slate-800/80 hover:bg-emerald-950/50 text-slate-300 hover:text-emerald-300 border border-slate-700 hover:border-emerald-500/40 transition-colors duration-150 flex items-center justify-center gap-1.5 cursor-pointer touch-manipulation active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                   >
                     <span>Reimburse debt</span>
-                    <span className="text-[10px] text-slate-400 font-mono font-normal">
+                    <span className="text-[10px] text-slate-400 font-mono tabular-nums font-normal">
                       ({formatMoney(Math.abs(b.net_cents), group.currency)})
                     </span>
                   </button>

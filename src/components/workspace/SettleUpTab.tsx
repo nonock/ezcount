@@ -27,6 +27,7 @@ export const SettleUpTab: React.FC<SettleUpTabProps> = ({
               viewBox="0 0 24 24"
               stroke="currentColor"
               strokeWidth="2"
+              aria-hidden="true"
             >
               <path
                 strokeLinecap="round"
@@ -47,7 +48,7 @@ export const SettleUpTab: React.FC<SettleUpTabProps> = ({
           <button
             type="button"
             onClick={onOpenReimburse}
-            className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 transition active:scale-95 cursor-pointer shrink-0"
+            className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 transition-all duration-150 active:scale-[0.98] cursor-pointer touch-manipulation shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
           >
             <svg
               className="w-3.5 h-3.5"
@@ -55,6 +56,7 @@ export const SettleUpTab: React.FC<SettleUpTabProps> = ({
               viewBox="0 0 24 24"
               stroke="currentColor"
               strokeWidth="2.5"
+              aria-hidden="true"
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
@@ -66,7 +68,10 @@ export const SettleUpTab: React.FC<SettleUpTabProps> = ({
       {/* Settlements List */}
       {settlements.length === 0 ? (
         <div className="text-center py-12 px-4 border border-dashed border-slate-800 rounded-2xl bg-slate-900/30 space-y-2">
-          <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mx-auto flex items-center justify-center text-lg">
+          <div
+            aria-hidden="true"
+            className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mx-auto flex items-center justify-center text-lg select-none"
+          >
             ✓
           </div>
           <h3 className="text-sm font-semibold text-slate-200">All settled up!</h3>
@@ -75,27 +80,30 @@ export const SettleUpTab: React.FC<SettleUpTabProps> = ({
           </p>
         </div>
       ) : (
-        <div className="space-y-2.5">
+        <ul className="space-y-2.5 list-none p-0 m-0">
           {settlements.map((s) => (
-            <div
+            <li
               key={`${s.from_id}-${s.to_id}`}
-              className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900/80 transition"
+              className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900/80 transition-colors duration-150"
             >
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center text-xs font-bold">
+                <div
+                  aria-hidden="true"
+                  className="w-8 h-8 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center text-xs font-bold select-none"
+                >
                   {s.from_name.charAt(0).toUpperCase()}
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-white">
-                    <span className="text-rose-300">{s.from_name}</span> pays{" "}
-                    <span className="text-emerald-300">{s.to_name}</span>
+                    <span className="text-rose-300 font-medium">{s.from_name}</span> pays{" "}
+                    <span className="text-emerald-300 font-medium">{s.to_name}</span>
                   </p>
                   <p className="text-[11px] text-slate-500">Direct reimbursement</p>
                 </div>
               </div>
 
               <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
-                <span className="text-base font-bold text-emerald-400 font-mono">
+                <span className="text-base font-bold text-emerald-400 font-mono tabular-nums">
                   {formatMoney(s.amount_cents, group.currency)}
                 </span>
                 <button
@@ -103,7 +111,7 @@ export const SettleUpTab: React.FC<SettleUpTabProps> = ({
                   onClick={() =>
                     onMarkAsPaid(s.from_id, s.to_id, (s.amount_cents / 100).toFixed(2))
                   }
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 transition cursor-pointer active:scale-95"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 transition-all duration-150 cursor-pointer touch-manipulation active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                 >
                   <svg
                     className="w-3.5 h-3.5"
@@ -111,15 +119,16 @@ export const SettleUpTab: React.FC<SettleUpTabProps> = ({
                     viewBox="0 0 24 24"
                     stroke="currentColor"
                     strokeWidth="2.5"
+                    aria-hidden="true"
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                   </svg>
                   <span>Mark as Paid</span>
                 </button>
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );
