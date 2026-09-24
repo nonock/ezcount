@@ -6,6 +6,13 @@ async function chooseOption(page: Page, trigger: string, option: string) {
   await page.getByRole("option", { name: option, exact: true }).click();
 }
 
+/** Says who the user is in the open group, through the header's "Change" link. */
+async function chooseIdentity(page: Page, name: string) {
+  await page.getByRole("button", { name: "Change", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name, exact: true }).click();
+  await expect(page.getByText(`You're ${name}`)).toBeVisible();
+}
+
 /** Picks a day in the expense date picker, moving back a month if it isn't shown. */
 async function pickExpenseDate(page: Page, date: Date) {
   await page.locator("#input-expense-date").click();
@@ -41,10 +48,12 @@ test.describe("Group Lifecycle & Selection (Regression Test)", () => {
     await page.locator("#input-group-name").fill("Rome Holiday");
     await chooseOption(page, "#select-group-currency", "EUR (€) — Euro");
 
+    // The first person is the user, suggested from the account.
+    await expect(page.getByLabel("Your name")).toHaveValue("alice");
+    await page.getByLabel("Your name").fill("Alice");
     const participantInputs = page.locator("input[placeholder^='Participant']");
-    await participantInputs.nth(0).fill("Alice");
-    await participantInputs.nth(1).fill("Bob");
-    await participantInputs.nth(2).fill("Charlie");
+    await participantInputs.nth(0).fill("Bob");
+    await participantInputs.nth(1).fill("Charlie");
 
     // Submit form
     await page.getByRole("button", { name: "Create Group", exact: true }).click();
@@ -89,9 +98,8 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await page.locator("#input-group-name").fill("Ski Trip 2026");
     await chooseOption(page, "#select-group-currency", "EUR (€) — Euro");
 
-    const participantInputs = page.locator("input[placeholder^='Participant']");
-    await participantInputs.nth(0).fill("Alice");
-    await participantInputs.nth(1).fill("Bob");
+    await page.getByLabel("Your name").fill("Alice");
+    await page.locator("input[placeholder^='Participant']").first().fill("Bob");
     // Remove 3rd participant
     await page
       .getByRole("button", { name: /Remove participant/ })
@@ -123,17 +131,16 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await expect(expenseCard.getByText("200.00 €")).toBeVisible();
     await expect(expenseCard.getByText("Paid by Alice", { exact: false })).toBeVisible();
 
-    // Verify Active User Summary for Alice
+    // The creator is Alice, so the summary is hers.
+    await expect(page.getByText("You're Alice")).toBeVisible();
     await expect(page.getByText("Paid by you")).toBeVisible();
     await expect(page.getByText("200.00 €").first()).toBeVisible();
     await expect(page.getByText("+100.00 €")).toBeVisible();
 
-    // Switch active user to Bob and verify summary updates
-    await chooseOption(page, "#select-active-participant", "Bob");
+    // Saying you're Bob instead updates the summary
+    await chooseIdentity(page, "Bob");
     await expect(page.getByText("-100.00 €")).toBeVisible();
-
-    // Switch back to Alice
-    await chooseOption(page, "#select-active-participant", "Alice");
+    await chooseIdentity(page, "Alice");
 
     // Add a second expense with a past date (yesterday)
     const yesterday = new Date();

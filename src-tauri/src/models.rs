@@ -84,3 +84,11 @@ pub struct SyncInfo {
     pub last_synced_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct AccountInfo {
+    pub username: String,
+    pub server_url: String,
+    // Group id -> id of the participant the user is in that group.
+    pub identities: std::collections::HashMap<String, String>,
+}

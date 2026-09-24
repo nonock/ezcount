@@ -2,42 +2,27 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import type { Group, SyncInfo } from "@/types";
-import { errorMessage } from "@/utils/errors";
 import { formatDateTime } from "@/utils/formatters";
 import { CopyIcon, LockIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
-
-const SERVER_KEY = "ezcount_sync_server";
-const DEFAULT_SERVER = "http://localhost:8787";
-
-function rememberedServer(): string {
-  try {
-    return localStorage.getItem(SERVER_KEY) || DEFAULT_SERVER;
-  } catch {
-    return DEFAULT_SERVER;
-  }
-}
 
 interface ShareGroupModalProps {
   isOpen: boolean;
   onClose: () => void;
   group: Group;
   syncInfo: SyncInfo | null;
-  onEnableSync: (serverUrl: string) => Promise<void>;
   onSyncNow: () => Promise<void>;
 }
 
@@ -46,36 +31,9 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
   onClose,
   group,
   syncInfo,
-  onEnableSync,
   onSyncNow,
 }) => {
-  const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    setServerUrl(rememberedServer());
-    setError(null);
-  }, [isOpen]);
-
-  const handleEnable = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await onEnableSync(serverUrl.trim());
-      try {
-        localStorage.setItem(SERVER_KEY, serverUrl.trim());
-      } catch {
-        // Remembering the server is only a convenience.
-      }
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const handleSyncNow = async () => {
     setBusy(true);
@@ -101,46 +59,17 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Share Group</DialogTitle>
+          <DialogTitle>Invite to Group</DialogTitle>
           <DialogDescription>
-            {syncInfo?.enabled
-              ? `Other members join "${group.name}" with this invite code.`
-              : `Sync "${group.name}" so other members can join from their own devices. Everyone can edit, even offline; changes merge when devices reconnect.`}
+            Other members join "{group.name}" with this invite code, from their own account.
+            Everyone can edit, even offline; changes merge when devices reconnect.
           </DialogDescription>
         </DialogHeader>
 
-        {!syncInfo?.enabled ? (
-          <form onSubmit={handleEnable}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="input-sync-server">Sync server URL</FieldLabel>
-                <Input
-                  id="input-sync-server"
-                  type="url"
-                  required
-                  value={serverUrl}
-                  onChange={(e) => setServerUrl(e.target.value)}
-                  placeholder="https://sync.example.com"
-                  autoComplete="url"
-                />
-                <FieldDescription>
-                  Changes are end-to-end encrypted: the server cannot read them.
-                </FieldDescription>
-              </Field>
-              <FieldError>{error}</FieldError>
-            </FieldGroup>
-            <DialogFooter className="mt-6">
-              <DialogClose asChild>
-                <Button type="button" variant="outline">
-                  Cancel
-                </Button>
-              </DialogClose>
-              <Button type="submit" disabled={busy}>
-                {busy && <Spinner data-icon="inline-start" />}
-                Start Syncing
-              </Button>
-            </DialogFooter>
-          </form>
+        {!syncInfo?.invite_code ? (
+          <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+            <Spinner /> Loading…
+          </div>
         ) : (
           <>
             <FieldGroup>
@@ -150,7 +79,7 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
                   id="share-invite-code"
                   readOnly
                   rows={3}
-                  value={syncInfo.invite_code ?? ""}
+                  value={syncInfo.invite_code}
                   onFocus={(e) => e.currentTarget.select()}
                   className="resize-none font-mono text-xs break-all"
                 />

@@ -1,4 +1,4 @@
-//! Client side of group sync.
+//! Client side of accounts and group sync.
 //!
 //! The server is a dumb relay: it stores opaque Loro updates per group, in order, and hands
 //! them back by sequence number. Each device pushes the operations the server doesn't have
@@ -7,19 +7,25 @@
 //! Anyone holding a group's invite code (server URL, group ID and secret key) can read and
 //! edit that group. The relay never sees the secret: updates are end-to-end encrypted and the
 //! relay only receives a derived auth token (see `crypto`).
+//!
+//! An account is one more document synced the same way (see `account`). It lists the groups
+//! of one person with their invite details, so every device logged into the account ends up
+//! with the same groups: `reconcile` downloads groups added on another device and drops the
+//! ones left there. Every group of a logged-in device is shared through the relay.
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
-use loro::{ExportMode, LoroDoc, VersionVector};
+use loro::{ExportMode, LoroDoc};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
 
-use crate::crypto::GroupKeys;
+use crate::account;
+use crate::crypto::{GroupKeys, PasswordKeys};
 use crate::doc;
 use crate::models::Group;
-use crate::storage::{import_remote_update, SyncMeta};
+use crate::storage::{import_remote_update, Session, SyncMeta};
 use crate::AppState;
 
 type Res<T> = Result<T, String>;
@@ -28,9 +34,12 @@ type Res<T> = Result<T, String>;
 const POLL_INTERVAL: Duration = Duration::from_secs(20);
 /// Short pause after a wake-up so a burst of edits goes out as one push.
 const DEBOUNCE: Duration = Duration::from_millis(500);
+const MIN_PASSWORD_LEN: usize = 8;
 
 /// Frontend event emitted after each background sync attempt of a group.
 pub const SYNC_EVENT: &str = "sync-updated";
+/// Frontend event emitted when the account's groups or identities changed on another device.
+pub const ACCOUNT_EVENT: &str = "account-updated";
 
 #[derive(Clone, Serialize)]
 struct SyncEvent {
@@ -113,6 +122,44 @@ pub fn new_secret() -> Res<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Account credentials
+// ---------------------------------------------------------------------------
+
+/// Lowercases and checks a username: 3 to 32 of `a-z 0-9 . _ -`, starting with a letter or
+/// digit. The relay applies the same rule.
+pub fn normalize_username(raw: &str) -> Res<String> {
+    let username = raw.trim().to_lowercase();
+    let bytes = username.as_bytes();
+    let valid = (3..=32).contains(&bytes.len())
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes.iter().all(|&b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+        });
+    if valid {
+        Ok(username)
+    } else {
+        Err("Usernames are 3 to 32 letters, digits, dots, dashes or underscores".to_string())
+    }
+}
+
+fn check_password(password: &str) -> Res<()> {
+    if password.chars().count() < MIN_PASSWORD_LEN {
+        return Err(format!(
+            "Use a password of at least {MIN_PASSWORD_LEN} characters"
+        ));
+    }
+    Ok(())
+}
+
+/// Argon2 takes a noticeable fraction of a second, so it runs on a blocking thread.
+async fn password_keys(username: &str, password: &str) -> Res<PasswordKeys> {
+    let (username, password) = (username.to_string(), password.to_string());
+    tauri::async_runtime::spawn_blocking(move || PasswordKeys::derive(&username, &password))
+        .await
+        .map_err(|e| format!("Could not derive keys from the password: {e}"))?
+}
+
+// ---------------------------------------------------------------------------
 // HTTP protocol
 // ---------------------------------------------------------------------------
 
@@ -126,6 +173,27 @@ struct UpdatesPage {
 struct RemoteUpdate {
     seq: i64,
     data: String,
+}
+
+#[derive(Serialize)]
+struct SignUpRequest<'a> {
+    username: &'a str,
+    login_token: &'a str,
+    wrapped_key: String,
+    account_id: &'a str,
+    doc_token: &'a str,
+}
+
+#[derive(Serialize)]
+struct LogInRequest<'a> {
+    username: &'a str,
+    login_token: &'a str,
+}
+
+#[derive(Deserialize)]
+struct LogInResponse {
+    account_id: String,
+    wrapped_key: String,
 }
 
 fn updates_url(server_url: &str, group_id: &str) -> String {
@@ -144,13 +212,15 @@ async fn check_status(response: reqwest::Response) -> Res<reqwest::Response> {
     match response.status().as_u16() {
         200..=299 => Ok(response),
         401 | 403 => Err("The sync server rejected this group's key".to_string()),
-        404 => Err("The sync server does not know this group".to_string()),
+        404 => Err(NOT_ON_SERVER.to_string()),
         status => {
             let body = response.text().await.unwrap_or_default();
             Err(format!("The sync server answered {status}: {body}"))
         }
     }
 }
+
+const NOT_ON_SERVER: &str = "The sync server does not know this group";
 
 /// Encrypts and uploads one update.
 async fn push(
@@ -206,11 +276,35 @@ async fn pull_page(
     Ok((updates, page.has_more))
 }
 
+/// Downloads a whole document. Returns it with the matching sync state.
+async fn download(
+    http: &reqwest::Client,
+    server_url: &str,
+    secret: &str,
+    id: &str,
+) -> Res<(LoroDoc, SyncMeta)> {
+    let keys = GroupKeys::derive(secret)?;
+    let doc = LoroDoc::new();
+    let mut meta = SyncMeta::new(server_url.to_string(), secret.to_string());
+    loop {
+        let (updates, has_more) = pull_page(http, server_url, &keys, id, meta.cursor).await?;
+        for (seq, bytes) in updates {
+            import_remote_update(&doc, &bytes, &mut meta.server_vv)?;
+            meta.cursor = seq;
+        }
+        if !has_more {
+            break;
+        }
+    }
+    meta.last_synced_at = Some(chrono::Utc::now());
+    Ok((doc, meta))
+}
+
 // ---------------------------------------------------------------------------
-// Operations
+// Group sync
 // ---------------------------------------------------------------------------
 
-/// Pushes local changes and pulls remote ones for a shared group.
+/// Pushes local changes and pulls remote ones for a shared group (or the account document).
 /// Returns whether remote changes were applied.
 pub async fn sync_group(state: &AppState, group_id: &str) -> Res<bool> {
     // One sync at a time, so the background loop and "Sync now" never push the same changes twice.
@@ -265,66 +359,353 @@ async fn sync_group_inner(state: &AppState, group_id: &str) -> Res<bool> {
     Ok(changed)
 }
 
-/// Starts sharing a local group through `server_url`. Nothing is kept if the first sync fails.
-pub async fn enable_sync(state: &AppState, group_id: &str, server_url: &str) -> Res<()> {
-    let server_url = normalize_server_url(server_url)?;
-    {
-        let mut store = state.store();
-        if store.sync_meta(group_id).is_some() {
-            return Ok(());
+/// Syncs the account document. Returns whether another device changed it.
+pub async fn sync_account(state: &AppState) -> Res<bool> {
+    let Some(account_id) = state.store().session().map(|s| s.account_id.clone()) else {
+        return Ok(false);
+    };
+    sync_group(state, &account_id).await
+}
+
+/// Makes this device's groups match the account: downloads groups added on other devices and
+/// removes the ones left there. Groups that can't be downloaded yet are retried next time.
+/// Returns whether the list of groups changed.
+pub async fn reconcile(state: &AppState) -> Res<bool> {
+    let (listed, local) = {
+        let store = state.store();
+        if store.session().is_none() {
+            return Ok(false);
         }
-        store.set_sync(group_id, SyncMeta::new(server_url, new_secret()?))?;
+        (account::groups(store.account_doc()?)?, store.group_ids())
+    };
+    let mut changed = false;
+
+    for id in local
+        .iter()
+        .filter(|id| !listed.iter().any(|g| &g.group_id == *id))
+    {
+        // Left on another device. Upload what this device still had first, for the others.
+        let _ = sync_group(state, id).await;
+        state.store().delete(id)?;
+        changed = true;
     }
-    if let Err(e) = sync_group(state, group_id).await {
-        state.store().clear_sync(group_id)?;
-        return Err(e);
+
+    for entry in listed.iter().filter(|g| !local.contains(&g.group_id)) {
+        match download(
+            &state.http,
+            &entry.server_url,
+            &entry.secret,
+            &entry.group_id,
+        )
+        .await
+        {
+            Ok((doc, meta)) => {
+                if doc::read_group(&doc).map(|g| g.id).as_deref() != Ok(entry.group_id.as_str()) {
+                    eprintln!("[sync] group {} has no usable data yet", entry.group_id);
+                    continue;
+                }
+                let mut store = state.store();
+                if !store.contains(&entry.group_id) {
+                    store.insert(doc, Some(meta))?;
+                    changed = true;
+                }
+            }
+            // Created on another device that hasn't uploaded it yet.
+            Err(e) if e == NOT_ON_SERVER => {}
+            Err(e) => eprintln!("[sync] could not download group {}: {e}", entry.group_id),
+        }
+    }
+    Ok(changed)
+}
+
+// ---------------------------------------------------------------------------
+// Accounts
+// ---------------------------------------------------------------------------
+
+/// Creates an account on `server_url` and logs this device into it. Groups already on the
+/// device become part of the account.
+pub async fn sign_up(
+    state: &AppState,
+    server_url: &str,
+    username: &str,
+    password: &str,
+) -> Res<()> {
+    let server_url = normalize_server_url(server_url)?;
+    let username = normalize_username(username)?;
+    check_password(password)?;
+    ensure_logged_out(state)?;
+
+    let keys = password_keys(&username, password).await?;
+    let account_id = uuid::Uuid::new_v4().to_string();
+    let account_key = new_secret()?;
+    let doc_keys = GroupKeys::derive(&account_key)?;
+
+    let response = state
+        .http
+        .post(format!("{server_url}/v1/accounts"))
+        .json(&SignUpRequest {
+            username: &username,
+            login_token: &keys.login_token,
+            wrapped_key: STANDARD.encode(keys.wrap_account_key(&account_id, &account_key)?),
+            account_id: &account_id,
+            doc_token: &doc_keys.auth_token,
+        })
+        .send()
+        .await
+        .map_err(request_err)?;
+    if response.status() == reqwest::StatusCode::CONFLICT {
+        return Err(format!("The username \"{username}\" is already taken"));
+    }
+    check_status(response).await?;
+
+    let session = Session {
+        server_url: server_url.clone(),
+        username,
+        account_id,
+    };
+    state.store().set_session(
+        session,
+        LoroDoc::new(),
+        SyncMeta::new(server_url, account_key),
+    )?;
+    adopt_local_groups(state)?;
+    // Upload the new account right away; the background loop retries if this fails.
+    let _ = sync_account(state).await;
+    Ok(())
+}
+
+/// Logs this device into an existing account. Its groups download in the background.
+pub async fn log_in(state: &AppState, server_url: &str, username: &str, password: &str) -> Res<()> {
+    let server_url = normalize_server_url(server_url)?;
+    let username =
+        normalize_username(username).map_err(|_| "Wrong username or password".to_string())?;
+    ensure_logged_out(state)?;
+
+    let keys = password_keys(&username, password).await?;
+    let response = state
+        .http
+        .post(format!("{server_url}/v1/accounts/login"))
+        .json(&LogInRequest {
+            username: &username,
+            login_token: &keys.login_token,
+        })
+        .send()
+        .await
+        .map_err(request_err)?;
+    let found: LogInResponse = match response.status().as_u16() {
+        401 => return Err("Wrong username or password".to_string()),
+        429 => {
+            return Err("Too many failed attempts. Wait a few minutes and try again.".to_string())
+        }
+        _ => check_status(response)
+            .await?
+            .json()
+            .await
+            .map_err(|e| format!("The sync server sent an unexpected response: {e}"))?,
+    };
+    let wrapped = STANDARD
+        .decode(&found.wrapped_key)
+        .map_err(|_| "The sync server sent corrupt account data".to_string())?;
+    let account_key = keys.unwrap_account_key(&found.account_id, &wrapped)?;
+
+    // Download the account before saving anything, so a failure leaves the device as it was.
+    let (doc, meta) = download(&state.http, &server_url, &account_key, &found.account_id).await?;
+    let session = Session {
+        server_url,
+        username,
+        account_id: found.account_id,
+    };
+    state.store().set_session(session, doc, meta)?;
+    adopt_local_groups(state)?;
+    state.sync_wakeup.notify_one();
+    Ok(())
+}
+
+/// Logs out and removes the account's data from this device. Refuses while edits are not
+/// uploaded yet, unless `force` is set.
+pub async fn log_out(state: &AppState, force: bool) -> Res<()> {
+    if !force {
+        let _ = sync_account(state).await;
+        let ids = state.store().synced_ids();
+        for id in ids {
+            let _ = sync_group(state, &id).await;
+        }
+        if state.store().has_unpushed_changes() {
+            return Err(
+                "Some changes on this device are not uploaded yet. Connect to the internet and \
+                 try again, or log out anyway and lose them."
+                    .to_string(),
+            );
+        }
+    }
+    let _guard = state.sync_lock.lock().await;
+    state.store().wipe()
+}
+
+fn ensure_logged_out(state: &AppState) -> Res<()> {
+    if state.store().session().is_some() {
+        return Err("This device is already logged in".to_string());
     }
     Ok(())
 }
 
-/// Downloads a shared group from its invite code and adds it to this device.
+fn require_session(state: &AppState) -> Res<Session> {
+    state
+        .store()
+        .session()
+        .cloned()
+        .ok_or_else(|| "Log in first".to_string())
+}
+
+/// Adds the groups on this device to the account, sharing the ones that weren't yet.
+fn adopt_local_groups(state: &AppState) -> Res<()> {
+    let mut store = state.store();
+    let server_url = store
+        .session()
+        .map(|s| s.server_url.clone())
+        .ok_or_else(|| "Log in first".to_string())?;
+    let listed: Vec<String> = account::groups(store.account_doc()?)?
+        .into_iter()
+        .map(|g| g.group_id)
+        .collect();
+    for id in store.group_ids() {
+        if listed.contains(&id) {
+            continue;
+        }
+        if store.sync_meta(&id).is_none() {
+            store.set_sync(&id, SyncMeta::new(server_url.clone(), new_secret()?))?;
+        }
+        let meta = store.sync_meta(&id).cloned().expect("just set");
+        store.update_account(|d| account::add_group(d, &id, &meta.server_url, &meta.secret))?;
+    }
+    state.sync_wakeup.notify_one();
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Group membership
+// ---------------------------------------------------------------------------
+
+/// Creates a group shared through the account's relay. The first participant is the user.
+pub fn create_group(
+    state: &AppState,
+    name: &str,
+    currency: &str,
+    participants: &[String],
+) -> Res<Group> {
+    let session = require_session(state)?;
+    let doc = doc::new_group_doc(name, currency, participants)?;
+    let group = doc::read_group(&doc)?;
+    let me = group
+        .participants
+        .first()
+        .ok_or_else(|| "Add yourself to the group".to_string())?
+        .id
+        .clone();
+    let meta = SyncMeta::new(session.server_url, new_secret()?);
+
+    // Account first: if the app stops in between, the group is fetched again from the
+    // account instead of being dropped as "left on another device".
+    let mut store = state.store();
+    store.update_account(|d| {
+        account::add_group(d, &group.id, &meta.server_url, &meta.secret)?;
+        account::set_identity(d, &group.id, &me)
+    })?;
+    let inserted = store.insert(doc, Some(meta));
+    if inserted.is_err() {
+        let _ = store.update_account(|d| account::remove_group(d, &group.id));
+    }
+    drop(store);
+    state.sync_wakeup.notify_one();
+    inserted
+}
+
+/// Downloads a shared group from its invite code and adds it to the account.
 pub async fn join_group(state: &AppState, code: &str) -> Res<Group> {
     let invite = parse_invite(code)?;
+    require_session(state)?;
+    let already = || "This group is already in your account".to_string();
     if state.store().contains(&invite.group_id) {
-        return Err("This group is already on this device".to_string());
+        return Err(already());
     }
 
-    let keys = GroupKeys::derive(&invite.secret)?;
-    let doc = LoroDoc::new();
-    let mut server_vv = VersionVector::new();
-    let mut cursor = 0;
-    loop {
-        let (updates, has_more) = pull_page(
-            &state.http,
-            &invite.server_url,
-            &keys,
-            &invite.group_id,
-            cursor,
-        )
-        .await?;
-        for (seq, bytes) in updates {
-            import_remote_update(&doc, &bytes, &mut server_vv)?;
-            cursor = seq;
-        }
-        if !has_more {
-            break;
-        }
-    }
-
+    let (doc, meta) = download(
+        &state.http,
+        &invite.server_url,
+        &invite.secret,
+        &invite.group_id,
+    )
+    .await?;
     let group = doc::read_group(&doc)
         .map_err(|_| "The sync server has no usable data for this group".to_string())?;
     if group.id != invite.group_id {
         return Err("The invite code does not match the group on the server".to_string());
     }
 
-    let mut meta = SyncMeta::new(invite.server_url, invite.secret);
-    meta.server_vv = server_vv;
-    meta.cursor = cursor;
-    meta.last_synced_at = Some(chrono::Utc::now());
-    state.store().insert(doc, Some(meta))
+    let mut store = state.store();
+    if store.contains(&invite.group_id) {
+        return Err(already());
+    }
+    store.update_account(|d| {
+        account::add_group(d, &invite.group_id, &invite.server_url, &invite.secret)
+    })?;
+    let group = store.insert(doc, Some(meta))?;
+    drop(store);
+    state.sync_wakeup.notify_one();
+    Ok(group)
 }
 
-/// Syncs every shared group in the background: right after local edits and on a timer.
+/// Removes a group from the account, on every device. Other members keep it.
+pub async fn leave_group(state: &AppState, group_id: &str) -> Res<()> {
+    // Hand over this device's last edits to the other members first, if possible.
+    if state.store().sync_meta(group_id).is_some() {
+        let _ = sync_group(state, group_id).await;
+    }
+    let mut store = state.store();
+    if store.session().is_some() {
+        store.update_account(|d| account::remove_group(d, group_id))?;
+    }
+    store.delete(group_id)?;
+    drop(store);
+    state.sync_wakeup.notify_one();
+    Ok(())
+}
+
+/// Records which participant the user is in a group, for all their devices.
+pub fn set_identity(state: &AppState, group_id: &str, participant_id: &str) -> Res<()> {
+    let mut store = state.store();
+    let group = store.group(group_id)?;
+    if !group
+        .participants
+        .iter()
+        .any(|p| p.id == participant_id && !p.removed)
+    {
+        return Err("This person is not a member of the group".to_string());
+    }
+    store.update_account(|d| account::set_identity(d, group_id, participant_id))?;
+    drop(store);
+    state.sync_wakeup.notify_one();
+    Ok(())
+}
+
+/// Adds the user to a group as a new participant.
+pub fn add_self(state: &AppState, group_id: &str, name: &str) -> Res<Group> {
+    require_session(state)?;
+    let mut new_id = String::new();
+    state.mutate(group_id, |d| {
+        new_id = doc::add_participant(d, name)?;
+        Ok(())
+    })?;
+    set_identity(state, group_id, &new_id)?;
+    state.store().group(group_id)
+}
+
+// ---------------------------------------------------------------------------
+// Background loop
+// ---------------------------------------------------------------------------
+
+/// Syncs the account and every shared group in the background: right after local edits and
+/// on a timer.
 pub fn spawn_background_sync(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -334,6 +715,18 @@ pub fn spawn_background_sync(app: AppHandle) {
                 _ = tokio::time::sleep(POLL_INTERVAL) => {}
             }
             tokio::time::sleep(DEBOUNCE).await;
+
+            let account_changed = matches!(sync_account(&state).await, Ok(true));
+            let groups_changed = match reconcile(&state).await {
+                Ok(changed) => changed,
+                Err(e) => {
+                    eprintln!("[sync] could not update groups from the account: {e}");
+                    false
+                }
+            };
+            if account_changed || groups_changed {
+                let _ = app.emit(ACCOUNT_EVENT, ());
+            }
 
             let ids = state.store().synced_ids();
             for group_id in ids {
@@ -378,15 +771,28 @@ mod tests {
     fn secrets_are_unique() {
         assert_ne!(new_secret().unwrap(), new_secret().unwrap());
     }
+
+    #[test]
+    fn usernames_are_normalized_and_checked() {
+        assert_eq!(normalize_username("  Alice.B ").unwrap(), "alice.b");
+        assert_eq!(normalize_username("bob_42").unwrap(), "bob_42");
+        for bad in ["ab", "-alice", "al ice", "élodie", &"x".repeat(33)] {
+            assert!(normalize_username(bad).is_err(), "{bad}");
+        }
+        assert!(check_password("short").is_err());
+        assert!(check_password("long enough").is_ok());
+    }
 }
 
-/// Two devices syncing through a real relay on a local port.
+/// Devices syncing through a real relay on a local port.
 #[cfg(test)]
 mod end_to_end {
     use super::*;
     use crate::models::ExpenseSplit;
     use crate::storage::Store;
     use std::path::PathBuf;
+
+    const PASSWORD: &str = "correct horse battery";
 
     struct Device {
         state: AppState,
@@ -404,12 +810,59 @@ mod end_to_end {
             }
         }
 
+        async fn signed_up(url: &str, username: &str) -> Self {
+            let device = Self::new();
+            sign_up(&device.state, url, username, PASSWORD)
+                .await
+                .unwrap();
+            device
+        }
+
+        async fn logged_in(url: &str, username: &str) -> Self {
+            let device = Self::new();
+            log_in(&device.state, url, username, PASSWORD)
+                .await
+                .unwrap();
+            reconcile(&device.state).await.unwrap();
+            device
+        }
+
         fn group(&self, id: &str) -> Group {
             self.state.store().group(id).unwrap()
         }
 
+        fn group_ids(&self) -> Vec<String> {
+            self.state.store().group_ids()
+        }
+
+        fn identity(&self, group_id: &str) -> Option<String> {
+            let store = self.state.store();
+            account::identities(store.account_doc().unwrap())
+                .unwrap()
+                .remove(group_id)
+        }
+
+        fn create(&self, name: &str, people: &[&str]) -> Group {
+            let people: Vec<String> = people.iter().map(|p| p.to_string()).collect();
+            create_group(&self.state, name, "EUR", &people).unwrap()
+        }
+
+        fn invite(&self, id: &str) -> String {
+            self.state.sync_info(id).unwrap().invite_code.unwrap()
+        }
+
         fn edit(&self, id: &str, change: impl FnOnce(&LoroDoc) -> Res<()>) {
             self.state.mutate(id, change).unwrap();
+        }
+
+        /// One full round, like the background loop.
+        async fn sync(&self) {
+            sync_account(&self.state).await.unwrap();
+            reconcile(&self.state).await.unwrap();
+            let ids = self.state.store().synced_ids();
+            for id in ids {
+                sync_group(&self.state, &id).await.unwrap();
+            }
         }
     }
 
@@ -437,13 +890,243 @@ mod end_to_end {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn devices_share_and_converge() {
+    async fn one_account_on_two_devices() {
         let (url, relay_dir) = start_relay().await;
-        let (a, b) = (Device::new(), Device::new());
+        let phone = Device::signed_up(&url, "Alice").await;
+        let trip = phone.create("Trip", &["Alice", "Bob"]);
+        let alice = trip.participants[0].id.clone();
+        assert_eq!(
+            phone.identity(&trip.id),
+            Some(alice.clone()),
+            "creator is the first person"
+        );
+        phone.sync().await;
 
-        // Device A creates a group with one expense and shares it.
-        let doc = doc::new_group_doc("Trip", "EUR", &["Alice".into(), "Bob".into()]).unwrap();
-        let group = a.state.store().insert(doc, None).unwrap();
+        // Logging in on a laptop brings the same groups and the same identity.
+        let laptop = Device::logged_in(&url, "alice").await;
+        assert_eq!(laptop.group_ids(), vec![trip.id.clone()]);
+        assert_eq!(laptop.group(&trip.id), phone.group(&trip.id));
+        assert_eq!(laptop.identity(&trip.id), Some(alice.clone()));
+
+        // A group created on the laptop shows up on the phone.
+        let flat = laptop.create("Flat", &["Alice", "Chris"]);
+        laptop.edit(&trip.id, |d| {
+            doc::add_expense(d, "Taxi", 3000, alice.clone(), vec![split(&alice)], None)
+        });
+        laptop.sync().await;
+        phone.sync().await;
+        let mut ids = phone.group_ids();
+        ids.sort();
+        let mut expected = vec![trip.id.clone(), flat.id.clone()];
+        expected.sort();
+        assert_eq!(ids, expected);
+        assert_eq!(phone.group(&trip.id).expenses.len(), 1);
+
+        // Leaving on the phone removes the group from the laptop too.
+        leave_group(&phone.state, &flat.id).await.unwrap();
+        phone.sync().await;
+        laptop.sync().await;
+        assert_eq!(laptop.group_ids(), vec![trip.id.clone()]);
+
+        let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn identity_chosen_on_one_device_applies_everywhere() {
+        let (url, relay_dir) = start_relay().await;
+        let alice = Device::signed_up(&url, "alice").await;
+        let group = alice.create("Dinner", &["Alice", "Bob"]);
+        alice.sync().await;
+
+        let bob_phone = Device::signed_up(&url, "bob").await;
+        let joined = join_group(&bob_phone.state, &alice.invite(&group.id))
+            .await
+            .unwrap();
+        assert_eq!(
+            bob_phone.identity(&group.id),
+            None,
+            "joiners pick who they are"
+        );
+        let bob = joined.participants[1].id.clone();
+        set_identity(&bob_phone.state, &group.id, &bob).unwrap();
+        assert!(set_identity(&bob_phone.state, &group.id, "nobody").is_err());
+        bob_phone.sync().await;
+
+        let bob_laptop = Device::logged_in(&url, "bob").await;
+        assert_eq!(bob_laptop.identity(&group.id), Some(bob));
+
+        // Someone new adds themselves instead of picking an existing name.
+        let carol = Device::signed_up(&url, "carol").await;
+        join_group(&carol.state, &alice.invite(&group.id))
+            .await
+            .unwrap();
+        let updated = add_self(&carol.state, &group.id, "Carol").unwrap();
+        let me = carol.identity(&group.id).unwrap();
+        assert_eq!(
+            updated
+                .participants
+                .iter()
+                .find(|p| p.id == me)
+                .unwrap()
+                .name,
+            "Carol"
+        );
+
+        let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_invite_opens_one_group_only() {
+        let (url, relay_dir) = start_relay().await;
+        let alice = Device::signed_up(&url, "alice").await;
+        let trip = alice.create("Trip", &["Alice", "Bob"]);
+        let flat = alice.create("Flat", &["Alice", "Chris"]);
+        alice.sync().await;
+
+        let bob = Device::signed_up(&url, "bob").await;
+        join_group(&bob.state, &alice.invite(&trip.id))
+            .await
+            .unwrap();
+        bob.sync().await;
+        assert_eq!(bob.group_ids(), vec![trip.id.clone()]);
+
+        // Alice's later groups don't reach Bob either, on any of his devices.
+        let _party = alice.create("Party", &["Alice"]);
+        alice.sync().await;
+        bob.sync().await;
+        assert_eq!(bob.group_ids(), vec![trip.id.clone()]);
+        let bob_laptop = Device::logged_in(&url, "bob").await;
+        assert_eq!(bob_laptop.group_ids(), vec![trip.id.clone()]);
+
+        // The Trip key can't be used to open the Flat: each group has its own key.
+        let trip_secret = bob
+            .state
+            .store()
+            .sync_meta(&trip.id)
+            .unwrap()
+            .secret
+            .clone();
+        let borrowed = invite_code(&url, &flat.id, &trip_secret);
+        let err = join_group(&bob.state, &borrowed).await.unwrap_err();
+        assert!(err.contains("rejected"), "{err}");
+        assert!(!bob.state.store().contains(&flat.id));
+
+        // Nor can Alice's account be opened with a group key.
+        let alice_account = alice.state.store().session().unwrap().account_id.clone();
+        let err = join_group(&bob.state, &invite_code(&url, &alice_account, &trip_secret))
+            .await
+            .unwrap_err();
+        assert!(err.contains("rejected"), "{err}");
+
+        let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sign_up_and_log_in_errors() {
+        let (url, relay_dir) = start_relay().await;
+        let _alice = Device::signed_up(&url, "alice").await;
+
+        let other = Device::new();
+        let err = sign_up(&other.state, &url, "ALICE", PASSWORD)
+            .await
+            .unwrap_err();
+        assert!(err.contains("already taken"), "{err}");
+        let err = sign_up(&other.state, &url, "dave", "short")
+            .await
+            .unwrap_err();
+        assert!(err.contains("at least"), "{err}");
+
+        let err = log_in(&other.state, &url, "alice", "wrong password")
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Wrong username or password");
+        let err = log_in(&other.state, &url, "nobody", PASSWORD)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err, "Wrong username or password",
+            "unknown user looks the same"
+        );
+        assert!(other.state.store().session().is_none());
+
+        // After repeated failures the relay refuses even the right password for a while.
+        for _ in 0..4 {
+            let _ = log_in(&other.state, &url, "alice", "wrong password").await;
+        }
+        let err = log_in(&other.state, &url, "alice", PASSWORD)
+            .await
+            .unwrap_err();
+        assert!(err.contains("Too many"), "{err}");
+
+        let offline = Device::new();
+        let err = sign_up(&offline.state, "http://127.0.0.1:9", "erin", PASSWORD)
+            .await
+            .unwrap_err();
+        assert!(err.contains("reach"), "{err}");
+        assert!(offline.state.store().session().is_none());
+
+        let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn local_groups_join_the_account_and_log_out_clears_the_device() {
+        let (url, relay_dir) = start_relay().await;
+        let device = Device::new();
+        let doc = doc::new_group_doc("Before accounts", "EUR", &["Ann".into()]).unwrap();
+        let old = device.state.store().insert(doc, None).unwrap();
+
+        sign_up(&device.state, &url, "ann", PASSWORD).await.unwrap();
+        assert!(device.state.sync_info(&old.id).unwrap().enabled);
+        device.sync().await;
+
+        log_out(&device.state, false).await.unwrap();
+        assert!(device.state.store().session().is_none());
+        assert!(device.group_ids().is_empty());
+
+        log_in(&device.state, &url, "ann", PASSWORD).await.unwrap();
+        reconcile(&device.state).await.unwrap();
+        assert_eq!(device.group(&old.id).name, "Before accounts");
+
+        let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn log_out_keeps_unuploaded_changes_unless_forced() {
+        let device = Device::new();
+        let (url, relay_dir) = start_relay().await;
+        sign_up(&device.state, &url, "ann", PASSWORD).await.unwrap();
+        // Point the account at a dead relay so nothing can be uploaded.
+        device
+            .state
+            .store()
+            .insert(
+                doc::new_group_doc("Offline", "EUR", &["Ann".into()]).unwrap(),
+                Some(SyncMeta::new(
+                    "http://127.0.0.1:9".into(),
+                    new_secret().unwrap(),
+                )),
+            )
+            .unwrap();
+
+        let err = log_out(&device.state, false).await.unwrap_err();
+        assert!(err.contains("not uploaded"), "{err}");
+        assert!(device.state.store().session().is_some());
+        log_out(&device.state, true).await.unwrap();
+        assert!(device.state.store().session().is_none());
+
+        let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn members_share_and_converge() {
+        let (url, relay_dir) = start_relay().await;
+        let (a, b) = (
+            Device::signed_up(&url, "alice").await,
+            Device::signed_up(&url, "bob").await,
+        );
+
+        // A creates a group with one expense and uploads it.
+        let group = a.create("Trip", &["Alice", "Bob"]);
         let (gid, alice, bob) = (
             group.id.clone(),
             group.participants[0].id.clone(),
@@ -459,22 +1142,19 @@ mod end_to_end {
                 None,
             )
         });
-        enable_sync(&a.state, &gid, &format!("{url}/"))
-            .await
-            .unwrap();
-        let invite = a.state.sync_info(&gid).unwrap().invite_code.unwrap();
+        sync_group(&a.state, &gid).await.unwrap();
 
-        // Device B joins with the invite code and sees the same group.
-        let joined = join_group(&b.state, &invite).await.unwrap();
+        // B joins with the invite code and sees the same group.
+        let joined = join_group(&b.state, &a.invite(&gid)).await.unwrap();
         assert_eq!(joined, a.group(&gid));
         assert!(
-            join_group(&b.state, &invite).await.is_err(),
+            join_group(&b.state, &a.invite(&gid)).await.is_err(),
             "joining twice is refused"
         );
 
         // Both edit while "offline", then sync in any order.
         let hotel = joined.expenses[0].id.clone();
-        a.edit(&gid, |d| doc::add_participant(d, "Charlie"));
+        a.edit(&gid, |d| doc::add_participant(d, "Charlie").map(|_| ()));
         a.edit(&gid, |d| {
             doc::update_expense(
                 d,
@@ -548,14 +1228,13 @@ mod end_to_end {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn relay_sees_neither_data_nor_secret() {
+    async fn relay_sees_neither_data_nor_secrets() {
         use sha2::{Digest, Sha256};
 
         let (url, relay_dir) = start_relay().await;
-        let a = Device::new();
+        let a = Device::signed_up(&url, "alice").await;
         let marker = "Confidential-Hotel-Name-7391";
-        let doc = doc::new_group_doc(marker, "EUR", &["Zoe-Marker".into()]).unwrap();
-        let gid = a.state.store().insert(doc, None).unwrap().id;
+        let gid = a.create(marker, &["Zoe-Marker"]).id;
         // Sanity check: an unencrypted Loro update does contain the text.
         let plain = a
             .state
@@ -565,21 +1244,26 @@ mod end_to_end {
             .export(ExportMode::Snapshot)
             .unwrap();
         assert!(plain.windows(marker.len()).any(|w| w == marker.as_bytes()));
-
-        enable_sync(&a.state, &gid, &url).await.unwrap();
+        a.sync().await;
         let secret = a.state.store().sync_meta(&gid).unwrap().secret.clone();
 
         let relay = rusqlite::Connection::open(relay_dir.join("relay.sqlite3")).unwrap();
         let blobs: Vec<Vec<u8>> = relay
-            .prepare("SELECT data FROM updates")
+            .prepare("SELECT data FROM updates UNION ALL SELECT wrapped_key FROM accounts")
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert!(!blobs.is_empty());
+        assert!(blobs.len() >= 3, "group, account and wrapped key");
+        // Neither the data, nor the group key kept in the account, nor the password.
         for blob in &blobs {
-            for needle in [marker.as_bytes(), b"Zoe-Marker"] {
+            for needle in [
+                marker.as_bytes(),
+                b"Zoe-Marker",
+                secret.as_bytes(),
+                PASSWORD.as_bytes(),
+            ] {
                 assert!(
                     !blob.windows(needle.len()).any(|w| w == needle),
                     "plaintext leaked"
@@ -596,6 +1280,10 @@ mod end_to_end {
         let token = GroupKeys::derive(&secret).unwrap().auth_token;
         assert_eq!(stored, Sha256::digest(token.as_bytes()).to_vec());
         assert_ne!(stored, Sha256::digest(secret.as_bytes()).to_vec());
+        let login_hash: Vec<u8> = relay
+            .query_row("SELECT login_hash FROM accounts", [], |r| r.get(0))
+            .unwrap();
+        assert_ne!(login_hash, Sha256::digest(PASSWORD.as_bytes()).to_vec());
 
         let _ = std::fs::remove_dir_all(relay_dir);
     }
@@ -603,23 +1291,31 @@ mod end_to_end {
     #[tokio::test(flavor = "multi_thread")]
     async fn tampered_update_is_refused() {
         let (url, relay_dir) = start_relay().await;
-        let (a, b) = (Device::new(), Device::new());
-        let doc = doc::new_group_doc("Flat", "EUR", &["Ann".into()]).unwrap();
-        let gid = a.state.store().insert(doc, None).unwrap().id;
-        enable_sync(&a.state, &gid, &url).await.unwrap();
-        let invite = a.state.sync_info(&gid).unwrap().invite_code.unwrap();
+        let (a, b) = (
+            Device::signed_up(&url, "alice").await,
+            Device::signed_up(&url, "bob").await,
+        );
+        let gid = a.create("Flat", &["Ann"]).id;
+        sync_group(&a.state, &gid).await.unwrap();
 
         // A malicious or faulty relay flips one byte of the stored update.
         let relay = rusqlite::Connection::open(relay_dir.join("relay.sqlite3")).unwrap();
         let mut blob: Vec<u8> = relay
-            .query_row("SELECT data FROM updates LIMIT 1", [], |r| r.get(0))
+            .query_row(
+                "SELECT data FROM updates WHERE group_id = ?1",
+                [&gid],
+                |r| r.get(0),
+            )
             .unwrap();
         *blob.last_mut().unwrap() ^= 1;
         relay
-            .execute("UPDATE updates SET data = ?1", [&blob])
+            .execute(
+                "UPDATE updates SET data = ?1 WHERE group_id = ?2",
+                rusqlite::params![blob, gid],
+            )
             .unwrap();
 
-        let err = join_group(&b.state, &invite).await.unwrap_err();
+        let err = join_group(&b.state, &a.invite(&gid)).await.unwrap_err();
         assert!(err.contains("decrypted"), "{err}");
         assert!(!b.state.store().contains(&gid));
 
@@ -629,10 +1325,12 @@ mod end_to_end {
     #[tokio::test(flavor = "multi_thread")]
     async fn wrong_key_is_rejected() {
         let (url, relay_dir) = start_relay().await;
-        let (a, b) = (Device::new(), Device::new());
-        let doc = doc::new_group_doc("Flat", "EUR", &["Ann".into()]).unwrap();
-        let gid = a.state.store().insert(doc, None).unwrap().id;
-        enable_sync(&a.state, &gid, &url).await.unwrap();
+        let (a, b) = (
+            Device::signed_up(&url, "alice").await,
+            Device::signed_up(&url, "bob").await,
+        );
+        let gid = a.create("Flat", &["Ann"]).id;
+        sync_group(&a.state, &gid).await.unwrap();
 
         let forged = invite_code(&url, &gid, &new_secret().unwrap());
         let err = join_group(&b.state, &forged).await.unwrap_err();
@@ -642,18 +1340,5 @@ mod end_to_end {
         assert!(join_group(&b.state, &missing).await.is_err());
 
         let _ = std::fs::remove_dir_all(relay_dir);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn unreachable_server_keeps_group_local() {
-        let a = Device::new();
-        let doc = doc::new_group_doc("Solo", "EUR", &["Ann".into()]).unwrap();
-        let gid = a.state.store().insert(doc, None).unwrap().id;
-        // Port 9 (discard) on localhost is essentially never listening.
-        let err = enable_sync(&a.state, &gid, "http://127.0.0.1:9")
-            .await
-            .unwrap_err();
-        assert!(err.contains("reach"), "{err}");
-        assert!(!a.state.sync_info(&gid).unwrap().enabled);
     }
 }

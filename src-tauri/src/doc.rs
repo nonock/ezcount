@@ -294,12 +294,15 @@ pub fn doc_from_legacy(group: &Group) -> Res<LoroDoc> {
     Ok(doc)
 }
 
-pub fn add_participant(doc: &LoroDoc, name: &str) -> Res<()> {
+/// Adds a participant and returns their id.
+pub fn add_participant(doc: &LoroDoc, name: &str) -> Res<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err("Participant name cannot be empty".to_string());
     }
-    insert_participant(doc, &Uuid::new_v4().to_string(), trimmed, false)
+    let id = Uuid::new_v4().to_string();
+    insert_participant(doc, &id, trimmed, false)?;
+    Ok(id)
 }
 
 /// Soft-deletes a participant. Their past expenses and balance stay intact.

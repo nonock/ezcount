@@ -28,12 +28,15 @@ import { Spinner } from "@/components/ui/spinner";
 import { errorMessage } from "@/utils/errors";
 import { PlusIcon, XIcon } from "lucide-react";
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface CreateGroupModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** The first participant is the user; the backend records them as "you". */
   onCreateGroup: (name: string, currency: string, participants: string[]) => Promise<void>;
+  /** Suggested name for the user. */
+  ownName: string;
 }
 
 interface ParticipantField {
@@ -41,8 +44,10 @@ interface ParticipantField {
   name: string;
 }
 
-const initialParticipants = (): ParticipantField[] => [
-  { id: "p-init-1", name: "" },
+const SELF_ID = "p-self";
+
+const initialParticipants = (ownName = ""): ParticipantField[] => [
+  { id: SELF_ID, name: ownName },
   { id: "p-init-2", name: "" },
   { id: "p-init-3", name: "" },
 ];
@@ -51,12 +56,21 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   isOpen,
   onClose,
   onCreateGroup,
+  ownName,
 }) => {
   const [name, setName] = useState("");
   const [currency, setCurrency] = useState("EUR");
   const [participants, setParticipants] = useState<ParticipantField[]>(initialParticipants);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Suggest the user's name, without overwriting what they typed.
+  useEffect(() => {
+    if (!isOpen) return;
+    setParticipants((current) =>
+      current.map((p) => (p.id === SELF_ID && !p.name.trim() ? { ...p, name: ownName } : p))
+    );
+  }, [isOpen, ownName]);
 
   const handleAddParticipantField = () => {
     setParticipants([...participants, { id: `p-${Date.now()}-${Math.random()}`, name: "" }]);
@@ -67,21 +81,22 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   };
 
   const handleRemoveParticipantField = (id: string) => {
-    if (participants.length <= 1) return;
+    if (id === SELF_ID) return;
     setParticipants(participants.filter((p) => p.id !== id));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedName = name.trim();
+    // The user's own name stays first.
     const validParticipants = participants.map((p) => p.name.trim()).filter((p) => p.length > 0);
 
     if (!trimmedName) {
       setError("Please enter a group name.");
       return;
     }
-    if (validParticipants.length === 0) {
-      setError("Please enter at least one participant.");
+    if (!participants[0]?.name.trim()) {
+      setError("Please enter your name.");
       return;
     }
 
@@ -91,7 +106,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       await onCreateGroup(trimmedName, currency, validParticipants);
       setName("");
       setCurrency("EUR");
-      setParticipants(initialParticipants());
+      setParticipants(initialParticipants(ownName));
       onClose();
     } catch (err) {
       setError(errorMessage(err));
@@ -147,10 +162,14 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     <Input
                       value={p.name}
                       onChange={(e) => handleParticipantChange(p.id, e.target.value)}
-                      placeholder={`Participant ${idx + 1}`}
-                      aria-label={`Participant ${idx + 1}`}
+                      placeholder={p.id === SELF_ID ? "Your name" : `Participant ${idx + 1}`}
+                      aria-label={p.id === SELF_ID ? "Your name" : `Participant ${idx + 1}`}
                     />
-                    {participants.length > 1 && (
+                    {p.id === SELF_ID ? (
+                      <span className="w-9 shrink-0 text-center text-xs text-muted-foreground">
+                        You
+                      </span>
+                    ) : (
                       <Button
                         type="button"
                         variant="ghost"

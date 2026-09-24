@@ -2,10 +2,13 @@
 //!
 //! SQLite gives atomic, crash-safe writes (important on Android, where the OS kills apps
 //! at any moment). Data that cannot be read is reported and left in place, never dropped.
+//!
+//! When logged in, the account document (see `account`) is stored and synced exactly like a
+//! group, under the account id, but it is never listed as a group.
 
 use chrono::{DateTime, Utc};
 use loro::{ExportMode, IdSpan, LoroDoc, VersionVector};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -34,7 +37,22 @@ const SCHEMA: &str = "
         last_synced_at TEXT,
         last_error     TEXT
     );
+    CREATE TABLE IF NOT EXISTS account (
+        id         INTEGER PRIMARY KEY CHECK (id = 1),
+        server_url TEXT NOT NULL,
+        username   TEXT NOT NULL,
+        account_id TEXT NOT NULL
+    );
 ";
+
+/// The account this device is logged into. Its key is the secret of the account document's
+/// sync row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Session {
+    pub server_url: String,
+    pub username: String,
+    pub account_id: String,
+}
 
 /// Sync state of a shared group.
 #[derive(Debug, Clone)]
@@ -83,6 +101,7 @@ pub struct Store {
     conn: Connection,
     docs: HashMap<String, LoroDoc>,
     sync: HashMap<String, SyncMeta>,
+    session: Option<Session>,
 }
 
 impl Store {
@@ -104,6 +123,7 @@ impl Store {
             conn,
             docs: HashMap::new(),
             sync: HashMap::new(),
+            session: None,
         };
         store.load(&mut warnings)?;
         store.migrate_legacy_json(legacy_json, &mut warnings);
@@ -163,6 +183,37 @@ impl Store {
             let (id, meta) = row.map_err(db_err)?;
             self.sync.insert(id, meta);
         }
+
+        self.session = self
+            .conn
+            .query_row(
+                "SELECT server_url, username, account_id FROM account WHERE id = 1",
+                [],
+                |r| {
+                    Ok(Session {
+                        server_url: r.get(0)?,
+                        username: r.get(1)?,
+                        account_id: r.get(2)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(db_err)?;
+        if let Some(session) = &self.session {
+            // Without its document the account cannot work; start again from the relay.
+            if !self.docs.contains_key(&session.account_id)
+                || !self.sync.contains_key(&session.account_id)
+            {
+                warnings.push(
+                    "Your account data on this device was unreadable. Log in again to restore it."
+                        .to_string(),
+                );
+                self.conn
+                    .execute("DELETE FROM account", [])
+                    .map_err(db_err)?;
+                self.session = None;
+            }
+        }
         Ok(())
     }
 
@@ -216,8 +267,21 @@ impl Store {
 
     // -- Groups --------------------------------------------------------------
 
+    fn is_account(&self, id: &str) -> bool {
+        self.session.as_ref().is_some_and(|s| s.account_id == id)
+    }
+
     pub fn contains(&self, id: &str) -> bool {
-        self.docs.contains_key(id)
+        self.docs.contains_key(id) && !self.is_account(id)
+    }
+
+    /// Ids of the groups on this device.
+    pub fn group_ids(&self) -> Vec<String> {
+        self.docs
+            .keys()
+            .filter(|id| !self.is_account(id))
+            .cloned()
+            .collect()
     }
 
     pub fn doc(&self, id: &str) -> Res<&LoroDoc> {
@@ -235,6 +299,7 @@ impl Store {
         let mut groups: Vec<Group> = self
             .docs
             .iter()
+            .filter(|(id, _)| !self.is_account(id))
             .filter_map(|(id, d)| match doc::read_group(d) {
                 Ok(g) => Some(g),
                 Err(e) => {
@@ -269,11 +334,19 @@ impl Store {
 
     /// Applies a change to a group's document and saves it.
     pub fn update(&mut self, id: &str, change: impl FnOnce(&LoroDoc) -> Res<()>) -> Res<Group> {
-        let doc = self.doc(id)?;
+        self.update_doc(id, change)?;
+        doc::read_group(self.doc(id)?)
+    }
+
+    /// Applies a change to any stored document (group or account) and saves it.
+    fn update_doc(&mut self, id: &str, change: impl FnOnce(&LoroDoc) -> Res<()>) -> Res<()> {
+        let doc = self
+            .docs
+            .get(id)
+            .ok_or_else(|| "Document not found".to_string())?;
         change(doc)?;
         doc.commit();
-        save_snapshot(&self.conn, id, doc)?;
-        doc::read_group(doc)
+        save_snapshot(&self.conn, id, doc)
     }
 
     /// Removes a group from this device. For a shared group, other members keep it.
@@ -297,12 +370,19 @@ impl Store {
         self.sync.get(id)
     }
 
+    /// Shared groups, not including the account document.
     pub fn synced_ids(&self) -> Vec<String> {
-        self.sync.keys().cloned().collect()
+        self.sync
+            .keys()
+            .filter(|id| !self.is_account(id))
+            .cloned()
+            .collect()
     }
 
     pub fn set_sync(&mut self, id: &str, meta: SyncMeta) -> Res<()> {
-        self.doc(id)?;
+        self.docs
+            .get(id)
+            .ok_or_else(|| "Document not found".to_string())?;
         save_sync(&self.conn, id, &meta)?;
         self.sync.insert(id.to_string(), meta);
         Ok(())
@@ -382,9 +462,78 @@ impl Store {
     }
 }
 
+impl Store {
+    // -- Account -------------------------------------------------------------
+
+    pub fn session(&self) -> Option<&Session> {
+        self.session.as_ref()
+    }
+
+    /// Logs this device into an account whose document is `doc`, synced with `meta`.
+    pub fn set_session(&mut self, session: Session, doc: LoroDoc, meta: SyncMeta) -> Res<()> {
+        if self.session.is_some() {
+            return Err("This device is already logged in".to_string());
+        }
+        let tx = self.conn.unchecked_transaction().map_err(db_err)?;
+        save_snapshot(&tx, &session.account_id, &doc)?;
+        save_sync(&tx, &session.account_id, &meta)?;
+        tx.execute(
+            "INSERT INTO account (id, server_url, username, account_id) VALUES (1, ?1, ?2, ?3)",
+            params![session.server_url, session.username, session.account_id],
+        )
+        .map_err(db_err)?;
+        tx.commit().map_err(db_err)?;
+        self.docs.insert(session.account_id.clone(), doc);
+        self.sync.insert(session.account_id.clone(), meta);
+        self.session = Some(session);
+        Ok(())
+    }
+
+    fn account_id(&self) -> Res<&str> {
+        self.session
+            .as_ref()
+            .map(|s| s.account_id.as_str())
+            .ok_or_else(|| "You are not logged in".to_string())
+    }
+
+    pub fn account_doc(&self) -> Res<&LoroDoc> {
+        let id = self.account_id()?;
+        self.docs
+            .get(id)
+            .ok_or_else(|| "Account data is missing".to_string())
+    }
+
+    pub fn update_account(&mut self, change: impl FnOnce(&LoroDoc) -> Res<()>) -> Res<()> {
+        let id = self.account_id()?.to_string();
+        self.update_doc(&id, change)
+    }
+
+    /// Whether any synced document (group or account) has edits the server doesn't hold yet.
+    pub fn has_unpushed_changes(&self) -> bool {
+        self.sync.iter().any(|(id, meta)| {
+            self.docs
+                .get(id)
+                .is_some_and(|doc| !meta.server_vv.includes_vv(&doc.oplog_vv()))
+        })
+    }
+
+    /// Logs out: removes the account and every group from this device.
+    pub fn wipe(&mut self) -> Res<()> {
+        let tx = self.conn.unchecked_transaction().map_err(db_err)?;
+        tx.execute_batch("DELETE FROM groups; DELETE FROM group_sync; DELETE FROM account;")
+            .map_err(db_err)?;
+        tx.commit().map_err(db_err)?;
+        self.docs.clear();
+        self.sync.clear();
+        self.session = None;
+        Ok(())
+    }
+}
+
 /// Current schema version, stored in SQLite's `user_version`.
 /// 2: sync is end-to-end encrypted.
-const SCHEMA_VERSION: i64 = 2;
+/// 3: accounts (a new table, nothing to migrate).
+const SCHEMA_VERSION: i64 = 3;
 
 fn upgrade_schema(conn: &Connection, warnings: &mut Vec<String>) -> Res<()> {
     let version: i64 = conn
@@ -479,7 +628,7 @@ mod tests {
                 )
                 .unwrap();
             store
-                .update(&group.id, |d| doc::add_participant(d, "Bob"))
+                .update(&group.id, |d| doc::add_participant(d, "Bob").map(|_| ()))
                 .unwrap();
             group.id
         };

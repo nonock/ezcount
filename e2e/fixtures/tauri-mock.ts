@@ -37,16 +37,80 @@ export interface MockGroup {
   created_at: string;
 }
 
+export const MOCK_PASSWORD = "correct horse";
+export const MOCK_SERVER = "http://localhost:8787";
+
+/**
+ * Seeds (set on `window` before the app loads):
+ * - `__SEED_GROUPS__`: groups on the device; the user is their first participant
+ *   unless `__SEED_IDENTITIES__` (group id -> participant id) says otherwise
+ * - `__LOGGED_OUT__`: start on the login screen
+ * - `__REMOTE_GROUPS__`: groups that can be joined with an invite code
+ * - `__UNSYNCED__`: log out fails unless forced
+ * - `__STORAGE_WARNINGS__`
+ */
 export function installTauriMock() {
+  // Serialized into the page, so it cannot use the module-level constants above.
+  const MOCK_PASSWORD = "correct horse";
+  const MOCK_SERVER = "http://localhost:8787";
+  const w = window as any;
   let groups: MockGroup[] | null = null;
+  let account: {
+    username: string;
+    server_url: string;
+    identities: Record<string, string>;
+  } | null = null;
+  let accountLoaded = false;
+
+  function getAccount() {
+    if (!accountLoaded) {
+      accountLoaded = true;
+      if (!w.__LOGGED_OUT__) {
+        const identities: Record<string, string> = {};
+        for (const g of w.__SEED_GROUPS__ || []) {
+          if (g.participants[0]) identities[g.id] = g.participants[0].id;
+        }
+        account = {
+          username: "alice",
+          server_url: MOCK_SERVER,
+          identities: w.__SEED_IDENTITIES__ ? { ...w.__SEED_IDENTITIES__ } : identities,
+        };
+      }
+    }
+    return account;
+  }
+
+  function requireAccount() {
+    const acc = getAccount();
+    if (!acc) throw new Error("Log in first");
+    return acc;
+  }
+
   function getGroups(): MockGroup[] {
     if (!groups) {
-      const seed = (window as any).__SEED_GROUPS__;
-      const seeded: MockGroup[] = seed ? JSON.parse(JSON.stringify(seed)) : [];
+      const seed = w.__SEED_GROUPS__;
+      const seeded: MockGroup[] = seed && getAccount() ? JSON.parse(JSON.stringify(seed)) : [];
       groups = seeded;
       return seeded;
     }
     return groups;
+  }
+
+  function checkCredentials(username: string, password: string, signingUp: boolean) {
+    const name = String(username || "")
+      .trim()
+      .toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(name)) {
+      throw new Error(
+        signingUp
+          ? "Usernames are 3 to 32 letters, digits, dots, dashes or underscores"
+          : "Wrong username or password"
+      );
+    }
+    if (signingUp && String(password).length < 8) {
+      throw new Error("Use a password of at least 8 characters");
+    }
+    return name;
   }
 
   function computeBalances(group: MockGroup) {
@@ -141,13 +205,14 @@ export function installTauriMock() {
 
   // Sync state per group, and groups "on the relay" that can be joined (seeded by tests).
   const syncInfos = new Map<string, any>();
+  // Every group of an account is shared.
   function syncInfo(groupId: string) {
     return (
       syncInfos.get(groupId) || {
         group_id: groupId,
-        enabled: false,
-        server_url: null,
-        invite_code: null,
+        enabled: true,
+        server_url: MOCK_SERVER,
+        invite_code: inviteFor(MOCK_SERVER, groupId),
         last_synced_at: null,
         last_error: null,
       }
@@ -169,6 +234,10 @@ export function installTauriMock() {
         (listeners.get(event) || []).filter((x) => x !== id)
       );
     },
+  };
+  w.__removeGroupElsewhere = (groupId: string) => {
+    const idx = getGroups().findIndex((x) => x.id === groupId);
+    if (idx !== -1) getGroups().splice(idx, 1);
   };
   (window as any).__emitMockEvent = (event: string, payload: unknown) => {
     for (const id of listeners.get(event) || []) {
@@ -200,20 +269,58 @@ export function installTauriMock() {
           return clone(syncInfo(args.groupId));
         }
 
-        case "enable_sync": {
-          if (!/^https?:\/\//.test(args?.serverUrl || "")) {
-            throw new Error("The server URL must start with http:// or https://");
+        case "get_account":
+          return clone(getAccount());
+
+        case "sign_up": {
+          if (getAccount()) throw new Error("This device is already logged in");
+          const username = checkCredentials(args.username, args.password, true);
+          if ((w.__TAKEN_USERNAMES__ || []).includes(username)) {
+            throw new Error(`The username "${username}" is already taken`);
           }
-          const info = {
-            group_id: args.groupId,
-            enabled: true,
-            server_url: args.serverUrl.replace(/\/+$/, ""),
-            invite_code: inviteFor(args.serverUrl.replace(/\/+$/, ""), args.groupId),
-            last_synced_at: new Date().toISOString(),
-            last_error: null,
-          };
-          syncInfos.set(args.groupId, info);
-          return clone(info);
+          account = { username, server_url: args.serverUrl, identities: {} };
+          return clone(account);
+        }
+
+        case "log_in": {
+          if (getAccount()) throw new Error("This device is already logged in");
+          const username = checkCredentials(args.username, args.password, false);
+          if (args.password !== MOCK_PASSWORD) throw new Error("Wrong username or password");
+          account = { username, server_url: args.serverUrl, identities: {} };
+          groups = [];
+          return clone(account);
+        }
+
+        case "log_out": {
+          if (w.__UNSYNCED__ && !args.force) {
+            throw new Error(
+              "Some changes on this device are not uploaded yet. Connect to the internet and try again, or log out anyway and lose them."
+            );
+          }
+          account = null;
+          groups = [];
+          return null;
+        }
+
+        case "set_identity": {
+          const acc = requireAccount();
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          if (!g.participants.some((x) => x.id === args.participantId && !x.removed)) {
+            throw new Error("This person is not a member of the group");
+          }
+          acc.identities[args.groupId] = args.participantId;
+          return clone(acc);
+        }
+
+        case "add_self": {
+          const acc = requireAccount();
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          const id = `p-self-${Date.now()}`;
+          g.participants.push({ id, name: args.name });
+          acc.identities[args.groupId] = id;
+          return clone(g);
         }
 
         case "sync_now": {
@@ -229,8 +336,9 @@ export function installTauriMock() {
           }
           const params = new URL(code.replace("ezcount://", "https://")).searchParams;
           const groupId = params.get("group") || "";
+          requireAccount();
           if (getGroups().some((x) => x.id === groupId)) {
-            throw new Error("This group is already on this device");
+            throw new Error("This group is already in your account");
           }
           const remote = ((window as any).__REMOTE_GROUPS__ || []).find(
             (g: MockGroup) => g.id === groupId
@@ -274,6 +382,7 @@ export function installTauriMock() {
           if (!args || typeof args.name !== "string" || !Array.isArray(args.participants)) {
             throw new Error("invalid create_group arguments");
           }
+          const acc = requireAccount();
           const now = new Date().toISOString();
           const newGroup: MockGroup = {
             id: `group-${Date.now()}`,
@@ -287,16 +396,18 @@ export function installTauriMock() {
             created_at: now,
           };
           getGroups().unshift(newGroup);
+          acc.identities[newGroup.id] = newGroup.participants[0].id;
           return clone(newGroup);
         }
 
-        case "delete_group": {
+        case "leave_group": {
           if (!args || typeof args.groupId !== "string") {
             throw new Error("missing required argument `group_id`");
           }
           const idx = getGroups().findIndex((x) => x.id === args.groupId);
           if (idx !== -1) getGroups().splice(idx, 1);
-          return true;
+          if (account) delete account.identities[args.groupId];
+          return null;
         }
 
         case "add_participant": {

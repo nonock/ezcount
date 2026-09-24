@@ -1,3 +1,4 @@
+mod account;
 mod crypto;
 mod doc;
 mod engine;
@@ -11,7 +12,9 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use tauri::{Manager, State};
 
-use crate::models::{ExpenseSplit, Group, ParticipantBalance, SettlementTransfer, SyncInfo};
+use crate::models::{
+    AccountInfo, ExpenseSplit, Group, ParticipantBalance, SettlementTransfer, SyncInfo,
+};
 use crate::storage::Store;
 
 pub struct AppState {
@@ -56,6 +59,23 @@ impl AppState {
         Ok(group)
     }
 
+    fn account_info(&self) -> Result<Option<AccountInfo>, String> {
+        let store = self.store();
+        let Some(session) = store.session() else {
+            return Ok(None);
+        };
+        Ok(Some(AccountInfo {
+            username: session.username.clone(),
+            server_url: session.server_url.clone(),
+            identities: account::identities(store.account_doc()?)?,
+        }))
+    }
+
+    fn require_account_info(&self) -> Result<AccountInfo, String> {
+        self.account_info()?
+            .ok_or_else(|| "You are not logged in".to_string())
+    }
+
     fn sync_info(&self, group_id: &str) -> Result<SyncInfo, String> {
         let store = self.store();
         store.doc(group_id)?;
@@ -85,21 +105,21 @@ fn get_group(state: State<AppState>, group_id: String) -> Result<Group, String> 
 
 #[tauri::command]
 #[specta::specta]
+/// The first participant is the user.
 fn create_group(
     state: State<AppState>,
     name: String,
     currency: String,
     participants: Vec<String>,
 ) -> Result<Group, String> {
-    let doc = doc::new_group_doc(&name, &currency, &participants)?;
-    state.store().insert(doc, None)
+    sync::create_group(&state, &name, &currency, &participants)
 }
 
-/// Removes the group from this device. Other members of a shared group keep it.
+/// Removes the group from the account, on all the user's devices. Other members keep it.
 #[tauri::command]
 #[specta::specta]
-fn delete_group(state: State<AppState>, group_id: String) -> Result<bool, String> {
-    state.store().delete(&group_id)
+async fn leave_group(state: State<'_, AppState>, group_id: String) -> Result<(), String> {
+    sync::leave_group(&state, &group_id).await
 }
 
 #[tauri::command]
@@ -109,7 +129,7 @@ fn add_participant(
     group_id: String,
     name: String,
 ) -> Result<Group, String> {
-    state.mutate(&group_id, |d| doc::add_participant(d, &name))
+    state.mutate(&group_id, |d| doc::add_participant(d, &name).map(|_| ()))
 }
 
 #[tauri::command]
@@ -221,18 +241,6 @@ fn get_sync_info(state: State<AppState>, group_id: String) -> Result<SyncInfo, S
     state.sync_info(&group_id)
 }
 
-/// Starts sharing a group through a sync server and returns its invite code.
-#[tauri::command]
-#[specta::specta]
-async fn enable_sync(
-    state: State<'_, AppState>,
-    group_id: String,
-    server_url: String,
-) -> Result<SyncInfo, String> {
-    sync::enable_sync(&state, &group_id, &server_url).await?;
-    state.sync_info(&group_id)
-}
-
 /// Syncs one group immediately. Failures are reported in the returned `last_error`.
 #[tauri::command]
 #[specta::specta]
@@ -247,12 +255,69 @@ async fn join_group(state: State<'_, AppState>, invite_code: String) -> Result<G
     sync::join_group(&state, &invite_code).await
 }
 
+#[tauri::command]
+#[specta::specta]
+fn get_account(state: State<AppState>) -> Result<Option<AccountInfo>, String> {
+    state.account_info()
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn sign_up(
+    state: State<'_, AppState>,
+    server_url: String,
+    username: String,
+    password: String,
+) -> Result<AccountInfo, String> {
+    sync::sign_up(&state, &server_url, &username, &password).await?;
+    state.require_account_info()
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn log_in(
+    state: State<'_, AppState>,
+    server_url: String,
+    username: String,
+    password: String,
+) -> Result<AccountInfo, String> {
+    sync::log_in(&state, &server_url, &username, &password).await?;
+    state.require_account_info()
+}
+
+/// Removes the account and its groups from this device. Fails while changes are not uploaded,
+/// unless `force` is set.
+#[tauri::command]
+#[specta::specta]
+async fn log_out(state: State<'_, AppState>, force: bool) -> Result<(), String> {
+    sync::log_out(&state, force).await
+}
+
+/// Records which participant the user is in a group.
+#[tauri::command]
+#[specta::specta]
+fn set_identity(
+    state: State<AppState>,
+    group_id: String,
+    participant_id: String,
+) -> Result<AccountInfo, String> {
+    sync::set_identity(&state, &group_id, &participant_id)?;
+    state.require_account_info()
+}
+
+/// Adds the user to a group as a new participant.
+#[tauri::command]
+#[specta::specta]
+fn add_self(state: State<AppState>, group_id: String, name: String) -> Result<Group, String> {
+    sync::add_self(&state, &group_id, &name)
+}
+
 pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
         get_groups,
         get_group,
         create_group,
-        delete_group,
+        leave_group,
         add_participant,
         remove_participant,
         add_expense,
@@ -263,9 +328,14 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         get_settlements,
         get_storage_warnings,
         get_sync_info,
-        enable_sync,
         sync_now,
-        join_group
+        join_group,
+        get_account,
+        sign_up,
+        log_in,
+        log_out,
+        set_identity,
+        add_self
     ])
 }
 

@@ -1,5 +1,6 @@
 import { type Result, commands } from "../bindings";
 import type {
+  AccountInfo,
   ExpenseSplit,
   Group,
   ParticipantBalance,
@@ -25,8 +26,9 @@ export const api = {
     return unwrap(await commands.createGroup(name, currency, participants));
   },
 
-  async deleteGroup(groupId: string): Promise<void> {
-    unwrap(await commands.deleteGroup(groupId));
+  /** Removes the group from the account, on all the user's devices. */
+  async leaveGroup(groupId: string): Promise<void> {
+    unwrap(await commands.leaveGroup(groupId));
   },
 
   async addParticipant(groupId: string, name: string): Promise<Group> {
@@ -96,16 +98,37 @@ export const api = {
     return unwrap(await commands.getSyncInfo(groupId));
   },
 
-  async enableSync(groupId: string, serverUrl: string): Promise<SyncInfo> {
-    return unwrap(await commands.enableSync(groupId, serverUrl));
-  },
-
   async syncNow(groupId: string): Promise<SyncInfo> {
     return unwrap(await commands.syncNow(groupId));
   },
 
   async joinGroup(inviteCode: string): Promise<Group> {
     return unwrap(await commands.joinGroup(inviteCode));
+  },
+
+  async getAccount(): Promise<AccountInfo | null> {
+    return unwrap(await commands.getAccount());
+  },
+
+  async signUp(serverUrl: string, username: string, password: string): Promise<AccountInfo> {
+    return unwrap(await commands.signUp(serverUrl, username, password));
+  },
+
+  async logIn(serverUrl: string, username: string, password: string): Promise<AccountInfo> {
+    return unwrap(await commands.logIn(serverUrl, username, password));
+  },
+
+  /** Fails while changes are not uploaded yet, unless `force` is set. */
+  async logOut(force = false): Promise<void> {
+    unwrap(await commands.logOut(force));
+  },
+
+  async setIdentity(groupId: string, participantId: string): Promise<AccountInfo> {
+    return unwrap(await commands.setIdentity(groupId, participantId));
+  },
+
+  async addSelf(groupId: string, name: string): Promise<Group> {
+    return unwrap(await commands.addSelf(groupId, name));
   },
 
   async getBalances(groupId: string): Promise<ParticipantBalance[]> {

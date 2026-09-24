@@ -16,6 +16,7 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AuthScreen } from "./components/auth/AuthScreen";
 import { Navbar } from "./components/common/Navbar";
 import { GroupDashboard } from "./components/dashboard/GroupDashboard";
 import { AddExpenseModal } from "./components/modals/AddExpenseModal";
@@ -25,12 +26,14 @@ import { ExpenseHistoryModal } from "./components/modals/ExpenseHistoryModal";
 import { JoinGroupModal } from "./components/modals/JoinGroupModal";
 import { RecordReimbursementModal } from "./components/modals/RecordReimbursementModal";
 import { ShareGroupModal } from "./components/modals/ShareGroupModal";
+import { WhoAreYouModal } from "./components/modals/WhoAreYouModal";
 import { BalancesTab } from "./components/workspace/BalancesTab";
 import { ExpensesTab } from "./components/workspace/ExpensesTab";
 import { GroupHeader } from "./components/workspace/GroupHeader";
 import { SettleUpTab } from "./components/workspace/SettleUpTab";
 import { api } from "./services/api";
 import type {
+  AccountInfo,
   Expense,
   ExpenseSplit,
   Group,
@@ -47,6 +50,8 @@ interface SyncUpdatedEvent {
 
 export const App: React.FC = () => {
   const askConfirm = useConfirm();
+  // undefined while loading, null when logged out.
+  const [account, setAccount] = useState<AccountInfo | null | undefined>(undefined);
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [currentGroup, setCurrentGroup] = useState<Group | null>(null);
@@ -54,7 +59,6 @@ export const App: React.FC = () => {
   const [balances, setBalances] = useState<ParticipantBalance[]>([]);
   const [settlements, setSettlements] = useState<SettlementTransfer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Modal open states
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
@@ -65,6 +69,9 @@ export const App: React.FC = () => {
   const [isReimburseOpen, setIsReimburseOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isJoinOpen, setIsJoinOpen] = useState(false);
+  const [isWhoOpen, setIsWhoOpen] = useState(false);
+  // Groups where the user closed the "Who are you?" prompt without answering, this session.
+  const [identitySkipped, setIdentitySkipped] = useState<Set<string>>(() => new Set());
   const [syncInfo, setSyncInfo] = useState<SyncInfo | null>(null);
   const [storageWarnings, setStorageWarnings] = useState<string[]>([]);
   // Read by the sync event listener, which is registered once.
@@ -106,13 +113,29 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  const refreshAccount = useCallback(async () => {
+    try {
+      setAccount(await api.getAccount());
+    } catch (err) {
+      console.error("Failed to load the account:", err);
+      setAccount(null);
+    }
+  }, []);
+
   useEffect(() => {
-    refreshGroups();
+    refreshAccount();
     api
       .getStorageWarnings()
       .then(setStorageWarnings)
       .catch((err) => console.error("Failed to load storage warnings:", err));
-  }, [refreshGroups]);
+  }, [refreshAccount]);
+
+  const loggedIn = Boolean(account);
+  useEffect(() => {
+    if (loggedIn) refreshGroups();
+  }, [loggedIn, refreshGroups]);
+
+  const currentUserId = (currentGroup && account?.identities[currentGroup.id]) || null;
 
   useEffect(() => {
     selectedGroupRef.current = selectedGroupId;
@@ -122,7 +145,6 @@ export const App: React.FC = () => {
       setCurrentGroup(null);
       setBalances([]);
       setSettlements([]);
-      setCurrentUserId(null);
       setSyncInfo(null);
     }
   }, [selectedGroupId, refreshActiveGroup]);
@@ -154,6 +176,31 @@ export const App: React.FC = () => {
     };
   }, [refreshGroups, refreshActiveGroup]);
 
+  // Another device of this account joined or left a group, or changed who the user is.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    listen("account-updated", async () => {
+      await refreshAccount();
+      const list = await api.getGroups();
+      setGroups(list);
+      const selected = selectedGroupRef.current;
+      if (selected && !list.some((g) => g.id === selected)) {
+        setSelectedGroupId(null);
+        toast.info("This group was removed from your account on another device");
+      }
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch((err) => console.error("Could not subscribe to account updates:", err));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [refreshAccount]);
+
   const isShared = Boolean(syncInfo?.enabled);
 
   const handleSyncNow = useCallback(async () => {
@@ -176,29 +223,68 @@ export const App: React.FC = () => {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [isShared, handleSyncNow]);
 
+  // Ask once per group who the user is; the answer is kept in their account.
+  const needsIdentity = Boolean(
+    currentGroup && account && !currentUserId && !identitySkipped.has(currentGroup.id)
+  );
   useEffect(() => {
-    const active = currentGroup?.participants.filter((p) => !p.removed) ?? [];
-    if (!currentGroup || active.length === 0) {
-      setCurrentUserId(null);
-      return;
-    }
-
-    const saved = localStorage.getItem(`ezcount_user_${currentGroup.id}`);
-    if (saved && active.some((p) => p.id === saved)) {
-      setCurrentUserId(saved);
-    } else {
-      const defaultUser = active[0].id;
-      setCurrentUserId(defaultUser);
-      localStorage.setItem(`ezcount_user_${currentGroup.id}`, defaultUser);
-    }
-  }, [currentGroup]);
+    if (needsIdentity) setIsWhoOpen(true);
+  }, [needsIdentity]);
 
   // Actions
-  const handleSelectCurrentUser = (userId: string) => {
-    setCurrentUserId(userId);
-    if (currentGroup) {
-      localStorage.setItem(`ezcount_user_${currentGroup.id}`, userId);
+  const handleCloseWho = () => {
+    setIsWhoOpen(false);
+    if (currentGroup && !currentUserId) {
+      const groupId = currentGroup.id;
+      setIdentitySkipped((skipped) => new Set(skipped).add(groupId));
     }
+  };
+
+  const handleChooseIdentity = async (participantId: string) => {
+    if (!currentGroup) return;
+    setAccount(await api.setIdentity(currentGroup.id, participantId));
+  };
+
+  const handleAddSelf = async (name: string) => {
+    if (!currentGroup) return;
+    const updated = await api.addSelf(currentGroup.id, name);
+    setCurrentGroup(updated);
+    await refreshAccount();
+    await refreshActiveGroup(updated.id);
+    await refreshGroups();
+  };
+
+  const handleLogOut = async () => {
+    if (!account) return;
+    const confirmed = await askConfirm({
+      title: `Log out of ${account.username}?`,
+      description:
+        "Your groups are removed from this device. They stay in your account: log in again to get them back.",
+      confirmLabel: "Log Out",
+    });
+    if (!confirmed) return;
+    try {
+      await api.logOut(false);
+    } catch (err) {
+      const force = await askConfirm({
+        title: "Log out anyway?",
+        description: errorMessage(err),
+        confirmLabel: "Log Out Anyway",
+        destructive: true,
+      });
+      if (!force) return;
+      try {
+        await api.logOut(true);
+      } catch (forceErr) {
+        toast.error("Could not log out", { description: errorMessage(forceErr) });
+        return;
+      }
+    }
+    setSelectedGroupId(null);
+    setCurrentGroup(null);
+    setGroups([]);
+    setIdentitySkipped(new Set());
+    setAccount(null);
   };
 
   const handleSelectGroup = (groupId: string) => {
@@ -215,33 +301,27 @@ export const App: React.FC = () => {
   // Errors propagate to the dialog, which shows them inline.
   const handleCreateGroup = async (name: string, currency: string, participants: string[]) => {
     const newGroup = await api.createGroup(name, currency, participants);
+    // The backend recorded the creator as the first participant.
+    await refreshAccount();
     await refreshGroups();
     setSelectedGroupId(newGroup.id);
   };
 
-  const handleDeleteGroup = async () => {
+  const handleLeaveGroup = async () => {
     if (!currentGroup) return;
-    const confirmed = await askConfirm(
-      isShared
-        ? {
-            title: `Remove "${currentGroup.name}" from this device?`,
-            description: "Other members keep the group, and you can rejoin with the invite code.",
-            confirmLabel: "Remove",
-            destructive: true,
-          }
-        : {
-            title: `Delete "${currentGroup.name}"?`,
-            description: "All its expenses and balances are deleted from this device.",
-            confirmLabel: "Delete Group",
-            destructive: true,
-          }
-    );
+    const confirmed = await askConfirm({
+      title: `Leave "${currentGroup.name}"?`,
+      description:
+        "It's removed from your account on all your devices. Other members keep the group, and you can rejoin with an invite code.",
+      confirmLabel: "Leave Group",
+      destructive: true,
+    });
     if (!confirmed) return;
     try {
-      await api.deleteGroup(currentGroup.id);
+      await api.leaveGroup(currentGroup.id);
       handleNavigateHome();
     } catch (err) {
-      toast.error("Could not delete the group", { description: errorMessage(err) });
+      toast.error("Could not leave the group", { description: errorMessage(err) });
     }
   };
 
@@ -264,11 +344,6 @@ export const App: React.FC = () => {
     } catch (err) {
       toast.error("Could not remove the member", { description: errorMessage(err) });
     }
-  };
-
-  const handleEnableSync = async (serverUrl: string) => {
-    if (!currentGroup) return;
-    setSyncInfo(await api.enableSync(currentGroup.id, serverUrl));
   };
 
   const handleJoinGroup = async (inviteCode: string) => {
@@ -389,12 +464,33 @@ export const App: React.FC = () => {
     setIsReimburseOpen(true);
   };
 
+  if (account === undefined) {
+    return (
+      <div className="flex min-h-screen items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Spinner /> Loading…
+      </div>
+    );
+  }
+
+  if (account === null) {
+    return (
+      <AuthScreen
+        onAuthenticated={(acc) => {
+          setLoading(true);
+          setAccount(acc);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar
         currentGroup={currentGroup}
         onNavigateHome={handleNavigateHome}
         onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
+        username={account.username}
+        onLogOut={handleLogOut}
       />
 
       <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
@@ -440,11 +536,11 @@ export const App: React.FC = () => {
               group={currentGroup}
               balances={balances}
               currentUserId={currentUserId}
-              onSelectCurrentUser={handleSelectCurrentUser}
+              onChangeIdentity={() => setIsWhoOpen(true)}
               onOpenAddMember={() => setIsAddMemberOpen(true)}
               onRemoveMember={handleRemoveMember}
               onOpenShare={() => setIsShareOpen(true)}
-              onDeleteGroup={handleDeleteGroup}
+              onLeaveGroup={handleLeaveGroup}
               syncInfo={syncInfo}
             />
 
@@ -511,6 +607,7 @@ export const App: React.FC = () => {
         isOpen={isCreateGroupOpen}
         onClose={() => setIsCreateGroupOpen(false)}
         onCreateGroup={handleCreateGroup}
+        ownName={account.username}
       />
 
       <JoinGroupModal
@@ -526,8 +623,17 @@ export const App: React.FC = () => {
             onClose={() => setIsShareOpen(false)}
             group={currentGroup}
             syncInfo={syncInfo}
-            onEnableSync={handleEnableSync}
             onSyncNow={handleSyncNow}
+          />
+
+          <WhoAreYouModal
+            isOpen={isWhoOpen}
+            onClose={handleCloseWho}
+            group={currentGroup}
+            currentUserId={currentUserId}
+            defaultName={account.username}
+            onChoose={handleChooseIdentity}
+            onAddSelf={handleAddSelf}
           />
 
           <AddMemberModal

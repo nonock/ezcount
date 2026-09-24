@@ -18,6 +18,9 @@ async getGroup(groupId: string) : Promise<Result<Group, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * The first participant is the user.
+ */
 async createGroup(name: string, currency: string, participants: string[]) : Promise<Result<Group, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("create_group", { name, currency, participants }) };
@@ -27,11 +30,11 @@ async createGroup(name: string, currency: string, participants: string[]) : Prom
 }
 },
 /**
- * Removes the group from this device. Other members of a shared group keep it.
+ * Removes the group from the account, on all the user's devices. Other members keep it.
  */
-async deleteGroup(groupId: string) : Promise<Result<boolean, string>> {
+async leaveGroup(groupId: string) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("delete_group", { groupId }) };
+    return { status: "ok", data: await TAURI_INVOKE("leave_group", { groupId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -113,17 +116,6 @@ async getSyncInfo(groupId: string) : Promise<Result<SyncInfo, string>> {
 }
 },
 /**
- * Starts sharing a group through a sync server and returns its invite code.
- */
-async enableSync(groupId: string, serverUrl: string) : Promise<Result<SyncInfo, string>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("enable_sync", { groupId, serverUrl }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Syncs one group immediately. Failures are reported in the returned `last_error`.
  */
 async syncNow(groupId: string) : Promise<Result<SyncInfo, string>> {
@@ -141,6 +133,64 @@ async joinGroup(inviteCode: string) : Promise<Result<Group, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async getAccount() : Promise<Result<AccountInfo | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_account") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async signUp(serverUrl: string, username: string, password: string) : Promise<Result<AccountInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sign_up", { serverUrl, username, password }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async logIn(serverUrl: string, username: string, password: string) : Promise<Result<AccountInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("log_in", { serverUrl, username, password }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Removes the account and its groups from this device. Fails while changes are not uploaded,
+ * unless `force` is set.
+ */
+async logOut(force: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("log_out", { force }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Records which participant the user is in a group.
+ */
+async setIdentity(groupId: string, participantId: string) : Promise<Result<AccountInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_identity", { groupId, participantId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Adds the user to a group as a new participant.
+ */
+async addSelf(groupId: string, name: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_self", { groupId, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -154,6 +204,7 @@ async joinGroup(inviteCode: string) : Promise<Result<Group, string>> {
 
 /** user-defined types **/
 
+export type AccountInfo = { username: string; server_url: string; identities: { [key in string]: string } }
 export type Expense = { id: string; group_id: string; title: string; amount_cents: number; paid_by: string; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean }
 export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_splits: ExpenseSplit[]; summary: string }
 export type ExpenseSplit = { participant_id: string; shares: number }
