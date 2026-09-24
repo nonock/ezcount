@@ -26,6 +26,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
+      # Seconds, instead of failing halfway through the Android build.
+      - name: Tauri versions match
+        run: bun run check:tauri
       - run: bun install --frozen-lockfile
       - run: bunx biome ci .
       - run: bun run typecheck

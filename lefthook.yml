@@ -74,6 +74,14 @@ pre-commit:
                     - "src-tauri/src/**/*.rs"
                   run: bun run typecheck
 
+          - name: tauri-versions
+            # Rust crates and npm packages must share major.minor, or Tauri builds fail in CI.
+            glob:
+              - "src-tauri/Cargo.{toml,lock}"
+              - "package.json"
+              - "bun.lock"
+            run: bun run check:tauri
+
     - name: whitespace
       # Trailing whitespace and leftover conflict markers, after the formatters had their say.
       run: git diff --check --cached

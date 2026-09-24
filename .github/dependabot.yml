@@ -1,5 +1,9 @@
 # Weekly dependency updates, grouped into one PR per ecosystem for minor/patch bumps.
 # Majors come as separate PRs. The 7-day cooldown matches `minimumReleaseAge` in bunfig.toml.
+#
+# Tauri: the Rust crates and the npm packages must stay on the same major.minor, and the
+# crates must move together, so each side gets its own group and only patch updates here.
+# Minor upgrades are done by hand on both sides at once (README, "Upgrading Tauri").
 version: 2
 
 updates:
@@ -10,8 +14,13 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      tauri:
+        patterns: ["@tauri-apps/*"]
       frontend:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "@tauri-apps/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: cargo
     directories: [/src-tauri, /sync-server]
@@ -20,9 +29,13 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      tauri:
+        patterns: ["tauri", "tauri-*"]
       rust:
         update-types: [minor, patch]
     ignore:
+      - dependency-name: "tauri*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       # Pinned together: tauri-specta only works with this exact specta release candidate.
       - dependency-name: specta
       - dependency-name: specta-typescript

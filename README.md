@@ -45,6 +45,18 @@ Set the repository variable `EZCOUNT_SERVER` (Settings → Secrets and variables
 
 To try the phone on your home network without deploying anything, run `bun run relay` on your computer, allow it through the firewall, and use `http://<computer's LAN IP>:8787` as the server on both devices. `localhost` on the phone means the phone itself.
 
+### Upgrading Tauri
+
+Tauri's Rust crates and npm packages must be on the same major.minor version, or the Tauri CLI refuses to build in CI. So they are pinned to one minor (`tauri = "2.11"` in `src-tauri/Cargo.toml`, `~2.11` in `package.json`), Dependabot only proposes patch updates for them, and `bun run check:tauri` (run by CI and the pre-commit hook) compares both lock files. To move to a new minor, say 2.12, change both sides in one commit:
+
+```sh
+bun add @tauri-apps/api@~2.12.0 @tauri-apps/plugin-opener@~2.x.0
+bun add -d @tauri-apps/cli@~2.12.0
+# src-tauri/Cargo.toml: tauri = "2.12" (both entries), plus matching tauri-build / tauri-plugin-opener
+cargo update --manifest-path src-tauri/Cargo.toml -p tauri -p tauri-build -p tauri-plugin-opener
+bun run check:tauri
+```
+
 ### Android toolchain
 
 Building Android locally needs, besides Rust and Bun:
