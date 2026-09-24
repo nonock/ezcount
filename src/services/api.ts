@@ -1,5 +1,11 @@
 import { type Result, commands } from "../bindings";
-import type { ExpenseSplit, Group, ParticipantBalance, SettlementTransfer } from "../types";
+import type {
+  ExpenseSplit,
+  Group,
+  ParticipantBalance,
+  SettlementTransfer,
+  SyncInfo,
+} from "../types";
 
 function unwrap<T>(result: Result<T, string>): T {
   if (result.status === "ok") return result.data;
@@ -76,6 +82,30 @@ export const api = {
     return unwrap(
       await commands.recordReimbursement(groupId, fromId, toId, amountCents, notes || null)
     );
+  },
+
+  async removeParticipant(groupId: string, participantId: string): Promise<Group> {
+    return unwrap(await commands.removeParticipant(groupId, participantId));
+  },
+
+  async getStorageWarnings(): Promise<string[]> {
+    return commands.getStorageWarnings();
+  },
+
+  async getSyncInfo(groupId: string): Promise<SyncInfo> {
+    return unwrap(await commands.getSyncInfo(groupId));
+  },
+
+  async enableSync(groupId: string, serverUrl: string): Promise<SyncInfo> {
+    return unwrap(await commands.enableSync(groupId, serverUrl));
+  },
+
+  async syncNow(groupId: string): Promise<SyncInfo> {
+    return unwrap(await commands.syncNow(groupId));
+  },
+
+  async joinGroup(inviteCode: string): Promise<Group> {
+    return unwrap(await commands.joinGroup(inviteCode));
   },
 
   async getBalances(groupId: string): Promise<ParticipantBalance[]> {

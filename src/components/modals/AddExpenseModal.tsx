@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Expense, ExpenseSplit, Group } from "../../types";
 import { formatMoney } from "../../utils/formatters";
 import { Modal } from "../common/Modal";
@@ -47,12 +47,30 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [amountStr, setAmountStr] = useState("");
   const [paidBy, setPaidBy] = useState("");
   const [expenseDate, setExpenseDate] = useState<string>(formatDateInput());
+
+  // Removed members stay selectable on expenses they are already part of.
+  const participants = useMemo(() => {
+    const involved = new Set(
+      editingExpense
+        ? [editingExpense.paid_by, ...editingExpense.splits.map((s) => s.participant_id)]
+        : []
+    );
+    return group.participants.filter((p) => !p.removed || involved.has(p.id));
+  }, [group.participants, editingExpense]);
   const [splitsState, setSplitsState] = useState<Record<string, SplitItemState>>({});
   const [submitting, setSubmitting] = useState(false);
 
-  // Initialize or reset form state when modal opens or editingExpense changes
+  // Initialize form state once per opening (or when switching to another expense), so a
+  // background sync refreshing the group doesn't wipe what the user is typing.
+  const initializedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      initializedFor.current = null;
+      return;
+    }
+    const key = editingExpense?.id ?? "new";
+    if (initializedFor.current === key) return;
+    initializedFor.current = key;
 
     if (editingExpense) {
       setTitle(editingExpense.title);
@@ -61,7 +79,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setExpenseDate(formatDateInput(editingExpense.created_at));
 
       const initialSplits: Record<string, SplitItemState> = {};
-      for (const p of group.participants) {
+      for (const p of participants) {
         const match = editingExpense.splits.find((s) => s.participant_id === p.id);
         initialSplits[p.id] = {
           included: !!match,
@@ -74,17 +92,17 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       setAmountStr("");
       setExpenseDate(formatDateInput());
       const defaultPayer =
-        currentUserId && group.participants.some((p) => p.id === currentUserId)
+        currentUserId && participants.some((p) => p.id === currentUserId)
           ? currentUserId
-          : group.participants[0]?.id || "";
+          : participants[0]?.id || "";
       setPaidBy(defaultPayer);
       const initialSplits: Record<string, SplitItemState> = {};
-      for (const p of group.participants) {
+      for (const p of participants) {
         initialSplits[p.id] = { included: true, shares: 1 };
       }
       setSplitsState(initialSplits);
     }
-  }, [isOpen, editingExpense, group, currentUserId]);
+  }, [isOpen, editingExpense, participants, currentUserId]);
 
   const handleToggleParticipant = (id: string) => {
     setSplitsState((prev) => ({
@@ -107,17 +125,17 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     }));
   };
 
-  const includedParticipants = group.participants.filter((p) => splitsState[p.id]?.included);
+  const includedParticipants = participants.filter((p) => splitsState[p.id]?.included);
   const totalShares = includedParticipants.reduce(
     (sum, p) => sum + (splitsState[p.id]?.shares || 1),
     0
   );
 
   const handleToggleAll = () => {
-    const allIncluded = includedParticipants.length === group.participants.length;
+    const allIncluded = includedParticipants.length === participants.length;
     setSplitsState((prev) => {
       const next: Record<string, SplitItemState> = {};
-      for (const p of group.participants) {
+      for (const p of participants) {
         next[p.id] = {
           included: !allIncluded,
           shares: prev[p.id]?.shares || 1,
@@ -271,7 +289,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
               onChange={(e) => setPaidBy(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 transition cursor-pointer"
             >
-              {group.participants.map((p) => (
+              {participants.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                   {p.id === currentUserId ? " (You)" : ""}
@@ -285,7 +303,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="block text-xs font-semibold text-slate-300">
-              Split between ({includedParticipants.length}/{group.participants.length} selected,{" "}
+              Split between ({includedParticipants.length}/{participants.length} selected,{" "}
               {totalShares} parts)
             </span>
             <button
@@ -293,14 +311,12 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
               onClick={handleToggleAll}
               className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold transition cursor-pointer"
             >
-              {includedParticipants.length === group.participants.length
-                ? "Deselect All"
-                : "Select All"}
+              {includedParticipants.length === participants.length ? "Deselect All" : "Select All"}
             </button>
           </div>
 
           <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-            {group.participants.map((p) => {
+            {participants.map((p) => {
               const state = splitsState[p.id] || { included: false, shares: 1 };
               const isIncluded = state.included;
               const userShares = state.shares;

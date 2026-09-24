@@ -1,12 +1,15 @@
+import { listen } from "@tauri-apps/api/event";
 import type React from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navbar } from "./components/common/Navbar";
 import { GroupDashboard } from "./components/dashboard/GroupDashboard";
 import { AddExpenseModal } from "./components/modals/AddExpenseModal";
 import { AddMemberModal } from "./components/modals/AddMemberModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
 import { ExpenseHistoryModal } from "./components/modals/ExpenseHistoryModal";
+import { JoinGroupModal } from "./components/modals/JoinGroupModal";
 import { RecordReimbursementModal } from "./components/modals/RecordReimbursementModal";
+import { ShareGroupModal } from "./components/modals/ShareGroupModal";
 import { BalancesTab } from "./components/workspace/BalancesTab";
 import { ExpensesTab } from "./components/workspace/ExpensesTab";
 import { GroupHeader } from "./components/workspace/GroupHeader";
@@ -18,8 +21,14 @@ import type {
   Group,
   ParticipantBalance,
   SettlementTransfer,
+  SyncInfo,
   TabType,
 } from "./types";
+
+interface SyncUpdatedEvent {
+  group_id: string;
+  changed: boolean;
+}
 
 export const App: React.FC = () => {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -38,6 +47,12 @@ export const App: React.FC = () => {
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [historyExpense, setHistoryExpense] = useState<Expense | null>(null);
   const [isReimburseOpen, setIsReimburseOpen] = useState(false);
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isJoinOpen, setIsJoinOpen] = useState(false);
+  const [syncInfo, setSyncInfo] = useState<SyncInfo | null>(null);
+  const [storageWarnings, setStorageWarnings] = useState<string[]>([]);
+  // Read by the sync event listener, which is registered once.
+  const selectedGroupRef = useRef<string | null>(null);
   const [reimbursePrefill, setReimbursePrefill] = useState<{
     fromId?: string;
     toId?: string;
@@ -59,9 +74,14 @@ export const App: React.FC = () => {
     try {
       const g = await api.getGroup(groupId);
       setCurrentGroup(g);
-      const [bal, set] = await Promise.all([api.getBalances(groupId), api.getSettlements(groupId)]);
+      const [bal, set, sync] = await Promise.all([
+        api.getBalances(groupId),
+        api.getSettlements(groupId),
+        api.getSyncInfo(groupId),
+      ]);
       setBalances(bal);
       setSettlements(set);
+      setSyncInfo(sync);
     } catch (err) {
       console.error("Failed to load active group:", err);
       alert(`Failed to open group: ${err instanceof Error ? err.message : String(err)}`);
@@ -72,9 +92,14 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     refreshGroups();
+    api
+      .getStorageWarnings()
+      .then(setStorageWarnings)
+      .catch((err) => console.error("Failed to load storage warnings:", err));
   }, [refreshGroups]);
 
   useEffect(() => {
+    selectedGroupRef.current = selectedGroupId;
     if (selectedGroupId) {
       refreshActiveGroup(selectedGroupId);
     } else {
@@ -82,20 +107,71 @@ export const App: React.FC = () => {
       setBalances([]);
       setSettlements([]);
       setCurrentUserId(null);
+      setSyncInfo(null);
     }
   }, [selectedGroupId, refreshActiveGroup]);
 
+  // Background sync reports every attempt; reload when another device changed something.
   useEffect(() => {
-    if (!currentGroup || currentGroup.participants.length === 0) {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    listen<SyncUpdatedEvent>("sync-updated", ({ payload }) => {
+      if (payload.changed) refreshGroups();
+      if (payload.group_id !== selectedGroupRef.current) return;
+      if (payload.changed) {
+        refreshActiveGroup(payload.group_id);
+      } else {
+        api
+          .getSyncInfo(payload.group_id)
+          .then(setSyncInfo)
+          .catch(() => {});
+      }
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch((err) => console.error("Could not subscribe to sync updates:", err));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [refreshGroups, refreshActiveGroup]);
+
+  const isShared = Boolean(syncInfo?.enabled);
+
+  const handleSyncNow = useCallback(async () => {
+    const groupId = selectedGroupRef.current;
+    if (!groupId) return;
+    setSyncInfo(await api.syncNow(groupId));
+    await refreshActiveGroup(groupId);
+    await refreshGroups();
+  }, [refreshActiveGroup, refreshGroups]);
+
+  // Catch up as soon as the app comes back to the foreground (e.g. reopening it on a phone).
+  useEffect(() => {
+    if (!isShared) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        handleSyncNow().catch((err) => console.error("Sync failed:", err));
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [isShared, handleSyncNow]);
+
+  useEffect(() => {
+    const active = currentGroup?.participants.filter((p) => !p.removed) ?? [];
+    if (!currentGroup || active.length === 0) {
       setCurrentUserId(null);
       return;
     }
 
     const saved = localStorage.getItem(`ezcount_user_${currentGroup.id}`);
-    if (saved && currentGroup.participants.some((p) => p.id === saved)) {
+    if (saved && active.some((p) => p.id === saved)) {
       setCurrentUserId(saved);
     } else {
-      const defaultUser = currentGroup.participants[0].id;
+      const defaultUser = active[0].id;
       setCurrentUserId(defaultUser);
       localStorage.setItem(`ezcount_user_${currentGroup.id}`, defaultUser);
     }
@@ -132,10 +208,40 @@ export const App: React.FC = () => {
 
   const handleDeleteGroup = async () => {
     if (!currentGroup) return;
-    if (confirm(`Are you sure you want to delete the group "${currentGroup.name}"?`)) {
+    const message = isShared
+      ? `Remove "${currentGroup.name}" from this device? Other members keep the group, and you can rejoin with the invite code.`
+      : `Are you sure you want to delete the group "${currentGroup.name}"?`;
+    if (confirm(message)) {
       await api.deleteGroup(currentGroup.id);
       handleNavigateHome();
     }
+  };
+
+  const handleRemoveMember = async (participantId: string) => {
+    if (!currentGroup) return;
+    const participant = currentGroup.participants.find((p) => p.id === participantId);
+    if (!participant) return;
+    const message = `Remove ${participant.name} from the group? Their past expenses and balance are kept, but they can't be added to new expenses.`;
+    if (!confirm(message)) return;
+    try {
+      await api.removeParticipant(currentGroup.id, participantId);
+      await refreshActiveGroup(currentGroup.id);
+      await refreshGroups();
+    } catch (err) {
+      alert(`Failed to remove member: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleEnableSync = async (serverUrl: string) => {
+    if (!currentGroup) return;
+    setSyncInfo(await api.enableSync(currentGroup.id, serverUrl));
+  };
+
+  const handleJoinGroup = async (inviteCode: string) => {
+    const group = await api.joinGroup(inviteCode);
+    await refreshGroups();
+    setSelectedGroupId(group.id);
+    setActiveTab("expenses");
   };
 
   const handleAddMember = async (name: string) => {
@@ -247,6 +353,30 @@ export const App: React.FC = () => {
       />
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6">
+        {storageWarnings.length > 0 && (
+          <div
+            role="alert"
+            className="mb-6 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200 space-y-2"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <strong className="font-semibold">Some saved data could not be loaded</strong>
+              <button
+                type="button"
+                onClick={() => setStorageWarnings([])}
+                className="text-amber-300 hover:text-amber-100 font-semibold cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+            <ul className="list-disc pl-4 space-y-1">
+              {storageWarnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+            <p className="text-amber-300/80">Nothing was deleted. The data is still on disk.</p>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center py-20 text-slate-500 text-sm">
             Loading groups...
@@ -256,6 +386,7 @@ export const App: React.FC = () => {
             groups={groups}
             onSelectGroup={handleSelectGroup}
             onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
+            onOpenJoinGroup={() => setIsJoinOpen(true)}
           />
         ) : (
           <div className="space-y-6 animate-in fade-in duration-200">
@@ -274,7 +405,10 @@ export const App: React.FC = () => {
               currentUserId={currentUserId}
               onSelectCurrentUser={handleSelectCurrentUser}
               onOpenAddMember={() => setIsAddMemberOpen(true)}
+              onRemoveMember={handleRemoveMember}
+              onOpenShare={() => setIsShareOpen(true)}
               onDeleteGroup={handleDeleteGroup}
+              syncInfo={syncInfo}
             />
 
             {/* Tab Navigation */}
@@ -409,8 +543,22 @@ export const App: React.FC = () => {
         onCreateGroup={handleCreateGroup}
       />
 
+      <JoinGroupModal
+        isOpen={isJoinOpen}
+        onClose={() => setIsJoinOpen(false)}
+        onJoinGroup={handleJoinGroup}
+      />
+
       {currentGroup && (
         <>
+          <ShareGroupModal
+            isOpen={isShareOpen}
+            onClose={() => setIsShareOpen(false)}
+            group={currentGroup}
+            syncInfo={syncInfo}
+            onEnableSync={handleEnableSync}
+            onSyncNow={handleSyncNow}
+          />
           <AddMemberModal
             isOpen={isAddMemberOpen}
             onClose={() => setIsAddMemberOpen(false)}

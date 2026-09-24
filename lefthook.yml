@@ -18,6 +18,15 @@ pre-commit:
       glob: "src-tauri/**/*.rs"
       run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 
+    # 3b. Sync relay: format check and clippy
+    sync-server-fmt:
+      glob: "sync-server/**/*.rs"
+      run: cargo fmt --manifest-path sync-server/Cargo.toml --check
+
+    sync-server-clippy:
+      glob: "sync-server/**/*.rs"
+      run: cargo clippy --manifest-path sync-server/Cargo.toml -- -D warnings
+
     # 4. Biome: Lint and format frontend code, JSON configs, and CSS
     biome-check:
       glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc,css}"

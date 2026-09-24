@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Group } from "../../types";
 import { Modal } from "../common/Modal";
 
@@ -33,16 +33,25 @@ export const RecordReimbursementModal: React.FC<RecordReimbursementModalProps> =
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Initialize once per opening so a background sync refreshing the group keeps the form intact.
+  const initialized = useRef(false);
   useEffect(() => {
-    if (isOpen && group.participants.length > 0) {
-      const p1 = group.participants[0].id;
-      const p2 = group.participants.length > 1 ? group.participants[1].id : p1;
-
-      setFromId(initialFromId || p1);
-      setToId(initialToId || (initialFromId === p1 ? p2 : p1));
-      setAmountStr(initialAmount || "");
-      setNotes("");
+    if (!isOpen) {
+      initialized.current = false;
+      return;
     }
+    if (initialized.current || group.participants.length === 0) return;
+    initialized.current = true;
+
+    const active = group.participants.filter((p) => !p.removed);
+    const pool = active.length > 0 ? active : group.participants;
+    const p1 = pool[0].id;
+    const p2 = pool.length > 1 ? pool[1].id : p1;
+
+    setFromId(initialFromId || p1);
+    setToId(initialToId || (initialFromId === p1 ? p2 : p1));
+    setAmountStr(initialAmount || "");
+    setNotes("");
   }, [isOpen, group, initialFromId, initialToId, initialAmount]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -92,6 +101,7 @@ export const RecordReimbursementModal: React.FC<RecordReimbursementModalProps> =
               {group.participants.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
+                  {p.removed ? " (removed)" : ""}
                 </option>
               ))}
             </select>
@@ -114,6 +124,7 @@ export const RecordReimbursementModal: React.FC<RecordReimbursementModalProps> =
               {group.participants.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
+                  {p.removed ? " (removed)" : ""}
                 </option>
               ))}
             </select>

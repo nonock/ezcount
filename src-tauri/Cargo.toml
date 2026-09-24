@@ -28,9 +28,21 @@ chrono = { version = "0.4", features = ["serde"] }
 specta = { version = "=2.0.0-rc.20", features = ["derive", "chrono"] }
 specta-typescript = "=0.0.7"
 tauri-specta = { version = "=2.0.0-rc.20", features = ["typescript"] }
+loro = "1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+base64 = "0.23.1"
+getrandom = "0.3"
+tokio = { version = "1.53.1", features = ["time", "sync", "macros"] }
+url = "2"
+chacha20poly1305 = "0.11.0"
+hkdf = "0.13.0"
+sha2 = "0.11.0"
 
 [dev-dependencies]
+ezcount-sync-server = { path = "../sync-server" }
 tauri = { version = "2", features = ["test"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "macros"] }
 
 [lints.rust]
 linker_messages = "allow"

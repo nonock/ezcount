@@ -32,7 +32,7 @@ export interface MockGroup {
   id: string;
   name: string;
   currency: string;
-  participants: { id: string; name: string }[];
+  participants: { id: string; name: string; removed?: boolean }[];
   expenses: MockExpense[];
   created_at: string;
 }
@@ -80,16 +80,20 @@ export function installTauriMock() {
       }
     }
 
-    return group.participants.map((p) => {
-      const data = map.get(p.id) || { paid: 0, owed: 0 };
-      return {
-        participant_id: p.id,
-        participant_name: p.name,
-        paid_cents: data.paid,
-        owed_cents: data.owed,
-        net_cents: data.paid - data.owed,
-      };
-    });
+    // Mirrors engine.rs: removed participants only appear while they have something to settle.
+    return group.participants
+      .map((p) => {
+        const data = map.get(p.id) || { paid: 0, owed: 0 };
+        return {
+          participant_id: p.id,
+          participant_name: p.name,
+          paid_cents: data.paid,
+          owed_cents: data.owed,
+          net_cents: data.paid - data.owed,
+          removed: Boolean(p.removed),
+        };
+      })
+      .filter((b) => !b.removed || b.net_cents !== 0);
   }
 
   function computeSettlements(group: MockGroup) {
@@ -132,9 +136,125 @@ export function installTauriMock() {
     return JSON.parse(JSON.stringify(val));
   }
 
+  // Sync state per group, and groups "on the relay" that can be joined (seeded by tests).
+  const syncInfos = new Map<string, any>();
+  function syncInfo(groupId: string) {
+    return (
+      syncInfos.get(groupId) || {
+        group_id: groupId,
+        enabled: false,
+        server_url: null,
+        invite_code: null,
+        last_synced_at: null,
+        last_error: null,
+      }
+    );
+  }
+  function inviteFor(serverUrl: string, groupId: string) {
+    return `ezcount://join?server=${encodeURIComponent(serverUrl)}&group=${groupId}&key=mock-key&v=2`;
+  }
+
+  // Minimal event plugin: `listen` registers a callback that tests can fire with
+  // `window.__emitMockEvent(name, payload)`.
+  let nextCallbackId = 1;
+  const callbacks = new Map<number, (event: any) => void>();
+  const listeners = new Map<string, number[]>();
+  (window as any).__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+    unregisterListener: (event: string, id: number) => {
+      listeners.set(
+        event,
+        (listeners.get(event) || []).filter((x) => x !== id)
+      );
+    },
+  };
+  (window as any).__emitMockEvent = (event: string, payload: unknown) => {
+    for (const id of listeners.get(event) || []) {
+      callbacks.get(id)?.({ event, id, payload });
+    }
+  };
+
   (window as any).__TAURI_INTERNALS__ = {
+    transformCallback: (callback: (event: any) => void) => {
+      const id = nextCallbackId++;
+      callbacks.set(id, callback);
+      return id;
+    },
     invoke: async (cmd: string, args?: any) => {
       switch (cmd) {
+        case "plugin:event|listen": {
+          listeners.set(args.event, [...(listeners.get(args.event) || []), args.handler]);
+          return args.handler;
+        }
+
+        case "plugin:event|unlisten":
+          return null;
+
+        case "get_storage_warnings":
+          return clone((window as any).__STORAGE_WARNINGS__ || []);
+
+        case "get_sync_info": {
+          if (!getGroups().some((x) => x.id === args?.groupId)) throw new Error("Group not found");
+          return clone(syncInfo(args.groupId));
+        }
+
+        case "enable_sync": {
+          if (!/^https?:\/\//.test(args?.serverUrl || "")) {
+            throw new Error("The server URL must start with http:// or https://");
+          }
+          const info = {
+            group_id: args.groupId,
+            enabled: true,
+            server_url: args.serverUrl.replace(/\/+$/, ""),
+            invite_code: inviteFor(args.serverUrl.replace(/\/+$/, ""), args.groupId),
+            last_synced_at: new Date().toISOString(),
+            last_error: null,
+          };
+          syncInfos.set(args.groupId, info);
+          return clone(info);
+        }
+
+        case "sync_now": {
+          const info = { ...syncInfo(args.groupId), last_synced_at: new Date().toISOString() };
+          syncInfos.set(args.groupId, info);
+          return clone(info);
+        }
+
+        case "join_group": {
+          const code = String(args?.inviteCode || "");
+          if (!code.startsWith("ezcount://join?")) {
+            throw new Error("This is not a valid ezcount invite code");
+          }
+          const params = new URL(code.replace("ezcount://", "https://")).searchParams;
+          const groupId = params.get("group") || "";
+          if (getGroups().some((x) => x.id === groupId)) {
+            throw new Error("This group is already on this device");
+          }
+          const remote = ((window as any).__REMOTE_GROUPS__ || []).find(
+            (g: MockGroup) => g.id === groupId
+          );
+          if (!remote) throw new Error("The sync server does not know this group");
+          getGroups().push(clone(remote));
+          const server = params.get("server") || "";
+          syncInfos.set(groupId, {
+            group_id: groupId,
+            enabled: true,
+            server_url: server,
+            invite_code: inviteFor(server, groupId),
+            last_synced_at: new Date().toISOString(),
+            last_error: null,
+          });
+          return clone(remote);
+        }
+
+        case "remove_participant": {
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          const p = g.participants.find((x) => x.id === args?.participantId);
+          if (!p) throw new Error("Participant not found");
+          p.removed = true;
+          return clone(g);
+        }
+
         case "get_groups":
           return clone(getGroups());
 

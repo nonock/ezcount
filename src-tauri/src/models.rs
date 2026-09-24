@@ -6,6 +6,10 @@ use specta::Type;
 pub struct Participant {
     pub id: String,
     pub name: String,
+    // Soft-deleted: kept so existing expenses and balances still resolve,
+    // but no longer offered for new expenses.
+    #[serde(default)]
+    pub removed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -57,6 +61,8 @@ pub struct ParticipantBalance {
     pub paid_cents: i64,
     pub owed_cents: i64,
     pub net_cents: i64,
+    // True for removed participants and for IDs that match no participant.
+    pub removed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -66,4 +72,15 @@ pub struct SettlementTransfer {
     pub to_id: String,
     pub to_name: String,
     pub amount_cents: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct SyncInfo {
+    pub group_id: String,
+    pub enabled: bool,
+    pub server_url: Option<String>,
+    // Share this with other members so they can join the group.
+    pub invite_code: Option<String>,
+    pub last_synced_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
 }

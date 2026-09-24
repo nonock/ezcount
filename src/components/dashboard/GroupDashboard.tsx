@@ -6,12 +6,14 @@ interface GroupDashboardProps {
   groups: Group[];
   onSelectGroup: (groupId: string) => void;
   onOpenCreateGroup: () => void;
+  onOpenJoinGroup: () => void;
 }
 
 export const GroupDashboard: React.FC<GroupDashboardProps> = ({
   groups,
   onSelectGroup,
   onOpenCreateGroup,
+  onOpenJoinGroup,
 }) => {
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
@@ -42,13 +44,22 @@ export const GroupDashboard: React.FC<GroupDashboardProps> = ({
           </p>
         </div>
         {groups.length > 0 && (
-          <button
-            type="button"
-            onClick={onOpenCreateGroup}
-            className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition cursor-pointer"
-          >
-            + Create another
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={onOpenJoinGroup}
+              className="text-xs font-semibold text-slate-400 hover:text-slate-200 transition cursor-pointer"
+            >
+              Join with code
+            </button>
+            <button
+              type="button"
+              onClick={onOpenCreateGroup}
+              className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition cursor-pointer"
+            >
+              + Create another
+            </button>
+          </div>
         )}
       </div>
 
@@ -62,13 +73,22 @@ export const GroupDashboard: React.FC<GroupDashboardProps> = ({
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
             Create a group for your next trip, dinner, flatshare, or event to start splitting bills.
           </p>
-          <button
-            type="button"
-            onClick={onOpenCreateGroup}
-            className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20 transition cursor-pointer"
-          >
-            + Create Group
-          </button>
+          <div className="mt-2 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={onOpenCreateGroup}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20 transition cursor-pointer"
+            >
+              + Create Group
+            </button>
+            <button
+              type="button"
+              onClick={onOpenJoinGroup}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
+            >
+              Join with Code
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -109,7 +129,8 @@ export const GroupDashboard: React.FC<GroupDashboardProps> = ({
                       Members
                     </span>
                     <span className="text-xs font-medium text-slate-300">
-                      {group.participants.length} people • {group.expenses.length} records
+                      {group.participants.filter((p) => !p.removed).length} people •{" "}
+                      {group.expenses.length} records
                     </span>
                   </div>
                 </div>

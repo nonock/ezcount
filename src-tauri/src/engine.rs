@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::models::{Group, ParticipantBalance, SettlementTransfer};
 
@@ -49,20 +49,39 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
         }
     }
 
-    group
+    // Known participants first, then any ID no participant matches (possible after merging
+    // edits from several devices), so money never silently drops out of the totals.
+    let mut seen = HashSet::new();
+    let ids: Vec<&str> = group
         .participants
         .iter()
-        .map(|p| {
-            let paid = paid_map.get(&p.id).copied().unwrap_or(0);
-            let owed = owed_map.get(&p.id).copied().unwrap_or(0);
-            let net = paid - owed;
-            ParticipantBalance {
-                participant_id: p.id.clone(),
-                participant_name: p.name.clone(),
+        .map(|p| p.id.as_str())
+        .chain(group.expenses.iter().flat_map(|e| {
+            std::iter::once(e.paid_by.as_str())
+                .chain(e.splits.iter().map(|s| s.participant_id.as_str()))
+        }))
+        .filter(|id| seen.insert(*id))
+        .collect();
+
+    ids.into_iter()
+        .filter_map(|id| {
+            let participant = group.participants.iter().find(|p| p.id == id);
+            let paid = paid_map.get(id).copied().unwrap_or(0);
+            let owed = owed_map.get(id).copied().unwrap_or(0);
+            let removed = participant.is_none_or(|p| p.removed);
+            // Removed people only matter while they have something to settle.
+            if removed && paid == owed {
+                return None;
+            }
+            Some(ParticipantBalance {
+                participant_id: id.to_string(),
+                participant_name: participant
+                    .map_or_else(|| "Unknown participant".to_string(), |p| p.name.clone()),
                 paid_cents: paid,
                 owed_cents: owed,
-                net_cents: net,
-            }
+                net_cents: paid - owed,
+                removed,
+            })
         })
         .collect()
 }
@@ -70,10 +89,9 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
 /// Simplifies debts into the minimum number of direct transfers using a greedy settlement algorithm.
 pub fn calculate_settlements(group: &Group) -> Vec<SettlementTransfer> {
     let balances = calculate_balances(group);
-    let name_map: HashMap<String, String> = group
-        .participants
+    let name_map: HashMap<String, String> = balances
         .iter()
-        .map(|p| (p.id.clone(), p.name.clone()))
+        .map(|b| (b.participant_id.clone(), b.participant_name.clone()))
         .collect();
 
     // Debtors owe money (net < 0). Store as positive amount owed.
@@ -150,14 +168,17 @@ mod tests {
                 Participant {
                     id: "p1".to_string(),
                     name: "Alice".to_string(),
+                    removed: false,
                 },
                 Participant {
                     id: "p2".to_string(),
                     name: "Bob".to_string(),
+                    removed: false,
                 },
                 Participant {
                     id: "p3".to_string(),
                     name: "Charlie".to_string(),
+                    removed: false,
                 },
             ],
             expenses: vec![],
@@ -389,5 +410,72 @@ mod tests {
         assert_eq!(settlements[0].from_name, "Charlie");
         assert_eq!(settlements[0].to_name, "Alice");
         assert_eq!(settlements[0].amount_cents, 2000);
+    }
+
+    fn expense(id: &str, amount_cents: i64, paid_by: &str, split_ids: &[&str]) -> Expense {
+        Expense {
+            id: id.to_string(),
+            group_id: "group_1".to_string(),
+            title: id.to_string(),
+            amount_cents,
+            paid_by: paid_by.to_string(),
+            splits: split_ids
+                .iter()
+                .map(|p| ExpenseSplit {
+                    participant_id: p.to_string(),
+                    shares: 1,
+                })
+                .collect(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            history: vec![],
+            is_reimbursement: false,
+        }
+    }
+
+    #[test]
+    fn test_removed_participant_keeps_open_balance() {
+        let mut group = setup_test_group();
+        group
+            .expenses
+            .push(expense("e1", 3000, "p1", &["p1", "p2", "p3"]));
+        group.participants[1].removed = true; // Bob owes 10.00
+        group.participants[2].removed = true;
+        group.expenses.push(expense("e2", 1000, "p3", &["p1"])); // Charlie is now even
+
+        let balances = calculate_balances(&group);
+        let bob = balances.iter().find(|b| b.participant_id == "p2").unwrap();
+        assert!(bob.removed);
+        assert_eq!(bob.net_cents, -1000);
+        assert!(
+            !balances.iter().any(|b| b.participant_id == "p3"),
+            "removed and settled participants are hidden"
+        );
+        assert_eq!(balances.iter().map(|b| b.net_cents).sum::<i64>(), 0);
+        assert_eq!(calculate_settlements(&group)[0].from_name, "Bob");
+    }
+
+    #[test]
+    fn test_unknown_participant_ids_keep_zero_sum() {
+        let mut group = setup_test_group();
+        group
+            .expenses
+            .push(expense("e1", 900, "ghost", &["p1", "p2", "ghost"]));
+
+        let balances = calculate_balances(&group);
+        assert_eq!(balances.iter().map(|b| b.net_cents).sum::<i64>(), 0);
+        let ghost = balances
+            .iter()
+            .find(|b| b.participant_id == "ghost")
+            .unwrap();
+        assert_eq!(ghost.participant_name, "Unknown participant");
+        assert!(ghost.removed);
+        assert_eq!(ghost.net_cents, 600);
+
+        let settlements = calculate_settlements(&group);
+        assert!(settlements
+            .iter()
+            .all(|s| s.to_name == "Unknown participant"));
+        assert_eq!(settlements.iter().map(|s| s.amount_cents).sum::<i64>(), 600);
     }
 }

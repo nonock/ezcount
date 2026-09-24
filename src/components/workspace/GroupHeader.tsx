@@ -1,6 +1,6 @@
 import type React from "react";
 import { useMemo } from "react";
-import type { Group, ParticipantBalance } from "../../types";
+import type { Group, ParticipantBalance, SyncInfo } from "../../types";
 import { formatMoney } from "../../utils/formatters";
 
 interface GroupHeaderProps {
@@ -9,7 +9,10 @@ interface GroupHeaderProps {
   currentUserId: string | null;
   onSelectCurrentUser: (id: string) => void;
   onOpenAddMember: () => void;
+  onRemoveMember: (participantId: string) => void;
+  onOpenShare: () => void;
   onDeleteGroup: () => void;
+  syncInfo: SyncInfo | null;
 }
 
 export const GroupHeader: React.FC<GroupHeaderProps> = ({
@@ -18,8 +21,16 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
   currentUserId,
   onSelectCurrentUser,
   onOpenAddMember,
+  onRemoveMember,
+  onOpenShare,
   onDeleteGroup,
+  syncInfo,
 }) => {
+  const activeParticipants = useMemo(
+    () => group.participants.filter((p) => !p.removed),
+    [group.participants]
+  );
+
   const totalCents = useMemo(
     () => group.expenses.reduce((sum, e) => sum + e.amount_cents, 0),
     [group.expenses]
@@ -52,7 +63,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
-            <span>{group.participants.length} participants</span>
+            <span>{activeParticipants.length} participants</span>
             <span aria-hidden="true" className="text-slate-600">
               •
             </span>
@@ -66,6 +77,30 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenShare}
+            title={
+              syncInfo?.last_error
+                ? `Last sync failed: ${syncInfo.last_error}`
+                : syncInfo?.enabled
+                  ? "Synced with other members"
+                  : "Share this group"
+            }
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-slate-600 transition-colors duration-150 cursor-pointer touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
+            {syncInfo?.enabled && (
+              <span
+                aria-hidden="true"
+                className={`w-1.5 h-1.5 rounded-full ${
+                  syncInfo.last_error ? "bg-rose-400" : "bg-emerald-400"
+                }`}
+              />
+            )}
+            <span>
+              {syncInfo?.enabled ? (syncInfo.last_error ? "Sync issue" : "Shared") : "Share"}
+            </span>
+          </button>
           <button
             type="button"
             onClick={onOpenAddMember}
@@ -114,21 +149,39 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
 
       {/* Member avatars / pills */}
       <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-800/80">
-        {group.participants.map((p) => (
+        {activeParticipants.map((p) => (
           <span
             key={p.id}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800/70 border border-slate-700/60 text-xs font-medium text-slate-300"
+            className="inline-flex items-center gap-1.5 pl-2.5 pr-1 py-1 rounded-lg bg-slate-800/70 border border-slate-700/60 text-xs font-medium text-slate-300"
           >
             <span className="w-4 h-4 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-bold flex items-center justify-center">
               {p.name.charAt(0).toUpperCase()}
             </span>
             {p.name}
+            <button
+              type="button"
+              onClick={() => onRemoveMember(p.id)}
+              aria-label={`Remove ${p.name}`}
+              title={`Remove ${p.name}`}
+              className="w-5 h-5 rounded-md flex items-center justify-center text-slate-500 hover:text-rose-300 hover:bg-rose-500/10 transition-colors duration-150 cursor-pointer touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+            >
+              <svg
+                className="w-3 h-3"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                aria-hidden="true"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </span>
         ))}
       </div>
 
       {/* Active User Summary Bar */}
-      {group.participants.length > 0 && (
+      {activeParticipants.length > 0 && (
         <div className="pt-3 border-t border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
             <span className="text-slate-400 font-medium">Viewing as:</span>
@@ -138,7 +191,7 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
               onChange={(e) => onSelectCurrentUser(e.target.value)}
               className="px-2.5 py-1.5 rounded-xl bg-slate-950 text-slate-100 border border-slate-700/80 font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 transition cursor-pointer text-xs"
             >
-              {group.participants.map((p) => (
+              {activeParticipants.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>

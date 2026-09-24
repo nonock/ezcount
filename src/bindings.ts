@@ -27,6 +27,9 @@ async createGroup(name: string, currency: string, participants: string[]) : Prom
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Removes the group from this device. Other members of a shared group keep it.
+ */
 async deleteGroup(groupId: string) : Promise<Result<boolean, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("delete_group", { groupId }) };
@@ -38,6 +41,14 @@ async deleteGroup(groupId: string) : Promise<Result<boolean, string>> {
 async addParticipant(groupId: string, name: string) : Promise<Result<Group, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_participant", { groupId, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async removeParticipant(groupId: string, participantId: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_participant", { groupId, participantId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -90,6 +101,47 @@ async getSettlements(groupId: string) : Promise<Result<SettlementTransfer[], str
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async getStorageWarnings() : Promise<string[]> {
+    return await TAURI_INVOKE("get_storage_warnings");
+},
+async getSyncInfo(groupId: string) : Promise<Result<SyncInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_sync_info", { groupId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Starts sharing a group through a sync server and returns its invite code.
+ */
+async enableSync(groupId: string, serverUrl: string) : Promise<Result<SyncInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("enable_sync", { groupId, serverUrl }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Syncs one group immediately. Failures are reported in the returned `last_error`.
+ */
+async syncNow(groupId: string) : Promise<Result<SyncInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sync_now", { groupId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async joinGroup(inviteCode: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("join_group", { inviteCode }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -107,9 +159,10 @@ export type Expense = { id: string; group_id: string; title: string; amount_cent
 export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_splits: ExpenseSplit[]; summary: string }
 export type ExpenseSplit = { participant_id: string; shares: number }
 export type Group = { id: string; name: string; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string }
-export type Participant = { id: string; name: string }
-export type ParticipantBalance = { participant_id: string; participant_name: string; paid_cents: number; owed_cents: number; net_cents: number }
+export type Participant = { id: string; name: string; removed?: boolean }
+export type ParticipantBalance = { participant_id: string; participant_name: string; paid_cents: number; owed_cents: number; net_cents: number; removed: boolean }
 export type SettlementTransfer = { from_id: string; from_name: string; to_id: string; to_name: string; amount_cents: number }
+export type SyncInfo = { group_id: string; enabled: boolean; server_url: string | null; invite_code: string | null; last_synced_at: string | null; last_error: string | null }
 
 /** tauri-specta globals **/
 

@@ -59,7 +59,14 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
                     {b.participant_name.charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-white">{b.participant_name}</h4>
+                    <h4 className="text-sm font-semibold text-white">
+                      {b.participant_name}
+                      {b.removed && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 align-middle">
+                          Removed
+                        </span>
+                      )}
+                    </h4>
                     <span className="text-[11px] text-slate-400">{statusText}</span>
                   </div>
                 </div>
