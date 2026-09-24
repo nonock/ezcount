@@ -1,8 +1,8 @@
 [package]
 name = "ezcount"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Local-first expense sharing for groups"
+authors = ["nonock"]
 edition = "2021"
 default-run = "ezcount"
 
@@ -47,3 +47,9 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "macros"] }
 [lints.rust]
 linker_messages = "allow"
 
+# Smaller, faster release binaries (matters most for the Android APK). Panics still unwind:
+# `AppState::store` relies on recovering a poisoned lock.
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

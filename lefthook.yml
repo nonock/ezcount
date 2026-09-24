@@ -1,43 +1,107 @@
-# Lefthook configuration for ezcount (Tauri v2 + Vite + TypeScript)
-# Refer to documentation: https://github.com/evilmartians/lefthook
+# Git hooks for ezcount. Docs: https://lefthook.dev
+#
+# pre-commit  fast checks on staged files; formatters fix and re-stage what they touch
+# commit-msg  Conventional Commits subject (feat:, fix(ui):, ...)
+# pre-push    test suites (Rust unit + relay end-to-end, Playwright)
+#
+# Skip once with LEFTHOOK=0 git commit ..., or a single job with LEFTHOOK_EXCLUDE=e2e git push.
+# Personal overrides go in lefthook-local.yml (git-ignored).
+
+# `*` stops at `/` and `**/` also matches the root, so globs read like .gitignore patterns.
+glob_matcher: doublestar
 
 pre-commit:
-  commands:
-    # 1. Generate & verify TypeScript bindings from Rust
-    tauri-bindings:
-      glob: "src-tauri/**/*.{rs,toml}"
-      run: cargo run --manifest-path src-tauri/Cargo.toml --bin export_bindings && git add src/bindings.ts
+  # Bindings first: the TypeScript check must see the regenerated `src/bindings.ts`.
+  piped: true
+  jobs:
+    - name: bindings
+      glob:
+        - "src-tauri/src/**/*.rs"
+        - "src-tauri/Cargo.toml"
+        - "src/bindings.ts"
+      run: cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export_bindings && git add src/bindings.ts
 
-    # 2. Rust: Format check
-    cargo-fmt:
-      glob: "src-tauri/**/*.rs"
-      run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+    - name: checks
+      group:
+        parallel: true
+        jobs:
+          - name: app-rust
+            group:
+              # Format before linting so clippy reports the final line numbers.
+              piped: true
+              jobs:
+                - name: app-fmt
+                  glob: "src-tauri/**/*.rs"
+                  run: cargo fmt --manifest-path src-tauri/Cargo.toml
+                  stage_fixed: true
+                - name: app-clippy
+                  # The app's tests link the relay crate, so relay changes can break them too.
+                  glob:
+                    - "src-tauri/**/*.rs"
+                    - "src-tauri/Cargo.{toml,lock}"
+                    - "sync-server/src/**/*.rs"
+                  run: cargo clippy --quiet --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-    # 3. Rust: Clippy linter
-    cargo-clippy:
-      glob: "src-tauri/**/*.rs"
-      run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+          - name: relay-rust
+            group:
+              piped: true
+              jobs:
+                - name: relay-fmt
+                  glob: "sync-server/**/*.rs"
+                  run: cargo fmt --manifest-path sync-server/Cargo.toml
+                  stage_fixed: true
+                - name: relay-clippy
+                  glob:
+                    - "sync-server/**/*.rs"
+                    - "sync-server/Cargo.{toml,lock}"
+                  run: cargo clippy --quiet --manifest-path sync-server/Cargo.toml --all-targets -- -D warnings
 
-    # 3b. Sync relay: format check and clippy
-    sync-server-fmt:
-      glob: "sync-server/**/*.rs"
-      run: cargo fmt --manifest-path sync-server/Cargo.toml --check
+          - name: frontend
+            group:
+              piped: true
+              jobs:
+                - name: biome
+                  glob: "**/*.{js,ts,cjs,mjs,jsx,tsx,json,jsonc,css}"
+                  run: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+                  stage_fixed: true
+                - name: typecheck
+                  # Rust changes can change the generated bindings the frontend is checked against.
+                  glob:
+                    - "{src,e2e}/**/*.{ts,tsx}"
+                    - "*.ts"
+                    - "tsconfig*.json"
+                    - "package.json"
+                    - "src-tauri/src/**/*.rs"
+                  run: bun run typecheck
 
-    sync-server-clippy:
-      glob: "sync-server/**/*.rs"
-      run: cargo clippy --manifest-path sync-server/Cargo.toml -- -D warnings
-
-    # 4. Biome: Lint and format frontend code, JSON configs, and CSS
-    biome-check:
-      glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc,css}"
-      run: bunx @biomejs/biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
-      stage_fixed: true
-
-    # 5. TypeScript: Type checking across src/
-    typecheck:
-      glob: "src/**/*.{ts,tsx}"
-      run: bunx tsc --noEmit
-
-    # 6. Git Hygiene: Trailing whitespace check
-    trailing-whitespace:
+    - name: whitespace
+      # Trailing whitespace and leftover conflict markers, after the formatters had their say.
       run: git diff --check --cached
+
+commit-msg:
+  jobs:
+    - name: conventional-commit
+      run: bun scripts/check-commit-msg.ts {1}
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: app-tests
+      glob:
+        - "src-tauri/**/*.{rs,toml}"
+        - "src-tauri/Cargo.lock"
+        - "sync-server/src/**/*.rs"
+      run: cargo test --quiet --manifest-path src-tauri/Cargo.toml
+
+    - name: relay-tests
+      glob:
+        - "sync-server/**/*.{rs,toml}"
+        - "sync-server/Cargo.lock"
+      run: cargo test --quiet --manifest-path sync-server/Cargo.toml
+
+    - name: e2e
+      glob:
+        - "{src,e2e}/**/*"
+        - "*.{ts,json,html}"
+        - "bun.lock"
+      run: bun run test:e2e

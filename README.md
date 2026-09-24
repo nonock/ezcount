@@ -16,9 +16,19 @@ Split group expenses (Tricount-style) on Windows, Linux and Android. Built with 
 bun install
 bun run tauri dev          # desktop app
 bun run tauri android dev  # Android (needs the Android SDK/NDK and Rust Android targets)
-cargo test --manifest-path src-tauri/Cargo.toml   # includes an end-to-end sync test against a real relay
+bun run relay              # local sync relay on :8787
+bun run test:rust          # app + relay tests, including end-to-end sync against a real relay
 bun run test:e2e           # Playwright UI tests against a mocked backend
+bun run verify             # everything CI runs
 ```
+
+Git hooks ([lefthook](https://lefthook.dev), installed by `bun install`):
+
+- **pre-commit** regenerates `src/bindings.ts` when Rust changes, then in parallel: rustfmt and Biome (both fix and re-stage), clippy on the touched crate, and `tsc`. Only jobs whose files are staged run.
+- **commit-msg** requires a [Conventional Commits](https://www.conventionalcommits.org) subject (`feat(ui): …`, `fix: …`).
+- **pre-push** runs the Rust tests and the Playwright suite.
+
+Skip them once with `LEFTHOOK=0`. CI (`.github/workflows/ci.yml`) runs the same checks on Linux and builds the relay image. Dependabot proposes weekly updates, waiting 7 days after each release.
 
 ## Running the sync relay
 
@@ -30,6 +40,13 @@ cargo run --release --manifest-path sync-server/Cargo.toml
 | ------------------- | ---------------------- | --------------------- |
 | `EZCOUNT_SYNC_ADDR` | `0.0.0.0:8787`         | Listen address        |
 | `EZCOUNT_SYNC_DB`   | `ezcount-sync.sqlite3` | SQLite file for data  |
+
+Or with Docker (data lives in the `ezcount-relay` volume; `GET /health` answers `ok`):
+
+```sh
+docker build -t ezcount-relay sync-server
+docker run -d --name ezcount-relay --restart unless-stopped -p 8787:8787 -v ezcount-relay:/data ezcount-relay
+```
 
 In the app, open a group and tap **Share**. Enter the relay URL and copy the invite code. Other members use **Join with Code** on the home screen.
 

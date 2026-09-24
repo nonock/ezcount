@@ -9,11 +9,16 @@
     "ignoreUnknown": false,
     "include": [
       "src/**",
+      "e2e/**",
+      "scripts/**",
       "index.html",
       "vite.config.ts",
+      "playwright.config.ts",
       "package.json",
-      "tsconfig.json",
+      "tsconfig*.json",
       "biome.json",
+      "components.json",
+      ".vscode/*.json",
       "src-tauri/tauri.conf.json",
       "src-tauri/capabilities/**"
     ],
@@ -47,5 +52,17 @@
     "formatter": {
       "trailingCommas": "none"
     }
-  }
+  },
+  "overrides": [
+    {
+      "include": ["e2e/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ]
 }

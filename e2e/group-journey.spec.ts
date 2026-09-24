@@ -93,7 +93,10 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await participantInputs.nth(0).fill("Alice");
     await participantInputs.nth(1).fill("Bob");
     // Remove 3rd participant
-    await page.getByRole("button", { name: /Remove participant/ }).last().click();
+    await page
+      .getByRole("button", { name: /Remove participant/ })
+      .last()
+      .click();
 
     await page.getByRole("button", { name: "Create Group", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Ski Trip 2026" })).toBeVisible();
@@ -160,7 +163,9 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await page.getByRole("button", { name: "Save Changes" }).click();
 
     // Verify updated details
-    await expect(expenseCard.getByRole("heading", { name: "Chalet Rental & Firewood" })).toBeVisible();
+    await expect(
+      expenseCard.getByRole("heading", { name: "Chalet Rental & Firewood" })
+    ).toBeVisible();
     await expect(expenseCard.getByText("250.00 €")).toBeVisible();
 
     // Verify "Edited (1)" badge is visible and clickable

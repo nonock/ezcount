@@ -1,0 +1,45 @@
+# Weekly dependency updates, grouped into one PR per ecosystem for minor/patch bumps.
+# Majors come as separate PRs. The 7-day cooldown matches `minimumReleaseAge` in bunfig.toml.
+version: 2
+
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      frontend:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directories: [/src-tauri, /sync-server]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      rust:
+        update-types: [minor, patch]
+    ignore:
+      # Pinned together: tauri-specta only works with this exact specta release candidate.
+      - dependency-name: specta
+      - dependency-name: specta-typescript
+      - dependency-name: tauri-specta
+      # 0.13's rustls backend pulls aws-lc-rs and the platform verifier, which break Android builds.
+      - dependency-name: reqwest
+        versions: [">=0.13"]
+
+  - package-ecosystem: docker
+    directory: /sync-server
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

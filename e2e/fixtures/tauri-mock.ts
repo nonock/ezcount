@@ -41,7 +41,10 @@ export function installTauriMock() {
   let groups: MockGroup[] | null = null;
   function getGroups(): MockGroup[] {
     if (!groups) {
-      groups = (window as any).__SEED_GROUPS__ ? JSON.parse(JSON.stringify((window as any).__SEED_GROUPS__)) : [];
+      const seed = (window as any).__SEED_GROUPS__;
+      const seeded: MockGroup[] = seed ? JSON.parse(JSON.stringify(seed)) : [];
+      groups = seeded;
+      return seeded;
     }
     return groups;
   }

@@ -1,0 +1,23 @@
+# Store text with LF and check it out with LF on every OS, whatever core.autocrlf says.
+# Biome and rustfmt both expect LF, and gradlew must stay a valid shell script.
+* text=auto eol=lf
+
+# Windows-only scripts need CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.jar binary
+*.woff2 binary
+
+# Generated files: hide from diffs and GitHub language stats.
+bun.lock linguist-generated=true
+**/Cargo.lock linguist-generated=true
+src/bindings.ts linguist-generated=true
+src/components/ui/** linguist-vendored=true
+src-tauri/gen/** linguist-generated=true
