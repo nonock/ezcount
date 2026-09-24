@@ -1,7 +1,33 @@
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from "@/components/ui/input-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import type { Group } from "@/types";
+import { errorMessage } from "@/utils/errors";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
-import type { Group } from "../../types";
-import { Modal } from "../common/Modal";
 
 interface RecordReimbursementModalProps {
   isOpen: boolean;
@@ -32,6 +58,7 @@ export const RecordReimbursementModal: React.FC<RecordReimbursementModalProps> =
   const [amountStr, setAmountStr] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Initialize once per opening so a background sync refreshing the group keeps the form intact.
   const initialized = useRef(false);
@@ -52,144 +79,124 @@ export const RecordReimbursementModal: React.FC<RecordReimbursementModalProps> =
     setToId(initialToId || (initialFromId === p1 ? p2 : p1));
     setAmountStr(initialAmount || "");
     setNotes("");
+    setError(null);
   }, [isOpen, group, initialFromId, initialToId, initialAmount]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (fromId === toId) {
-      alert("The sender and recipient cannot be the same person.");
+      setError("The sender and recipient cannot be the same person.");
       return;
     }
 
     const amountDecimal = Number.parseFloat(amountStr);
     const amountCents = !Number.isNaN(amountDecimal) ? Math.round(amountDecimal * 100) : 0;
-
     if (amountCents <= 0) {
-      alert("Please enter a valid amount greater than 0");
+      setError("Please enter an amount greater than zero.");
       return;
     }
 
     setSubmitting(true);
+    setError(null);
     try {
       await onRecordReimbursement(fromId, toId, amountCents, notes.trim() || undefined);
       onClose();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to record reimbursement");
+      setError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }
   };
 
+  const options = (
+    <SelectContent position="popper">
+      {group.participants.map((p) => (
+        <SelectItem key={p.id} value={p.id}>
+          {p.name}
+          {p.removed ? " (removed)" : ""}
+        </SelectItem>
+      ))}
+    </SelectContent>
+  );
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Record Reimbursement" icon="🤝">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label
-              htmlFor="select-reimburse-from"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
-            >
-              Who paid? (Sender) *
-            </label>
-            <select
-              id="select-reimburse-from"
-              required
-              value={fromId}
-              onChange={(e) => setFromId(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition cursor-pointer"
-            >
-              {group.participants.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.removed ? " (removed)" : ""}
-                </option>
-              ))}
-            </select>
-          </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Record Reimbursement</DialogTitle>
+          <DialogDescription>Record money paid back between two members.</DialogDescription>
+        </DialogHeader>
 
-          <div>
-            <label
-              htmlFor="select-reimburse-to"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
-            >
-              Who received? (Recipient) *
-            </label>
-            <select
-              id="select-reimburse-to"
-              required
-              value={toId}
-              onChange={(e) => setToId(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition cursor-pointer"
-            >
-              {group.participants.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.removed ? " (removed)" : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label
-            htmlFor="input-reimburse-amount"
-            className="block text-xs font-semibold text-slate-300 mb-1.5"
-          >
-            Amount *
-          </label>
-          <div className="relative">
-            <input
-              id="input-reimburse-amount"
-              type="number"
-              step="0.01"
-              min="0.01"
-              placeholder="0.00"
-              required
-              value={amountStr}
-              onChange={(e) => setAmountStr(e.target.value)}
-              className="w-full pl-3.5 pr-14 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-semibold text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
-            />
-            <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 pointer-events-none">
-              {group.currency}
+        <form onSubmit={handleSubmit}>
+          <FieldGroup>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="select-reimburse-from">From (sender)</FieldLabel>
+                <Select value={fromId} onValueChange={setFromId}>
+                  <SelectTrigger id="select-reimburse-from" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  {options}
+                </Select>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="select-reimburse-to">To (recipient)</FieldLabel>
+                <Select value={toId} onValueChange={setToId}>
+                  <SelectTrigger id="select-reimburse-to" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  {options}
+                </Select>
+              </Field>
             </div>
-          </div>
-        </div>
 
-        <div>
-          <label
-            htmlFor="input-reimburse-notes"
-            className="block text-xs font-semibold text-slate-300 mb-1.5"
-          >
-            Payment Note (Optional)
-          </label>
-          <input
-            id="input-reimburse-notes"
-            type="text"
-            placeholder="e.g. Revolut, Bank transfer, Cash"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
-          />
-        </div>
+            <Field>
+              <FieldLabel htmlFor="input-reimburse-amount">Amount</FieldLabel>
+              <InputGroup>
+                <InputGroupInput
+                  id="input-reimburse-amount"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0.01"
+                  placeholder="0.00"
+                  required
+                  value={amountStr}
+                  onChange={(e) => setAmountStr(e.target.value)}
+                  className="tabular-nums"
+                />
+                <InputGroupAddon align="inline-end">
+                  <InputGroupText>{group.currency}</InputGroupText>
+                </InputGroupAddon>
+              </InputGroup>
+            </Field>
 
-        <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-slate-200 transition cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="px-5 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 transition cursor-pointer disabled:opacity-50"
-          >
-            {submitting ? "Saving..." : "Confirm Payment"}
-          </button>
-        </div>
-      </form>
-    </Modal>
+            <Field>
+              <FieldLabel htmlFor="input-reimburse-notes">Note (optional)</FieldLabel>
+              <Input
+                id="input-reimburse-notes"
+                placeholder="e.g. Bank transfer, Cash"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </Field>
+
+            <FieldError>{error}</FieldError>
+          </FieldGroup>
+
+          <DialogFooter className="mt-6">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Spinner data-icon="inline-start" />}
+              Confirm Payment
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 };

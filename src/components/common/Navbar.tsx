@@ -1,5 +1,15 @@
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import type { Group } from "@/types";
+import { ChevronRightIcon, MonitorIcon, MoonIcon, PlusIcon, SunIcon } from "lucide-react";
+import { useTheme } from "next-themes";
 import type React from "react";
-import type { Group } from "../../types";
 
 interface NavbarProps {
   currentGroup: Group | null;
@@ -7,64 +17,68 @@ interface NavbarProps {
   onOpenCreateGroup: () => void;
 }
 
+const ThemeMenu: React.FC = () => {
+  const { theme = "system", setTheme } = useTheme();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="Change theme">
+          <SunIcon className="dark:hidden" />
+          <MoonIcon className="hidden dark:block" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
+          <DropdownMenuRadioItem value="light">
+            <SunIcon /> Light
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="dark">
+            <MoonIcon /> Dark
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="system">
+            <MonitorIcon /> System
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
 export const Navbar: React.FC<NavbarProps> = ({
   currentGroup,
   onNavigateHome,
   onOpenCreateGroup,
 }) => {
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/75 backdrop-blur-xl">
-      <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-        {/* Brand & Breadcrumb */}
-        <div className="flex items-center gap-3">
+    <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur-lg pt-[env(safe-area-inset-top)]">
+      <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-3 px-4">
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5">
           <button
             type="button"
             onClick={onNavigateHome}
-            className="flex items-center gap-2.5 text-left group cursor-pointer rounded-xl p-1 -m-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="flex shrink-0 items-center gap-2 rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-emerald-400 p-[1.5px] shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform duration-200">
-              <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-                <span className="text-base font-black bg-gradient-to-r from-indigo-400 to-emerald-400 bg-clip-text text-transparent">
-                  ez
-                </span>
-              </div>
-            </div>
-            <span className="text-lg font-extrabold tracking-tight text-white group-hover:text-indigo-200 transition-colors duration-150">
-              ezcount
+            <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-sm font-black text-primary-foreground">
+              ez
             </span>
+            <span className="text-base font-semibold tracking-tight">ezcount</span>
           </button>
-
           {currentGroup && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-600" aria-hidden="true">
-                /
-              </span>
-              <span className="text-slate-300 font-semibold px-2 py-0.5 rounded-md bg-slate-800/80 border border-slate-700/60 max-w-[160px] sm:max-w-[240px] truncate">
+            <>
+              <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="truncate text-sm text-muted-foreground" aria-current="page">
                 {currentGroup.name}
               </span>
-            </div>
+            </>
           )}
-        </div>
+        </nav>
 
-        {/* Global Actions */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          <button
-            type="button"
-            onClick={onOpenCreateGroup}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/25 hover:shadow-indigo-500/40 transition-all duration-150 active:scale-95 cursor-pointer touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              aria-hidden="true"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            <span>New Group</span>
-          </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <ThemeMenu />
+          <Button onClick={onOpenCreateGroup} aria-label="New group">
+            <PlusIcon data-icon="inline-start" />
+            <span className="hidden sm:inline">New Group</span>
+          </Button>
         </div>
       </div>
     </header>

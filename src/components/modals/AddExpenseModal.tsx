@@ -1,10 +1,47 @@
+import { DatePicker } from "@/components/common/DatePicker";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from "@/components/ui/input-group";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
+import type { Expense, ExpenseSplit, Group } from "@/types";
+import { errorMessage } from "@/utils/errors";
+import { formatDateInput, formatMoney } from "@/utils/formatters";
+import { MinusIcon, PlusIcon } from "lucide-react";
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Expense, ExpenseSplit, Group } from "../../types";
-import { formatMoney } from "../../utils/formatters";
-import { Modal } from "../common/Modal";
-
-import { formatDateInput } from "../../utils/formatters";
 
 interface AddExpenseModalProps {
   isOpen: boolean;
@@ -47,6 +84,9 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const [amountStr, setAmountStr] = useState("");
   const [paidBy, setPaidBy] = useState("");
   const [expenseDate, setExpenseDate] = useState<string>(formatDateInput());
+  const [splitsState, setSplitsState] = useState<Record<string, SplitItemState>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Removed members stay selectable on expenses they are already part of.
   const participants = useMemo(() => {
@@ -57,8 +97,6 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     );
     return group.participants.filter((p) => !p.removed || involved.has(p.id));
   }, [group.participants, editingExpense]);
-  const [splitsState, setSplitsState] = useState<Record<string, SplitItemState>>({});
-  const [submitting, setSubmitting] = useState(false);
 
   // Initialize form state once per opening (or when switching to another expense), so a
   // background sync refreshing the group doesn't wipe what the user is typing.
@@ -71,6 +109,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     const key = editingExpense?.id ?? "new";
     if (initializedFor.current === key) return;
     initializedFor.current = key;
+    setError(null);
 
     if (editingExpense) {
       setTitle(editingExpense.title);
@@ -130,9 +169,9 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     (sum, p) => sum + (splitsState[p.id]?.shares || 1),
     0
   );
+  const allIncluded = includedParticipants.length === participants.length;
 
   const handleToggleAll = () => {
-    const allIncluded = includedParticipants.length === participants.length;
     setSplitsState((prev) => {
       const next: Record<string, SplitItemState> = {};
       for (const p of participants) {
@@ -154,15 +193,15 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     const trimmedTitle = title.trim();
 
     if (!trimmedTitle) {
-      alert("Please enter an expense description");
+      setError("Please enter a description.");
       return;
     }
     if (amountCents <= 0) {
-      alert("Please enter a valid positive amount");
+      setError("Please enter an amount greater than zero.");
       return;
     }
     if (includedParticipants.length === 0) {
-      alert("Please select at least one participant to split the bill with");
+      setError("Select at least one person to split the bill with.");
       return;
     }
 
@@ -180,6 +219,7 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
     }
 
     setSubmitting(true);
+    setError(null);
     try {
       if (editingExpense && onUpdateExpense) {
         await onUpdateExpense(
@@ -193,12 +233,9 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
       } else {
         await onAddExpense(trimmedTitle, amountCents, paidBy, splits, createdAtIso);
       }
-      setTitle("");
-      setAmountStr("");
-      setExpenseDate(formatDateInput());
       onClose();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to save expense");
+      setError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -207,214 +244,182 @@ export const AddExpenseModal: React.FC<AddExpenseModalProps> = ({
   const isEditing = Boolean(editingExpense);
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title={isEditing ? "Edit Expense" : "Add New Expense"}
-      icon={isEditing ? "✏️" : "🧾"}
-      maxWidthClass="max-w-lg"
-    >
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label
-            htmlFor="input-expense-title"
-            className="block text-xs font-semibold text-slate-300 mb-1.5"
-          >
-            Description *
-          </label>
-          <input
-            id="input-expense-title"
-            type="text"
-            required
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Groceries, Dinner, Taxi, Museum tickets"
-            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
-          />
-        </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{isEditing ? "Edit Expense" : "Add New Expense"}</DialogTitle>
+          <DialogDescription>
+            {isEditing
+              ? "Changes are recorded in the expense's history."
+              : "Who paid, how much, and who it was for."}
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <label
-              htmlFor="input-expense-amount"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
-            >
-              Amount *
-            </label>
-            <div className="relative">
-              <input
-                id="input-expense-amount"
-                type="number"
-                step="0.01"
-                min="0.01"
+        <form onSubmit={handleSubmit}>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="input-expense-title">Description</FieldLabel>
+              <Input
+                id="input-expense-title"
                 required
-                value={amountStr}
-                onChange={(e) => setAmountStr(e.target.value)}
-                placeholder="0.00"
-                className="w-full pl-3.5 pr-12 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm font-semibold text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition font-mono tabular-nums"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Groceries, Dinner, Taxi"
               />
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 pointer-events-none">
-                {group.currency}
+            </Field>
+
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <Field>
+                <FieldLabel htmlFor="input-expense-amount">Amount</FieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    id="input-expense-amount"
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    min="0.01"
+                    required
+                    value={amountStr}
+                    onChange={(e) => setAmountStr(e.target.value)}
+                    placeholder="0.00"
+                    className="tabular-nums"
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupText>{group.currency}</InputGroupText>
+                  </InputGroupAddon>
+                </InputGroup>
+              </Field>
+
+              <Field>
+                <FieldLabel id="label-expense-date" htmlFor="input-expense-date">
+                  Date
+                </FieldLabel>
+                <DatePicker
+                  id="input-expense-date"
+                  labelId="label-expense-date"
+                  value={expenseDate}
+                  onChange={setExpenseDate}
+                />
+              </Field>
+
+              <Field className="col-span-2 sm:col-span-1">
+                <FieldLabel htmlFor="select-expense-payer">Paid by</FieldLabel>
+                <Select value={paidBy} onValueChange={setPaidBy}>
+                  <SelectTrigger id="select-expense-payer" className="w-full">
+                    <SelectValue placeholder="Choose…" />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    {participants.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                        {p.id === currentUserId ? " (You)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+
+            <FieldSet>
+              <div className="flex items-center justify-between">
+                <FieldLegend variant="label" className="mb-0">
+                  Split between
+                </FieldLegend>
+                <Button type="button" variant="link" size="sm" onClick={handleToggleAll}>
+                  {allIncluded ? "Deselect all" : "Select all"}
+                </Button>
               </div>
-            </div>
-          </div>
+              <FieldDescription>
+                {includedParticipants.length}/{participants.length} people, {totalShares}{" "}
+                {totalShares === 1 ? "part" : "parts"}
+                {amountCents > 0 && totalShares > 0 && (
+                  <> · about {formatMoney(perShareCents, group.currency)} per part</>
+                )}
+              </FieldDescription>
 
-          <div>
-            <label
-              htmlFor="input-expense-date"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
-            >
-              Date *
-            </label>
-            <input
-              id="input-expense-date"
-              type="date"
-              required
-              value={expenseDate}
-              onChange={(e) => setExpenseDate(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition [color-scheme:dark]"
-            />
-          </div>
+              <ul className="divide-y rounded-lg border">
+                {participants.map((p) => {
+                  const state = splitsState[p.id] || { included: false, shares: 1 };
+                  const owed =
+                    totalShares > 0 && amountCents > 0
+                      ? Math.round((amountCents * state.shares) / totalShares)
+                      : 0;
+                  const checkboxId = `split-${p.id}`;
 
-          <div>
-            <label
-              htmlFor="select-expense-payer"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
-            >
-              Paid by *
-            </label>
-            <select
-              id="select-expense-payer"
-              value={paidBy}
-              onChange={(e) => setPaidBy(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 transition cursor-pointer"
-            >
-              {participants.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.id === currentUserId ? " (You)" : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Split Section with Weighted Parts */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="block text-xs font-semibold text-slate-300">
-              Split between ({includedParticipants.length}/{participants.length} selected,{" "}
-              {totalShares} parts)
-            </span>
-            <button
-              type="button"
-              onClick={handleToggleAll}
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold transition cursor-pointer"
-            >
-              {includedParticipants.length === participants.length ? "Deselect All" : "Select All"}
-            </button>
-          </div>
-
-          <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-            {participants.map((p) => {
-              const state = splitsState[p.id] || { included: false, shares: 1 };
-              const isIncluded = state.included;
-              const userShares = state.shares;
-              const userOwed =
-                totalShares > 0 && amountCents > 0
-                  ? Math.round((amountCents * userShares) / totalShares)
-                  : 0;
-
-              return (
-                <div
-                  key={p.id}
-                  className={`flex items-center justify-between p-2.5 rounded-xl border transition ${
-                    isIncluded
-                      ? "border-slate-800 bg-slate-900/80"
-                      : "border-slate-850 bg-slate-950/40 opacity-55"
-                  }`}
-                >
-                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={isIncluded}
-                      onChange={() => handleToggleParticipant(p.id)}
-                      className="rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
-                    />
-                    <span className="text-xs font-medium text-slate-200">{p.name}</span>
-                  </label>
-
-                  {isIncluded && (
-                    <div className="flex items-center gap-2.5">
-                      {amountCents > 0 && totalShares > 0 && (
-                        <span className="text-xs font-mono font-semibold text-indigo-300">
-                          {formatMoney(userOwed, group.currency)}
-                        </span>
+                  return (
+                    <li
+                      key={p.id}
+                      className={cn(
+                        "flex min-h-11 items-center justify-between gap-2 px-3 py-1.5",
+                        !state.included && "text-muted-foreground"
                       )}
-
-                      {/* Stepper for parts */}
-                      <div className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-950 p-0.5">
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateShares(p.id, userShares - 1)}
-                          disabled={userShares <= 1}
-                          className="w-5 h-5 flex items-center justify-center text-xs font-bold text-slate-400 hover:text-white disabled:opacity-30 transition cursor-pointer disabled:cursor-not-allowed"
-                          title="Decrease parts"
-                        >
-                          -
-                        </button>
-                        <span className="px-1.5 text-[11px] font-bold text-slate-200 min-w-14 text-center">
-                          {userShares} {userShares === 1 ? "part" : "parts"}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateShares(p.id, userShares + 1)}
-                          className="w-5 h-5 flex items-center justify-center text-xs font-bold text-slate-400 hover:text-white transition cursor-pointer"
-                          title="Increase parts"
-                        >
-                          +
-                        </button>
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Checkbox
+                          id={checkboxId}
+                          checked={state.included}
+                          onCheckedChange={() => handleToggleParticipant(p.id)}
+                        />
+                        <Label htmlFor={checkboxId} className="font-normal">
+                          {p.name}
+                        </Label>
                       </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
 
-          {amountCents > 0 && totalShares > 0 && (
-            <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 px-1">
-              <span>
-                Total: <strong className="text-slate-200">{totalShares} parts</strong>
-              </span>
-              <span>
-                Approx.{" "}
-                <strong className="text-indigo-300 font-mono">
-                  {formatMoney(perShareCents, group.currency)}
-                </strong>{" "}
-                per part
-              </span>
-            </div>
-          )}
-        </div>
+                      {state.included && (
+                        <div className="flex items-center gap-2">
+                          {owed > 0 && (
+                            <span className="text-sm tabular-nums">
+                              {formatMoney(owed, group.currency)}
+                            </span>
+                          )}
+                          <div className="flex items-center rounded-md border">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleUpdateShares(p.id, state.shares - 1)}
+                              disabled={state.shares <= 1}
+                              aria-label={`Fewer parts for ${p.name}`}
+                            >
+                              <MinusIcon />
+                            </Button>
+                            <span className="min-w-14 text-center text-xs" aria-live="polite">
+                              {state.shares} {state.shares === 1 ? "part" : "parts"}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleUpdateShares(p.id, state.shares + 1)}
+                              aria-label={`More parts for ${p.name}`}
+                            >
+                              <PlusIcon />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </FieldSet>
 
-        <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-slate-200 transition cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition cursor-pointer disabled:opacity-50"
-          >
-            {submitting ? "Saving..." : isEditing ? "Save Changes" : "Save Expense"}
-          </button>
-        </div>
-      </form>
-    </Modal>
+            <FieldError>{error}</FieldError>
+          </FieldGroup>
+
+          <DialogFooter className="mt-6">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Spinner data-icon="inline-start" />}
+              {isEditing ? "Save Changes" : "Save Expense"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 };

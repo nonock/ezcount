@@ -1,6 +1,34 @@
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { errorMessage } from "@/utils/errors";
+import { PlusIcon, XIcon } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
-import { Modal } from "../common/Modal";
 
 interface CreateGroupModalProps {
   isOpen: boolean;
@@ -13,6 +41,12 @@ interface ParticipantField {
   name: string;
 }
 
+const initialParticipants = (): ParticipantField[] => [
+  { id: "p-init-1", name: "" },
+  { id: "p-init-2", name: "" },
+  { id: "p-init-3", name: "" },
+];
+
 export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   isOpen,
   onClose,
@@ -20,12 +54,9 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 }) => {
   const [name, setName] = useState("");
   const [currency, setCurrency] = useState("EUR");
-  const [participants, setParticipants] = useState<ParticipantField[]>([
-    { id: "p-init-1", name: "" },
-    { id: "p-init-2", name: "" },
-    { id: "p-init-3", name: "" },
-  ]);
+  const [participants, setParticipants] = useState<ParticipantField[]>(initialParticipants);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleAddParticipantField = () => {
     setParticipants([...participants, { id: `p-${Date.now()}-${Math.random()}`, name: "" }]);
@@ -46,128 +77,121 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     const validParticipants = participants.map((p) => p.name.trim()).filter((p) => p.length > 0);
 
     if (!trimmedName) {
-      alert("Please enter a group name");
+      setError("Please enter a group name.");
       return;
     }
     if (validParticipants.length === 0) {
-      alert("Please enter at least one participant");
+      setError("Please enter at least one participant.");
       return;
     }
 
     setSubmitting(true);
+    setError(null);
     try {
       await onCreateGroup(trimmedName, currency, validParticipants);
       setName("");
       setCurrency("EUR");
-      setParticipants([
-        { id: "p-init-1", name: "" },
-        { id: "p-init-2", name: "" },
-        { id: "p-init-3", name: "" },
-      ]);
+      setParticipants(initialParticipants());
       onClose();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to create group");
+      setError(errorMessage(err));
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Create New Group" icon="📁">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label
-            htmlFor="input-group-name"
-            className="block text-xs font-semibold text-slate-300 mb-1.5"
-          >
-            Group Name *
-          </label>
-          <input
-            id="input-group-name"
-            type="text"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Summer Vacation, Roommates, Dinner Party"
-            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
-          />
-        </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create New Group</DialogTitle>
+          <DialogDescription>
+            A trip, a flatshare, a dinner… You can add more people later.
+          </DialogDescription>
+        </DialogHeader>
 
-        <div>
-          <label
-            htmlFor="select-group-currency"
-            className="block text-xs font-semibold text-slate-300 mb-1.5"
-          >
-            Currency
-          </label>
-          <select
-            id="select-group-currency"
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 focus:outline-none focus:border-indigo-500 transition cursor-pointer"
-          >
-            <option value="EUR">EUR (€) - Euro</option>
-            <option value="USD">USD ($) - US Dollar</option>
-            <option value="GBP">GBP (£) - British Pound</option>
-            <option value="CHF">CHF - Swiss Franc</option>
-            <option value="CAD">CAD (CA$) - Canadian Dollar</option>
-          </select>
-        </div>
+        <form onSubmit={handleSubmit}>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="input-group-name">Group name</FieldLabel>
+              <Input
+                id="input-group-name"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Summer Vacation, Roommates"
+              />
+            </Field>
 
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="block text-xs font-semibold text-slate-300">Initial Participants</span>
-            <button
-              type="button"
-              onClick={handleAddParticipantField}
-              className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold transition cursor-pointer"
-            >
-              + Add Person
-            </button>
-          </div>
+            <Field>
+              <FieldLabel htmlFor="select-group-currency">Currency</FieldLabel>
+              <Select value={currency} onValueChange={setCurrency}>
+                <SelectTrigger id="select-group-currency" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  <SelectItem value="EUR">EUR (€) — Euro</SelectItem>
+                  <SelectItem value="USD">USD ($) — US Dollar</SelectItem>
+                  <SelectItem value="GBP">GBP (£) — British Pound</SelectItem>
+                  <SelectItem value="CHF">CHF — Swiss Franc</SelectItem>
+                  <SelectItem value="CAD">CAD (CA$) — Canadian Dollar</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
 
-          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-            {participants.map((p, idx) => (
-              <div key={p.id} className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={p.name}
-                  onChange={(e) => handleParticipantChange(p.id, e.target.value)}
-                  placeholder={`Participant ${idx + 1}`}
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
-                />
-                {participants.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveParticipantField(p.id)}
-                    className="p-2 text-slate-500 hover:text-rose-400 transition cursor-pointer"
-                    title="Remove"
-                  >
-                    ✕
-                  </button>
-                )}
+            <FieldSet>
+              <FieldLegend variant="label">Participants</FieldLegend>
+              <div className="space-y-2">
+                {participants.map((p, idx) => (
+                  <div key={p.id} className="flex items-center gap-2">
+                    <Input
+                      value={p.name}
+                      onChange={(e) => handleParticipantChange(p.id, e.target.value)}
+                      placeholder={`Participant ${idx + 1}`}
+                      aria-label={`Participant ${idx + 1}`}
+                    />
+                    {participants.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleRemoveParticipantField(p.id)}
+                        aria-label={`Remove participant ${idx + 1}`}
+                      >
+                        <XIcon />
+                      </Button>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="self-start"
+                onClick={handleAddParticipantField}
+              >
+                <PlusIcon data-icon="inline-start" />
+                Add person
+              </Button>
+            </FieldSet>
 
-        <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-slate-200 transition cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition cursor-pointer disabled:opacity-50"
-          >
-            {submitting ? "Creating..." : "Create Group"}
-          </button>
-        </div>
-      </form>
-    </Modal>
+            <FieldError>{error}</FieldError>
+          </FieldGroup>
+
+          <DialogFooter className="mt-6">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Spinner data-icon="inline-start" />}
+              Create Group
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 };

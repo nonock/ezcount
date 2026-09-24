@@ -1,6 +1,21 @@
+import { useConfirm } from "@/components/common/ConfirmDialog";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { errorMessage } from "@/utils/errors";
 import { listen } from "@tauri-apps/api/event";
+import {
+  ArrowLeftIcon,
+  ArrowLeftRightIcon,
+  ReceiptTextIcon,
+  ScaleIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Navbar } from "./components/common/Navbar";
 import { GroupDashboard } from "./components/dashboard/GroupDashboard";
 import { AddExpenseModal } from "./components/modals/AddExpenseModal";
@@ -31,6 +46,7 @@ interface SyncUpdatedEvent {
 }
 
 export const App: React.FC = () => {
+  const askConfirm = useConfirm();
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [currentGroup, setCurrentGroup] = useState<Group | null>(null);
@@ -84,7 +100,7 @@ export const App: React.FC = () => {
       setSyncInfo(sync);
     } catch (err) {
       console.error("Failed to load active group:", err);
-      alert(`Failed to open group: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error("Could not open the group", { description: errorMessage(err) });
       setSelectedGroupId(null);
       setCurrentGroup(null);
     }
@@ -196,24 +212,36 @@ export const App: React.FC = () => {
     refreshGroups();
   };
 
+  // Errors propagate to the dialog, which shows them inline.
   const handleCreateGroup = async (name: string, currency: string, participants: string[]) => {
-    try {
-      const newGroup = await api.createGroup(name, currency, participants);
-      await refreshGroups();
-      setSelectedGroupId(newGroup.id);
-    } catch (err) {
-      alert(`Failed to create group: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const newGroup = await api.createGroup(name, currency, participants);
+    await refreshGroups();
+    setSelectedGroupId(newGroup.id);
   };
 
   const handleDeleteGroup = async () => {
     if (!currentGroup) return;
-    const message = isShared
-      ? `Remove "${currentGroup.name}" from this device? Other members keep the group, and you can rejoin with the invite code.`
-      : `Are you sure you want to delete the group "${currentGroup.name}"?`;
-    if (confirm(message)) {
+    const confirmed = await askConfirm(
+      isShared
+        ? {
+            title: `Remove "${currentGroup.name}" from this device?`,
+            description: "Other members keep the group, and you can rejoin with the invite code.",
+            confirmLabel: "Remove",
+            destructive: true,
+          }
+        : {
+            title: `Delete "${currentGroup.name}"?`,
+            description: "All its expenses and balances are deleted from this device.",
+            confirmLabel: "Delete Group",
+            destructive: true,
+          }
+    );
+    if (!confirmed) return;
+    try {
       await api.deleteGroup(currentGroup.id);
       handleNavigateHome();
+    } catch (err) {
+      toast.error("Could not delete the group", { description: errorMessage(err) });
     }
   };
 
@@ -221,14 +249,20 @@ export const App: React.FC = () => {
     if (!currentGroup) return;
     const participant = currentGroup.participants.find((p) => p.id === participantId);
     if (!participant) return;
-    const message = `Remove ${participant.name} from the group? Their past expenses and balance are kept, but they can't be added to new expenses.`;
-    if (!confirm(message)) return;
+    const confirmed = await askConfirm({
+      title: `Remove ${participant.name}?`,
+      description:
+        "Their past expenses and balance are kept, but they can't be added to new expenses.",
+      confirmLabel: "Remove",
+      destructive: true,
+    });
+    if (!confirmed) return;
     try {
       await api.removeParticipant(currentGroup.id, participantId);
       await refreshActiveGroup(currentGroup.id);
       await refreshGroups();
     } catch (err) {
-      alert(`Failed to remove member: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error("Could not remove the member", { description: errorMessage(err) });
     }
   };
 
@@ -242,6 +276,7 @@ export const App: React.FC = () => {
     await refreshGroups();
     setSelectedGroupId(group.id);
     setActiveTab("expenses");
+    toast.success(`Joined "${group.name}"`);
   };
 
   const handleAddMember = async (name: string) => {
@@ -275,11 +310,21 @@ export const App: React.FC = () => {
 
   const handleDeleteExpense = async (expenseId: string) => {
     if (!currentGroup) return;
-    if (confirm("Are you sure you want to delete this record?")) {
+    const expense = currentGroup.expenses.find((e) => e.id === expenseId);
+    const confirmed = await askConfirm({
+      title: `Delete "${expense?.title ?? "this record"}"?`,
+      description: "Balances are recalculated without it. This can't be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!confirmed) return;
+    try {
       const updated = await api.deleteExpense(currentGroup.id, expenseId);
       setCurrentGroup(updated);
       await refreshActiveGroup(updated.id);
       await refreshGroups();
+    } catch (err) {
+      toast.error("Could not delete the record", { description: errorMessage(err) });
     }
   };
 
@@ -345,41 +390,37 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
+    <div className="flex min-h-screen flex-col">
       <Navbar
         currentGroup={currentGroup}
         onNavigateHome={handleNavigateHome}
         onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
       />
 
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6">
+      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         {storageWarnings.length > 0 && (
-          <div
-            role="alert"
-            className="mb-6 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-200 space-y-2"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <strong className="font-semibold">Some saved data could not be loaded</strong>
-              <button
-                type="button"
-                onClick={() => setStorageWarnings([])}
-                className="text-amber-300 hover:text-amber-100 font-semibold cursor-pointer"
-              >
+          <Alert>
+            <TriangleAlertIcon />
+            <AlertTitle>Some saved data could not be loaded</AlertTitle>
+            <AlertDescription>
+              <ul className="list-disc pl-4">
+                {storageWarnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+              <p>Nothing was deleted. The data is still on disk.</p>
+            </AlertDescription>
+            <AlertAction>
+              <Button variant="ghost" size="sm" onClick={() => setStorageWarnings([])}>
                 Dismiss
-              </button>
-            </div>
-            <ul className="list-disc pl-4 space-y-1">
-              {storageWarnings.map((w) => (
-                <li key={w}>{w}</li>
-              ))}
-            </ul>
-            <p className="text-amber-300/80">Nothing was deleted. The data is still on disk.</p>
-          </div>
+              </Button>
+            </AlertAction>
+          </Alert>
         )}
 
         {loading ? (
-          <div className="flex items-center justify-center py-20 text-slate-500 text-sm">
-            Loading groups...
+          <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
+            <Spinner /> Loading groups…
           </div>
         ) : !currentGroup ? (
           <GroupDashboard
@@ -389,15 +430,11 @@ export const App: React.FC = () => {
             onOpenJoinGroup={() => setIsJoinOpen(true)}
           />
         ) : (
-          <div className="space-y-6 animate-in fade-in duration-200">
-            {/* Back Button */}
-            <button
-              type="button"
-              onClick={handleNavigateHome}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-indigo-400 transition cursor-pointer"
-            >
-              ← Back to All Groups
-            </button>
+          <div className="space-y-4">
+            <Button variant="ghost" size="sm" onClick={handleNavigateHome} className="-ml-2">
+              <ArrowLeftIcon data-icon="inline-start" />
+              Back to All Groups
+            </Button>
 
             <GroupHeader
               group={currentGroup}
@@ -411,132 +448,65 @@ export const App: React.FC = () => {
               syncInfo={syncInfo}
             />
 
-            {/* Tab Navigation */}
-            <div className="border-b border-slate-800">
-              <nav className="flex space-x-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("expenses")}
-                  className={`px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition flex items-center gap-2 cursor-pointer ${
-                    activeTab === "expenses"
-                      ? "border-indigo-500 text-indigo-400"
-                      : "border-transparent text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z"
-                    />
-                  </svg>
-                  <span>Expenses</span>
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono">
+            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabType)}>
+              <TabsList className="w-full sm:w-fit">
+                <TabsTrigger value="expenses">
+                  <ReceiptTextIcon />
+                  Expenses
+                  <Badge variant="secondary" className="tabular-nums">
                     {currentGroup.expenses.length}
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("balances")}
-                  className={`px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition flex items-center gap-2 cursor-pointer ${
-                    activeTab === "balances"
-                      ? "border-indigo-500 text-indigo-400"
-                      : "border-transparent text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"
-                    />
-                  </svg>
-                  <span>Balances</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("settle")}
-                  className={`px-4 py-2.5 text-xs sm:text-sm font-semibold border-b-2 transition flex items-center gap-2 cursor-pointer ${
-                    activeTab === "settle"
-                      ? "border-indigo-500 text-indigo-400"
-                      : "border-transparent text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5"
-                    />
-                  </svg>
-                  <span>Settle Up</span>
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="balances">
+                  <ScaleIcon />
+                  Balances
+                </TabsTrigger>
+                <TabsTrigger value="settle">
+                  <ArrowLeftRightIcon />
+                  Settle Up
                   {settlements.length > 0 && (
-                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-mono">
+                    <Badge variant="secondary" className="tabular-nums">
                       {settlements.length}
-                    </span>
+                    </Badge>
                   )}
-                </button>
-              </nav>
-            </div>
+                </TabsTrigger>
+              </TabsList>
 
-            {/* Tab Panels */}
-            {activeTab === "expenses" && (
-              <ExpensesTab
-                group={currentGroup}
-                hasOutstandingDebt={currentGroup.expenses.length > 0 && settlements.length > 0}
-                onOpenAddExpense={handleOpenAddExpense}
-                onOpenReimburse={() => handleOpenReimburseModal()}
-                onDeleteExpense={handleDeleteExpense}
-                onEditExpense={handleEditExpense}
-                onViewHistory={handleViewHistory}
-              />
-            )}
-
-            {activeTab === "balances" && (
-              <BalancesTab
-                group={currentGroup}
-                balances={balances}
-                onReimburseParticipant={(pid, amount) =>
-                  handleOpenReimburseModal(pid, undefined, amount)
-                }
-              />
-            )}
-
-            {activeTab === "settle" && (
-              <SettleUpTab
-                group={currentGroup}
-                settlements={settlements}
-                onOpenReimburse={() => handleOpenReimburseModal()}
-                onMarkAsPaid={(fromId, toId, amount) =>
-                  handleOpenReimburseModal(fromId, toId, amount)
-                }
-              />
-            )}
+              <TabsContent value="expenses" className="pt-4">
+                <ExpensesTab
+                  group={currentGroup}
+                  hasOutstandingDebt={currentGroup.expenses.length > 0 && settlements.length > 0}
+                  onOpenAddExpense={handleOpenAddExpense}
+                  onOpenReimburse={() => handleOpenReimburseModal()}
+                  onDeleteExpense={handleDeleteExpense}
+                  onEditExpense={handleEditExpense}
+                  onViewHistory={handleViewHistory}
+                />
+              </TabsContent>
+              <TabsContent value="balances" className="pt-4">
+                <BalancesTab
+                  group={currentGroup}
+                  balances={balances}
+                  onReimburseParticipant={(pid, amount) =>
+                    handleOpenReimburseModal(pid, undefined, amount)
+                  }
+                />
+              </TabsContent>
+              <TabsContent value="settle" className="pt-4">
+                <SettleUpTab
+                  group={currentGroup}
+                  settlements={settlements}
+                  onOpenReimburse={() => handleOpenReimburseModal()}
+                  onMarkAsPaid={(fromId, toId, amount) =>
+                    handleOpenReimburseModal(fromId, toId, amount)
+                  }
+                />
+              </TabsContent>
+            </Tabs>
           </div>
         )}
       </main>
 
-      {/* Modals */}
       <CreateGroupModal
         isOpen={isCreateGroupOpen}
         onClose={() => setIsCreateGroupOpen(false)}
@@ -559,6 +529,7 @@ export const App: React.FC = () => {
             onEnableSync={handleEnableSync}
             onSyncNow={handleSyncNow}
           />
+
           <AddMemberModal
             isOpen={isAddMemberOpen}
             onClose={() => setIsAddMemberOpen(false)}

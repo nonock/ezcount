@@ -1,6 +1,25 @@
+import { Amount } from "@/components/common/Amount";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
+import type { Group, SettlementTransfer } from "@/types";
+import { CheckIcon, CircleCheckBigIcon, PlusIcon, RouteIcon } from "lucide-react";
 import type React from "react";
-import type { Group, SettlementTransfer } from "../../types";
-import { formatMoney } from "../../utils/formatters";
 
 interface SettleUpTabProps {
   group: Group;
@@ -17,115 +36,68 @@ export const SettleUpTab: React.FC<SettleUpTabProps> = ({
 }) => {
   return (
     <div className="space-y-4">
-      {/* Information & Action Card */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/20 text-xs text-indigo-300">
-        <div className="flex items-start gap-3">
-          <div className="text-indigo-400 mt-0.5">
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"
-              />
-            </svg>
-          </div>
-          <div>
-            <p className="font-medium text-indigo-200">Optimal Settlement Plan</p>
-            <p className="text-indigo-300/80 mt-0.5">
-              ezcount's greedy settlement algorithm minimizes the total number of transactions
-              required to settle all group debts.
-            </p>
-          </div>
-        </div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <Alert className="sm:flex-1">
+          <RouteIcon />
+          <AlertTitle>Optimal Settlement Plan</AlertTitle>
+          <AlertDescription>
+            The fewest direct payments that settle every debt in the group.
+          </AlertDescription>
+        </Alert>
         {settlements.length > 0 && group.expenses.length > 0 && (
-          <button
-            type="button"
-            onClick={onOpenReimburse}
-            className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 transition-all duration-150 active:scale-[0.98] cursor-pointer touch-manipulation shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-          >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              aria-hidden="true"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            <span>Record Reimbursement</span>
-          </button>
+          <Button onClick={onOpenReimburse} className="self-start">
+            <PlusIcon data-icon="inline-start" />
+            Record Reimbursement
+          </Button>
         )}
       </div>
 
-      {/* Settlements List */}
       {settlements.length === 0 ? (
-        <div className="text-center py-12 px-4 border border-dashed border-slate-800 rounded-2xl bg-slate-900/30 space-y-2">
-          <div
-            aria-hidden="true"
-            className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mx-auto flex items-center justify-center text-lg select-none"
-          >
-            ✓
-          </div>
-          <h3 className="text-sm font-semibold text-slate-200">All settled up!</h3>
-          <p className="text-xs text-slate-400">
-            No one in this group owes anything to anyone. Everyone is squared up.
-          </p>
-        </div>
+        <Empty className="border border-dashed">
+          <EmptyHeader>
+            <EmptyMedia variant="icon" className="text-positive">
+              <CircleCheckBigIcon />
+            </EmptyMedia>
+            <EmptyTitle>All settled up!</EmptyTitle>
+            <EmptyDescription>No one in this group owes anything to anyone.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <ul className="space-y-2.5 list-none p-0 m-0">
+        <ul className="space-y-2">
           {settlements.map((s) => (
-            <li
-              key={`${s.from_id}-${s.to_id}`}
-              className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl border border-slate-800 bg-slate-900/50 hover:bg-slate-900/80 transition-colors duration-150"
-            >
-              <div className="flex items-center gap-3">
-                <div
-                  aria-hidden="true"
-                  className="w-8 h-8 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center text-xs font-bold select-none"
-                >
-                  {s.from_name.charAt(0).toUpperCase()}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-white">
-                    <span className="text-rose-300 font-medium">{s.from_name}</span> pays{" "}
-                    <span className="text-emerald-300 font-medium">{s.to_name}</span>
-                  </p>
-                  <p className="text-[11px] text-slate-500">Direct reimbursement</p>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
-                <span className="text-base font-bold text-emerald-400 font-mono tabular-nums">
-                  {formatMoney(s.amount_cents, group.currency)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onMarkAsPaid(s.from_id, s.to_id, (s.amount_cents / 100).toFixed(2))
-                  }
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[44px] sm:min-h-0 rounded-xl text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 transition-all duration-150 cursor-pointer touch-manipulation active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
-                >
-                  <svg
-                    className="w-3.5 h-3.5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    aria-hidden="true"
+            <li key={`${s.from_id}-${s.to_id}`}>
+              <Item variant="outline">
+                <ItemMedia>
+                  <Avatar>
+                    <AvatarFallback>{s.from_name.charAt(0).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>
+                    <span>
+                      <span className="text-negative">{s.from_name}</span> pays{" "}
+                      <span className="text-positive">{s.to_name}</span>
+                    </span>
+                  </ItemTitle>
+                  <ItemDescription>Direct reimbursement</ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Amount
+                    cents={s.amount_cents}
+                    currency={group.currency}
+                    className="font-semibold"
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      onMarkAsPaid(s.from_id, s.to_id, (s.amount_cents / 100).toFixed(2))
+                    }
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                  </svg>
-                  <span>Mark as Paid</span>
-                </button>
-              </div>
+                    <CheckIcon data-icon="inline-start" />
+                    Mark as Paid
+                  </Button>
+                </ItemActions>
+              </Item>
             </li>
           ))}
         </ul>

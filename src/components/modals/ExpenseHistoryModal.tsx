@@ -1,7 +1,15 @@
+import { Amount } from "@/components/common/Amount";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import type { Expense, Participant } from "@/types";
+import { formatDateTime } from "@/utils/formatters";
 import type React from "react";
-import type { Expense, Participant } from "../../types";
-import { formatDateTime, formatMoney } from "../../utils/formatters";
-import { Modal } from "../common/Modal";
 
 interface ExpenseHistoryModalProps {
   isOpen: boolean;
@@ -20,149 +28,89 @@ export const ExpenseHistoryModal: React.FC<ExpenseHistoryModalProps> = ({
 }) => {
   if (!expense) return null;
 
-  const getParticipantName = (id: string) => {
-    return participants.find((p) => p.id === id)?.name || "Unknown";
-  };
-
+  const nameOf = (id: string) => participants.find((p) => p.id === id)?.name || "Unknown";
   const historyEntries = expense.history ? [...expense.history].reverse() : [];
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title="Expense Revision History"
-      icon="📜"
-      maxWidthClass="max-w-lg"
-    >
-      <div className="space-y-4">
-        {/* Current State Card */}
-        <div className="p-3.5 rounded-xl bg-slate-900 border border-indigo-500/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-400">
-              Current Version
-            </span>
-            {historyEntries.length > 0 ? (
-              <span className="text-[11px] text-slate-400">
-                Last modified {formatDateTime(expense.updated_at)}
-              </span>
-            ) : (
-              <span className="text-[11px] text-slate-400">
-                Created {formatDateTime(expense.created_at)}
-              </span>
-            )}
-          </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Expense Revision History</DialogTitle>
+          <DialogDescription>
+            {historyEntries.length > 0
+              ? `Last modified ${formatDateTime(expense.updated_at)}`
+              : `Created ${formatDateTime(expense.created_at)}`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <section aria-label="Current version" className="space-y-2 rounded-lg border p-3">
           <div className="flex items-start justify-between gap-2">
             <div>
-              <h4 className="text-sm font-semibold text-slate-100">{expense.title}</h4>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Paid by{" "}
-                <strong className="text-slate-200">{getParticipantName(expense.paid_by)}</strong>
-              </p>
+              <Badge variant="secondary" className="mb-1.5">
+                Current version
+              </Badge>
+              <p className="font-medium">{expense.title}</p>
+              <p className="text-sm text-muted-foreground">Paid by {nameOf(expense.paid_by)}</p>
             </div>
-            <div className="text-right">
-              <span className="text-base font-bold font-mono text-indigo-300">
-                {formatMoney(expense.amount_cents, currency)}
-              </span>
-            </div>
+            <Amount cents={expense.amount_cents} currency={currency} className="font-semibold" />
           </div>
-          <div className="mt-2.5 pt-2 border-t border-slate-800 flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1">
             {expense.splits.map((s) => (
-              <span
-                key={s.participant_id}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-950 text-[11px] text-slate-300 border border-slate-800"
-              >
-                <span>{getParticipantName(s.participant_id)}</span>
-                <span className="font-semibold text-indigo-400">
-                  ({s.shares} {s.shares === 1 ? "part" : "parts"})
-                </span>
-              </span>
+              <Badge key={s.participant_id} variant="outline">
+                {nameOf(s.participant_id)} ({s.shares} {s.shares === 1 ? "part" : "parts"})
+              </Badge>
             ))}
           </div>
-        </div>
+        </section>
 
-        {/* Audit Timeline */}
-        <div>
-          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-            Change History ({historyEntries.length} {historyEntries.length === 1 ? "edit" : "edits"}
+        <section className="space-y-3">
+          <h3 className="text-sm font-medium text-muted-foreground">
+            Change history ({historyEntries.length} {historyEntries.length === 1 ? "edit" : "edits"}
             )
-          </h4>
+          </h3>
 
           {historyEntries.length === 0 ? (
-            <div className="text-center py-6 px-4 rounded-xl border border-dashed border-slate-800 bg-slate-950/40">
-              <p className="text-xs text-slate-500">
-                This expense has not been modified since creation.
-              </p>
-            </div>
+            <p className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+              This expense has not been modified since creation.
+            </p>
           ) : (
-            <div className="space-y-4 relative before:absolute before:inset-0 before:left-3 before:w-0.5 before:bg-slate-800 pl-7">
+            <ol className="relative space-y-3 border-l pl-5">
               {historyEntries.map((entry, idx) => (
-                <div key={`${entry.edited_at}-${idx}`} className="relative">
-                  {/* Timeline dot */}
-                  <div className="absolute -left-7 top-1.5 w-2.5 h-2.5 rounded-full bg-indigo-500 border-2 border-slate-950 ring-2 ring-indigo-500/20" />
-
-                  <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[11px] font-semibold text-indigo-300">
-                        {formatDateTime(entry.edited_at)}
-                      </span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800">
-                        Revision #{historyEntries.length - idx}
-                      </span>
+                <li key={`${entry.edited_at}-${idx}`} className="relative">
+                  <span
+                    aria-hidden
+                    className="absolute top-1.5 -left-[25px] size-2.5 rounded-full bg-primary ring-4 ring-background"
+                  />
+                  <div className="space-y-2 rounded-lg border p-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{formatDateTime(entry.edited_at)}</span>
+                      <Badge variant="outline">Revision #{historyEntries.length - idx}</Badge>
                     </div>
-
-                    <p className="text-xs font-medium text-amber-300/90 mb-2">{entry.summary}</p>
-
-                    <div className="text-[11px] text-slate-400 space-y-1 bg-slate-900/60 p-2 rounded-lg border border-slate-850">
-                      <div className="font-semibold text-slate-300 mb-1">
-                        State before this edit:
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Title:</span>
-                        <span className="text-slate-200">{entry.previous_title}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Amount:</span>
-                        <span className="font-mono text-slate-200">
-                          {formatMoney(entry.previous_amount_cents, currency)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Payer:</span>
-                        <span className="text-slate-200">
-                          {getParticipantName(entry.previous_paid_by)}
-                        </span>
-                      </div>
-                      <div className="pt-1 mt-1 border-t border-slate-800">
-                        <span className="block mb-1">Splits:</span>
-                        <div className="flex flex-wrap gap-1">
-                          {entry.previous_splits.map((s) => (
-                            <span
-                              key={s.participant_id}
-                              className="px-1.5 py-0.5 rounded bg-slate-950 text-[10px] text-slate-300"
-                            >
-                              {getParticipantName(s.participant_id)} ({s.shares}p)
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                    <p>{entry.summary}</p>
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md bg-muted/50 p-2 text-xs">
+                      <dt className="col-span-2 font-medium">Before this edit</dt>
+                      <dt className="text-muted-foreground">Title</dt>
+                      <dd className="text-right">{entry.previous_title}</dd>
+                      <dt className="text-muted-foreground">Amount</dt>
+                      <dd className="text-right">
+                        <Amount cents={entry.previous_amount_cents} currency={currency} />
+                      </dd>
+                      <dt className="text-muted-foreground">Payer</dt>
+                      <dd className="text-right">{nameOf(entry.previous_paid_by)}</dd>
+                      <dt className="text-muted-foreground">Split</dt>
+                      <dd className="text-right">
+                        {entry.previous_splits
+                          .map((s) => `${nameOf(s.participant_id)} (${s.shares}p)`)
+                          .join(", ")}
+                      </dd>
+                    </dl>
                   </div>
-                </div>
+                </li>
               ))}
-            </div>
+            </ol>
           )}
-        </div>
-
-        <div className="flex justify-end pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </Modal>
+        </section>
+      </DialogContent>
+    </Dialog>
   );
 };

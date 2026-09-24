@@ -35,7 +35,6 @@ const tripGroup = {
 
 test.beforeEach(async ({ page }) => {
   page.on("pageerror", (err) => console.error(">>> BROWSER ERROR:", err));
-  page.on("dialog", (dialog) => dialog.accept());
   await page.addInitScript(installTauriMock);
 });
 
@@ -52,21 +51,46 @@ test.describe("Removing members", () => {
     await page.getByRole("button", { name: /Lisbon Trip/ }).click();
 
     await page.getByRole("button", { name: "Remove Bob" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click();
     await expect(page.getByRole("button", { name: "Remove Bob" })).not.toBeVisible();
     await expect(page.getByText("2 participants")).toBeVisible();
 
     // Bob is no longer offered for new expenses...
     await page.getByRole("button", { name: "Add Expense", exact: true }).click();
-    const payer = page.locator("#select-expense-payer");
-    await expect(payer.locator("option", { hasText: "Bob" })).toHaveCount(0);
+    await page.locator("#select-expense-payer").click();
+    await expect(page.getByRole("option", { name: "Alice (You)" })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Bob" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Cancel" }).click();
 
     // ...but still owes his share of dinner, and can settle it.
-    await page.getByRole("button", { name: /Balances/ }).click();
-    const bobCard = page.locator("div.rounded-xl", { hasText: "Bob" }).filter({
-      hasText: "Removed",
-    });
+    await page.getByRole("tab", { name: "Balances" }).click();
+    const bobCard = page.getByTestId("balance-card").filter({ hasText: "Bob" });
+    await expect(bobCard.getByText("Removed")).toBeVisible();
     await expect(bobCard.getByText("-30.00 €")).toBeVisible();
+  });
+});
+
+test.describe("Confirmations", () => {
+  test("deleting an expense asks first, and cancel keeps it", async ({ page }) => {
+    await seed(page, { __SEED_GROUPS__: [tripGroup] });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Lisbon Trip/ }).click();
+
+    const openDelete = async () => {
+      await page.getByRole("button", { name: "Actions for Dinner" }).click();
+      await page.getByRole("menuitem", { name: "Delete" }).click();
+    };
+
+    await openDelete();
+    const confirmDialog = page.getByRole("alertdialog");
+    await expect(confirmDialog).toContainText('Delete "Dinner"?');
+    await confirmDialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("heading", { name: "Dinner" })).toBeVisible();
+
+    await openDelete();
+    await confirmDialog.getByRole("button", { name: "Delete" }).click();
+    await expect(page.getByText("No expenses recorded yet")).toBeVisible();
   });
 });
 
@@ -86,7 +110,7 @@ test.describe("Sharing and joining", () => {
     await expect(page.locator("#share-invite-code")).toHaveValue(
       /^ezcount:\/\/join\?server=https%3A%2F%2Fsync\.example\.com&group=group-trip&key=/
     );
-    await page.getByRole("button", { name: "Dismiss dialog" }).click();
+    await page.getByRole("button", { name: "Close" }).click();
     await expect(page.getByRole("button", { name: "Shared" })).toBeVisible();
   });
 

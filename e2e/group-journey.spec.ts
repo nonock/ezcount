@@ -1,5 +1,22 @@
-import { expect, test } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 import { installTauriMock } from "./fixtures/tauri-mock";
+
+async function chooseOption(page: Page, trigger: string, option: string) {
+  await page.locator(trigger).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+}
+
+/** Picks a day in the expense date picker, moving back a month if it isn't shown. */
+async function pickExpenseDate(page: Page, date: Date) {
+  await page.locator("#input-expense-date").click();
+  // The calendar tags each day with the browser's own date format.
+  const key = await page.evaluate((t) => new Date(t).toLocaleDateString(), date.getTime());
+  const day = page.locator(`[data-day="${key}"]`);
+  if ((await day.count()) === 0) {
+    await page.getByRole("button", { name: /previous month/i }).click();
+  }
+  await day.first().click();
+}
 
 test.beforeEach(async ({ page }) => {
   page.on("pageerror", (err) => console.error(">>> BROWSER ERROR:", err));
@@ -17,12 +34,12 @@ test.describe("Group Lifecycle & Selection (Regression Test)", () => {
     await expect(page.getByText("No groups yet")).toBeVisible();
 
     // Open create group modal
-    await page.getByRole("button", { name: "+ Create Group" }).click();
+    await page.getByRole("button", { name: "Create Group" }).click();
     await expect(page.getByRole("heading", { name: "Create New Group" })).toBeVisible();
 
     // Fill form
     await page.locator("#input-group-name").fill("Rome Holiday");
-    await page.locator("#select-group-currency").selectOption("EUR");
+    await chooseOption(page, "#select-group-currency", "EUR (€) — Euro");
 
     const participantInputs = page.locator("input[placeholder^='Participant']");
     await participantInputs.nth(0).fill("Alice");
@@ -41,7 +58,7 @@ test.describe("Group Lifecycle & Selection (Regression Test)", () => {
     await expect(page.getByRole("button", { name: "Reimburse" })).not.toBeVisible();
 
     // Navigate back to the dashboard
-    await page.getByRole("button", { name: "← Back to All Groups" }).click();
+    await page.getByRole("button", { name: "Back to All Groups" }).click();
 
     // Verify we are back on the dashboard with the group card visible
     await expect(page.getByRole("heading", { name: "Your Groups" })).toBeVisible();
@@ -68,15 +85,15 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await page.goto("/");
 
     // Create a group
-    await page.getByRole("button", { name: "+ Create Group" }).click();
+    await page.getByRole("button", { name: "Create Group" }).click();
     await page.locator("#input-group-name").fill("Ski Trip 2026");
-    await page.locator("#select-group-currency").selectOption("EUR");
+    await chooseOption(page, "#select-group-currency", "EUR (€) — Euro");
 
     const participantInputs = page.locator("input[placeholder^='Participant']");
     await participantInputs.nth(0).fill("Alice");
     await participantInputs.nth(1).fill("Bob");
     // Remove 3rd participant
-    await page.locator("button[title='Remove']").last().click();
+    await page.getByRole("button", { name: /Remove participant/ }).last().click();
 
     await page.getByRole("button", { name: "Create Group", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Ski Trip 2026" })).toBeVisible();
@@ -104,26 +121,28 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await expect(expenseCard.getByText("Paid by Alice", { exact: false })).toBeVisible();
 
     // Verify Active User Summary for Alice
-    await expect(page.getByText("Paid by you:")).toBeVisible();
+    await expect(page.getByText("Paid by you")).toBeVisible();
     await expect(page.getByText("200.00 €").first()).toBeVisible();
     await expect(page.getByText("+100.00 €")).toBeVisible();
 
     // Switch active user to Bob and verify summary updates
-    await page.getByLabel("Select active participant").selectOption({ label: "Bob" });
+    await chooseOption(page, "#select-active-participant", "Bob");
     await expect(page.getByText("-100.00 €")).toBeVisible();
 
     // Switch back to Alice
-    await page.getByLabel("Select active participant").selectOption({ label: "Alice" });
+    await chooseOption(page, "#select-active-participant", "Alice");
 
     // Add a second expense with a past date (yesterday)
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
 
     await page.getByRole("button", { name: "Add Expense", exact: true }).click();
     await page.locator("#input-expense-title").fill("Fondue Yesterday");
     await page.locator("#input-expense-amount").fill("50.00");
-    await page.locator("#input-expense-date").fill(yesterdayStr);
+    await pickExpenseDate(page, yesterday);
+    await expect(page.locator("#input-expense-date")).toContainText(
+      yesterday.toLocaleDateString("en-US", { dateStyle: "medium" })
+    );
     await page.getByRole("button", { name: "Save Expense" }).click();
 
     // Verify both "Today" and "Yesterday" headers are visible
@@ -132,7 +151,8 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await expect(page.getByRole("heading", { name: "Fondue Yesterday" })).toBeVisible();
 
     // Edit the first expense
-    await expenseCard.getByTitle("Edit expense").click();
+    await expenseCard.getByRole("button", { name: /Actions for/ }).click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
     await expect(page.getByRole("heading", { name: "Edit Expense" })).toBeVisible();
 
     await page.locator("#input-expense-title").fill("Chalet Rental & Firewood");
@@ -150,7 +170,7 @@ test.describe("Expense & Settlement Lifecycle", () => {
 
     // Verify history modal
     await expect(page.getByRole("heading", { name: "Expense Revision History" })).toBeVisible();
-    const historyModal = page.locator(".fixed");
+    const historyModal = page.getByRole("dialog");
     await expect(historyModal.getByText("Chalet Rental", { exact: true })).toBeVisible();
     await expect(historyModal.getByText("200.00 €")).toBeVisible();
 
@@ -158,13 +178,13 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await page.getByRole("button", { name: "Close" }).click();
 
     // Check Balances tab (Alice paid 250 + 50 = 300, total = 300, share = 150 each -> Bob owes 150)
-    await page.getByRole("button", { name: "Balances" }).click();
+    await page.getByRole("tab", { name: "Balances" }).click();
     await expect(page.getByText("Gets back")).toBeVisible();
     await expect(page.getByText("Owes")).toBeVisible();
     await expect(page.getByText("-150.00 €")).toBeVisible();
 
     // Check Settle Up tab
-    await page.getByRole("button", { name: "Settle Up" }).click();
+    await page.getByRole("tab", { name: "Settle Up" }).click();
     const settleCard = page.locator("li").filter({ hasText: "Bob pays Alice" });
     await expect(settleCard).toBeVisible();
     await expect(settleCard.getByText("150.00 €")).toBeVisible();

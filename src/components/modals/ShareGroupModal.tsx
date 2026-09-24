@@ -1,8 +1,25 @@
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
+import type { Group, SyncInfo } from "@/types";
+import { errorMessage } from "@/utils/errors";
+import { formatDateTime } from "@/utils/formatters";
+import { CopyIcon, LockIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
 import type React from "react";
 import { useEffect, useState } from "react";
-import type { Group, SyncInfo } from "../../types";
-import { formatDateTime } from "../../utils/formatters";
-import { Modal } from "../common/Modal";
+import { toast } from "sonner";
 
 const SERVER_KEY = "ezcount_sync_server";
 const DEFAULT_SERVER = "http://localhost:8787";
@@ -35,13 +52,11 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setServerUrl(rememberedServer());
     setError(null);
-    setCopied(false);
   }, [isOpen]);
 
   const handleEnable = async (e: React.FormEvent) => {
@@ -56,7 +71,7 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
         // Remembering the server is only a convenience.
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -75,124 +90,111 @@ export const ShareGroupModal: React.FC<ShareGroupModalProps> = ({
     if (!syncInfo?.invite_code) return;
     try {
       await navigator.clipboard.writeText(syncInfo.invite_code);
-      setCopied(true);
+      toast.success("Invite code copied");
     } catch {
       document.getElementById("share-invite-code")?.focus();
+      toast.info("Select the code and copy it manually");
     }
   };
 
-  const inputClass =
-    "w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition";
-
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Share Group" icon="🔗">
-      {!syncInfo?.enabled ? (
-        <form onSubmit={handleEnable} className="space-y-4">
-          <p className="text-xs text-slate-400 leading-relaxed">
-            Sync <strong className="text-slate-200">{group.name}</strong> through a sync server so
-            other members can join from their own devices. Everyone can add and edit expenses, even
-            offline; changes merge automatically when devices reconnect.
-          </p>
-          <div>
-            <label
-              htmlFor="input-sync-server"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
-            >
-              Sync server URL *
-            </label>
-            <input
-              id="input-sync-server"
-              type="url"
-              required
-              value={serverUrl}
-              onChange={(e) => setServerUrl(e.target.value)}
-              placeholder="https://sync.example.com"
-              autoComplete="url"
-              className={inputClass}
-            />
-          </div>
-          {error && (
-            <p role="alert" className="text-xs text-rose-300">
-              {error}
-            </p>
-          )}
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-slate-200 transition cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy}
-              className="px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition cursor-pointer disabled:opacity-50"
-            >
-              {busy ? "Connecting…" : "Start Syncing"}
-            </button>
-          </div>
-        </form>
-      ) : (
-        <div className="space-y-4">
-          <div>
-            <label
-              htmlFor="share-invite-code"
-              className="block text-xs font-semibold text-slate-300 mb-1.5"
-            >
-              Invite code
-            </label>
-            <textarea
-              id="share-invite-code"
-              readOnly
-              rows={3}
-              value={syncInfo.invite_code ?? ""}
-              onFocus={(e) => e.currentTarget.select()}
-              className={`${inputClass} font-mono text-[11px] break-all resize-none`}
-            />
-            <p className="text-[11px] text-slate-500 mt-1.5">
-              Anyone with this code can see and edit the group, so share it only with members.
-              Changes are end-to-end encrypted: the sync server cannot read them.
-            </p>
-          </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Share Group</DialogTitle>
+          <DialogDescription>
+            {syncInfo?.enabled
+              ? `Other members join "${group.name}" with this invite code.`
+              : `Sync "${group.name}" so other members can join from their own devices. Everyone can edit, even offline; changes merge when devices reconnect.`}
+          </DialogDescription>
+        </DialogHeader>
 
-          <dl className="text-xs space-y-1">
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-400">Server</dt>
-              <dd className="text-slate-200 font-mono truncate">{syncInfo.server_url}</dd>
-            </div>
-            <div className="flex justify-between gap-3">
-              <dt className="text-slate-400">Last synced</dt>
-              <dd className="text-slate-200">
-                {syncInfo.last_synced_at ? formatDateTime(syncInfo.last_synced_at) : "Never"}
-              </dd>
-            </div>
-          </dl>
-          {syncInfo.last_error && (
-            <p role="alert" className="text-xs text-rose-300">
-              Last sync failed: {syncInfo.last_error}
-            </p>
-          )}
+        {!syncInfo?.enabled ? (
+          <form onSubmit={handleEnable}>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="input-sync-server">Sync server URL</FieldLabel>
+                <Input
+                  id="input-sync-server"
+                  type="url"
+                  required
+                  value={serverUrl}
+                  onChange={(e) => setServerUrl(e.target.value)}
+                  placeholder="https://sync.example.com"
+                  autoComplete="url"
+                />
+                <FieldDescription>
+                  Changes are end-to-end encrypted: the server cannot read them.
+                </FieldDescription>
+              </Field>
+              <FieldError>{error}</FieldError>
+            </FieldGroup>
+            <DialogFooter className="mt-6">
+              <DialogClose asChild>
+                <Button type="button" variant="outline">
+                  Cancel
+                </Button>
+              </DialogClose>
+              <Button type="submit" disabled={busy}>
+                {busy && <Spinner data-icon="inline-start" />}
+                Start Syncing
+              </Button>
+            </DialogFooter>
+          </form>
+        ) : (
+          <>
+            <FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="share-invite-code">Invite code</FieldLabel>
+                <Textarea
+                  id="share-invite-code"
+                  readOnly
+                  rows={3}
+                  value={syncInfo.invite_code ?? ""}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="resize-none font-mono text-xs break-all"
+                />
+                <FieldDescription className="flex items-start gap-1.5">
+                  <LockIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                  Anyone with this code can see and edit the group, so share it only with members.
+                  Changes are end-to-end encrypted: the sync server cannot read them.
+                </FieldDescription>
+              </Field>
 
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
-            <button
-              type="button"
-              onClick={handleSyncNow}
-              disabled={busy}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition cursor-pointer disabled:opacity-50"
-            >
-              {busy ? "Syncing…" : "Sync Now"}
-            </button>
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition cursor-pointer"
-            >
-              {copied ? "Copied" : "Copy Invite Code"}
-            </button>
-          </div>
-        </div>
-      )}
-    </Modal>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+                <dt className="text-muted-foreground">Server</dt>
+                <dd className="truncate text-right font-mono">{syncInfo.server_url}</dd>
+                <dt className="text-muted-foreground">Last synced</dt>
+                <dd className="text-right">
+                  {syncInfo.last_synced_at ? formatDateTime(syncInfo.last_synced_at) : "Never"}
+                </dd>
+              </dl>
+
+              {syncInfo.last_error && (
+                <Alert variant="destructive">
+                  <TriangleAlertIcon />
+                  <AlertDescription>Last sync failed: {syncInfo.last_error}</AlertDescription>
+                </Alert>
+              )}
+            </FieldGroup>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={handleSyncNow} disabled={busy}>
+                {busy ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <RefreshCwIcon data-icon="inline-start" />
+                )}
+                Sync Now
+              </Button>
+              <Button onClick={handleCopy}>
+                <CopyIcon data-icon="inline-start" />
+                Copy Invite Code
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 };
