@@ -34,9 +34,9 @@ Skip them once with `LEFTHOOK=0`. CI (`.github/workflows/ci.yml`) runs the same 
 
 ## Test builds for phones and Linux
 
-Every push to `main` runs `.github/workflows/packages.yml`, which builds:
+Every push to `main` that touches the app runs `.github/workflows/packages.yml` (run it by hand from the Actions tab otherwise), which builds:
 
-- **`ezcount-android`**: an optimized APK for arm64 phones (about 15 MB),
+- **`ezcount-android`**: an optimized APK for arm64 phones. It is somewhat larger than a local `bun run android:apk` (about 15 MB), because CI skips link-time optimization to build faster,
 - **`ezcount-linux`**: a `.deb` and an `.AppImage`.
 
 Download them from the run's **Artifacts** section on GitHub. To install the APK, enable USB debugging on the phone and run `adb install -r <file>.apk`, or copy the file to the phone and open it. Every APK, local or from CI, is signed with the committed test key `src-tauri/gen/android/app/debug.keystore`, so a new one installs over the previous one and keeps the app's data. That key is public: replace it with a private one before publishing the app.

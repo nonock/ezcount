@@ -9,6 +9,18 @@ name: Packages
 on:
   push:
     branches: [main]
+    # Changes that can't affect the app's packages.
+    paths-ignore:
+      - "**/*.md"
+      - "e2e/**"
+      - "sync-server/**"
+      - "deploy/**"
+      - "scripts/**"
+      - ".github/dependabot.yml"
+      - ".github/workflows/ci.yml"
+      - "lefthook.yml"
+      - "biome.json"
+      - "playwright.config.ts"
   workflow_dispatch:
 
 concurrency:
@@ -21,6 +33,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   VITE_EZCOUNT_SERVER: ${{ vars.EZCOUNT_SERVER }}
+  # Test builds skip the release profile's whole-program optimization (`lto`, one codegen
+  # unit), which takes most of the build time on a runner, for a somewhat larger binary.
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
 
 jobs:
   android:
@@ -31,6 +47,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android

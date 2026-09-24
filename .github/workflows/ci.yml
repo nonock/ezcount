@@ -5,7 +5,9 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: ["**/*.md"]
   pull_request:
+    paths-ignore: ["**/*.md"]
   workflow_dispatch:
 
 concurrency:
@@ -34,8 +36,15 @@ jobs:
       - run: bun run typecheck
       - run: bun run build
 
+  # Lint and tests run as separate jobs, in parallel: clippy only type-checks, while tests
+  # compile everything, so they share little work anyway.
   rust:
+    name: rust-${{ matrix.task }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, test]
     steps:
       - uses: actions/checkout@v7
       - name: Install Tauri system dependencies
@@ -48,6 +57,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ matrix.task }}
           workspaces: |
             src-tauri -> target
             sync-server -> target
@@ -58,18 +68,27 @@ jobs:
       # `tauri::generate_context!` embeds the frontend, so it must be built first.
       - run: bun run build
       - name: Format
+        if: matrix.task == 'lint'
         run: |
           cargo fmt --manifest-path src-tauri/Cargo.toml --check
           cargo fmt --manifest-path sync-server/Cargo.toml --check
       - name: Clippy
+        if: matrix.task == 'lint'
         run: |
           cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
           cargo clippy --locked --manifest-path sync-server/Cargo.toml --all-targets -- -D warnings
       - name: Test
+        if: matrix.task == 'test'
+        env:
+          # No debug info: faster linking and a smaller cache. Failures still report locations.
+          CARGO_PROFILE_DEV_DEBUG: 0
         run: |
           cargo test --locked --manifest-path src-tauri/Cargo.toml
           cargo test --locked --manifest-path sync-server/Cargo.toml
       - name: Bindings are up to date
+        if: matrix.task == 'test'
+        env:
+          CARGO_PROFILE_DEV_DEBUG: 0
         run: |
           cargo run --locked --manifest-path src-tauri/Cargo.toml --bin export_bindings
           git diff --exit-code src/bindings.ts
