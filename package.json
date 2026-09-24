@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "android:apk": "tauri android build --apk --target aarch64",
     "relay": "cargo run --manifest-path sync-server/Cargo.toml",
     "bindings": "cargo run --manifest-path src-tauri/Cargo.toml --bin export_bindings",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",

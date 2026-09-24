@@ -1,0 +1,38 @@
+# ezcount relay behind Caddy, which gets and renews a Let's Encrypt certificate by itself.
+#
+#   cp .env.example .env    # then set EZCOUNT_DOMAIN
+#   docker compose up -d --build
+#
+# Needs a server with ports 80 and 443 open and a DNS record for the domain pointing at it.
+name: ezcount
+
+services:
+  relay:
+    build: ../sync-server
+    restart: unless-stopped
+    volumes:
+      - relay-data:/data
+    # Only Caddy talks to the relay; it is not published on the host.
+    expose:
+      - "8787"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - relay
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      EZCOUNT_DOMAIN: ${EZCOUNT_DOMAIN:?Set EZCOUNT_DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  relay-data:
+  caddy-data:
+  caddy-config:

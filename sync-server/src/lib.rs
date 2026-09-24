@@ -9,9 +9,13 @@
 //! the group secret on the devices and reveals nothing about the encryption key. Group IDs
 //! are random UUIDs, so they cannot be guessed and claimed before their creator.
 //!
-//! - `POST /v1/groups/{id}/updates`: body is one update; returns `{ "seq": n }`
-//! - `GET  /v1/groups/{id}/updates?after=n`: returns `{ "updates": [{ "seq", "data" }], "has_more" }`
-//!   with `data` in standard base64
+//! - `POST /v1/groups/{id}/updates`: body is one update; returns `{ "seq": n, "relay_id" }`
+//! - `GET  /v1/groups/{id}/updates?after=n`: returns
+//!   `{ "updates": [{ "seq", "data" }], "has_more", "relay_id" }` with `data` in standard base64
+//!
+//! `relay_id` is random and fixed for the lifetime of the database. When it changes (the
+//! database was reset or replaced), sequence numbers start over, so devices re-upload
+//! everything and read again from the start.
 //!
 //! Accounts let one person use several devices. Passwords never reach the relay: devices
 //! derive a login token from the password (Argon2id) and upload their account key encrypted
@@ -52,6 +56,8 @@ pub struct Relay {
     db: Mutex<Connection>,
     /// Failed login count and time of the first failure, per username. In memory only.
     login_failures: Mutex<HashMap<String, (u32, Instant)>>,
+    /// Identifies this database; see the module docs.
+    relay_id: String,
 }
 
 impl Relay {
@@ -78,11 +84,23 @@ impl Relay {
                  login_hash  BLOB NOT NULL,
                  wrapped_key BLOB NOT NULL,
                  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-             );",
+             );
+             CREATE TABLE IF NOT EXISTS relay_meta (
+                 key   TEXT PRIMARY KEY,
+                 value TEXT NOT NULL
+             );
+             INSERT OR IGNORE INTO relay_meta (key, value)
+                 VALUES ('relay_id', lower(hex(randomblob(16))));",
+        )?;
+        let relay_id = db.query_row(
+            "SELECT value FROM relay_meta WHERE key = 'relay_id'",
+            [],
+            |r| r.get(0),
         )?;
         Ok(Arc::new(Self {
             db: Mutex::new(db),
             login_failures: Mutex::new(HashMap::new()),
+            relay_id,
         }))
     }
 }
@@ -180,6 +198,7 @@ fn stored_hash(db: &Connection, group_id: &str) -> rusqlite::Result<Option<Vec<u
 #[derive(Serialize)]
 struct PushResponse {
     seq: i64,
+    relay_id: String,
 }
 
 async fn push(
@@ -212,7 +231,10 @@ async fn push(
     )?;
     let seq = tx.last_insert_rowid();
     tx.commit()?;
-    Ok(Json(PushResponse { seq }))
+    Ok(Json(PushResponse {
+        seq,
+        relay_id: relay.relay_id.clone(),
+    }))
 }
 
 #[derive(Deserialize)]
@@ -226,6 +248,7 @@ struct PullQuery {
 struct PullResponse {
     updates: Vec<Update>,
     has_more: bool,
+    relay_id: String,
 }
 
 #[derive(Serialize)]
@@ -263,7 +286,11 @@ async fn pull(
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let has_more = updates.len() > limit as usize;
     updates.truncate(limit as usize);
-    Ok(Json(PullResponse { updates, has_more }))
+    Ok(Json(PullResponse {
+        updates,
+        has_more,
+        relay_id: relay.relay_id.clone(),
+    }))
 }
 
 // ---------------------------------------------------------------------------

@@ -35,7 +35,8 @@ const SCHEMA: &str = "
         server_vv      BLOB NOT NULL,
         cursor         INTEGER NOT NULL,
         last_synced_at TEXT,
-        last_error     TEXT
+        last_error     TEXT,
+        relay_id       TEXT
     );
     CREATE TABLE IF NOT EXISTS account (
         id         INTEGER PRIMARY KEY CHECK (id = 1),
@@ -63,17 +64,32 @@ pub struct SyncMeta {
     pub server_vv: VersionVector,
     /// Highest server sequence number already imported.
     pub cursor: i64,
+    /// Identity of the relay database that `server_vv` and `cursor` refer to.
+    pub relay_id: Option<String>,
     pub last_synced_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
 }
 
 impl SyncMeta {
+    /// Whether this device ever uploaded to or read from the relay for this document.
+    pub fn used_relay(&self) -> bool {
+        self.cursor > 0 || self.server_vv.iter().next().is_some()
+    }
+
+    /// Forgets what the relay was thought to hold, so everything is uploaded and read again.
+    fn start_over(&mut self, relay_id: Option<String>) {
+        self.server_vv = VersionVector::new();
+        self.cursor = 0;
+        self.relay_id = relay_id;
+    }
+
     pub fn new(server_url: String, secret: String) -> Self {
         Self {
             server_url,
             secret,
             server_vv: VersionVector::new(),
             cursor: 0,
+            relay_id: None,
             last_synced_at: None,
             last_error: None,
         }
@@ -155,7 +171,8 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT group_id, server_url, secret, server_vv, cursor, last_synced_at, last_error
+                "SELECT group_id, server_url, secret, server_vv, cursor, last_synced_at, last_error,
+                        relay_id
                  FROM group_sync",
             )
             .map_err(db_err)?;
@@ -170,6 +187,7 @@ impl Store {
                         server_vv: VersionVector::decode(&r.get::<_, Vec<u8>>(3)?)
                             .unwrap_or_default(),
                         cursor: r.get(4)?,
+                        relay_id: r.get(7)?,
                         last_synced_at: r
                             .get::<_, Option<String>>(5)?
                             .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
@@ -443,6 +461,39 @@ impl Store {
         }
     }
 
+    /// Compares the relay's id with the one this device last saw for `id`. A different id
+    /// means the relay's database was reset or replaced and its sequence numbers started over,
+    /// so everything is uploaded and read again. Returns whether that happened.
+    pub fn check_relay(&mut self, id: &str, relay_id: Option<&str>) -> Res<bool> {
+        let Some(relay_id) = relay_id else {
+            // A relay too old to say; nothing to compare.
+            return Ok(false);
+        };
+        let meta = self.sync_mut(id)?;
+        let reset = match &meta.relay_id {
+            Some(known) if known == relay_id => return Ok(false),
+            Some(_) => {
+                meta.start_over(Some(relay_id.to_string()));
+                true
+            }
+            None => {
+                meta.relay_id = Some(relay_id.to_string());
+                false
+            }
+        };
+        let meta = meta.clone();
+        save_sync(&self.conn, id, &meta)?;
+        Ok(reset)
+    }
+
+    /// The relay lost `id` although this device used it before: upload everything again.
+    pub fn restart_sync(&mut self, id: &str) -> Res<()> {
+        let meta = self.sync_mut(id)?;
+        meta.start_over(None);
+        let meta = meta.clone();
+        save_sync(&self.conn, id, &meta)
+    }
+
     /// Saves the outcome of a sync attempt for display.
     pub fn record_sync_result(&mut self, id: &str, result: &Res<bool>) {
         let Some(meta) = self.sync.get_mut(id) else {
@@ -533,7 +584,8 @@ impl Store {
 /// Current schema version, stored in SQLite's `user_version`.
 /// 2: sync is end-to-end encrypted.
 /// 3: accounts (a new table, nothing to migrate).
-const SCHEMA_VERSION: i64 = 3;
+/// 4: `group_sync.relay_id`.
+const SCHEMA_VERSION: i64 = 4;
 
 fn upgrade_schema(conn: &Connection, warnings: &mut Vec<String>) -> Res<()> {
     let version: i64 = conn
@@ -550,6 +602,17 @@ fn upgrade_schema(conn: &Connection, warnings: &mut Vec<String>) -> Res<()> {
                  invite codes."
             ));
         }
+    }
+    let has_relay_id: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('group_sync') WHERE name = 'relay_id')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(db_err)?;
+    if !has_relay_id {
+        conn.execute("ALTER TABLE group_sync ADD COLUMN relay_id TEXT", [])
+            .map_err(db_err)?;
     }
     conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))
         .map_err(db_err)
@@ -570,12 +633,14 @@ fn save_snapshot(conn: &Connection, id: &str, doc: &LoroDoc) -> Res<()> {
 
 fn save_sync(conn: &Connection, id: &str, meta: &SyncMeta) -> Res<()> {
     conn.execute(
-        "INSERT INTO group_sync (group_id, server_url, secret, server_vv, cursor, last_synced_at, last_error)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO group_sync
+            (group_id, server_url, secret, server_vv, cursor, last_synced_at, last_error, relay_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(group_id) DO UPDATE SET
             server_url = excluded.server_url, secret = excluded.secret,
             server_vv = excluded.server_vv, cursor = excluded.cursor,
-            last_synced_at = excluded.last_synced_at, last_error = excluded.last_error",
+            last_synced_at = excluded.last_synced_at, last_error = excluded.last_error,
+            relay_id = excluded.relay_id",
         params![
             id,
             meta.server_url,
@@ -584,6 +649,7 @@ fn save_sync(conn: &Connection, id: &str, meta: &SyncMeta) -> Res<()> {
             meta.cursor,
             meta.last_synced_at.map(|d| d.to_rfc3339()),
             meta.last_error,
+            meta.relay_id,
         ],
     )
     .map_err(db_err)?;

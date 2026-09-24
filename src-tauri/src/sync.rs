@@ -48,9 +48,13 @@ struct SyncEvent {
 }
 
 pub fn http_client() -> Res<reqwest::Client> {
-    reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(30));
+    // Tests swap relays on one address; a pooled connection would still reach the old one.
+    #[cfg(test)]
+    let builder = builder.pool_max_idle_per_host(0);
+    builder
         .build()
         .map_err(|e| format!("Could not set up networking: {e}"))
 }
@@ -167,6 +171,16 @@ async fn password_keys(username: &str, password: &str) -> Res<PasswordKeys> {
 struct UpdatesPage {
     updates: Vec<RemoteUpdate>,
     has_more: bool,
+    // Missing from relays older than this field.
+    #[serde(default)]
+    relay_id: Option<String>,
+}
+
+/// One decrypted page of updates.
+struct Page {
+    updates: Vec<(i64, Vec<u8>)>,
+    has_more: bool,
+    relay_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -221,6 +235,8 @@ async fn check_status(response: reqwest::Response) -> Res<reqwest::Response> {
 }
 
 const NOT_ON_SERVER: &str = "The sync server does not know this group";
+/// A relay from before accounts answers 404 on the account endpoints.
+const NO_ACCOUNTS: &str = "This server doesn't support accounts. Update the ezcount relay.";
 
 /// Encrypts and uploads one update.
 async fn push(
@@ -242,15 +258,14 @@ async fn push(
     Ok(())
 }
 
-/// Fetches and decrypts one page of updates after `after`.
-/// Returns them in order plus whether more remain.
+/// Fetches and decrypts one page of updates after `after`, in order.
 async fn pull_page(
     http: &reqwest::Client,
     server_url: &str,
     keys: &GroupKeys,
     group_id: &str,
     after: i64,
-) -> Res<(Vec<(i64, Vec<u8>)>, bool)> {
+) -> Res<Page> {
     let response = http
         .get(updates_url(server_url, group_id))
         .query(&[("after", after)])
@@ -273,7 +288,11 @@ async fn pull_page(
             Ok((u.seq, keys.open(group_id, &sealed)?))
         })
         .collect::<Res<_>>()?;
-    Ok((updates, page.has_more))
+    Ok(Page {
+        updates,
+        has_more: page.has_more,
+        relay_id: page.relay_id,
+    })
 }
 
 /// Downloads a whole document. Returns it with the matching sync state.
@@ -287,12 +306,13 @@ async fn download(
     let doc = LoroDoc::new();
     let mut meta = SyncMeta::new(server_url.to_string(), secret.to_string());
     loop {
-        let (updates, has_more) = pull_page(http, server_url, &keys, id, meta.cursor).await?;
-        for (seq, bytes) in updates {
+        let page = pull_page(http, server_url, &keys, id, meta.cursor).await?;
+        meta.relay_id = page.relay_id;
+        for (seq, bytes) in page.updates {
             import_remote_update(&doc, &bytes, &mut meta.server_vv)?;
             meta.cursor = seq;
         }
-        if !has_more {
+        if !page.has_more {
             break;
         }
     }
@@ -315,12 +335,40 @@ pub async fn sync_group(state: &AppState, group_id: &str) -> Res<bool> {
 }
 
 async fn sync_group_inner(state: &AppState, group_id: &str) -> Res<bool> {
+    let not_shared = || "This group is not shared".to_string();
+    let meta = state
+        .store()
+        .sync_meta(group_id)
+        .ok_or_else(not_shared)?
+        .clone();
+    let keys = GroupKeys::derive(&meta.secret)?;
+    let mut changed = false;
+
+    // Before uploading, check the relay still holds what this device thinks it does. After the
+    // relay lost its data, or was replaced by an empty one, this device uploads everything
+    // again, so the group survives as long as one device still has it.
+    match pull_page(&state.http, &meta.server_url, &keys, group_id, meta.cursor).await {
+        Ok(page) => {
+            let restarted = state
+                .store()
+                .check_relay(group_id, page.relay_id.as_deref())?;
+            // After a restart the page's sequence numbers mean nothing; read again below.
+            if !restarted && !page.updates.is_empty() {
+                changed |= state.store().import_remote(group_id, &page.updates)?;
+            }
+        }
+        // Normal for a group never uploaded yet: the first upload registers it.
+        Err(e) if e == NOT_ON_SERVER => {
+            if meta.used_relay() {
+                state.store().restart_sync(group_id)?;
+            }
+        }
+        Err(e) => return Err(e),
+    }
+
     let (meta, outgoing) = {
         let store = state.store();
-        let meta = store
-            .sync_meta(group_id)
-            .ok_or_else(|| "This group is not shared".to_string())?
-            .clone();
+        let meta = store.sync_meta(group_id).ok_or_else(not_shared)?.clone();
         let doc = store.doc(group_id)?;
         let local = doc.oplog_vv();
         let outgoing = if meta.server_vv.includes_vv(&local) {
@@ -334,25 +382,25 @@ async fn sync_group_inner(state: &AppState, group_id: &str) -> Res<bool> {
         (meta, outgoing)
     };
 
-    let keys = GroupKeys::derive(&meta.secret)?;
     if let Some((bytes, pushed)) = outgoing {
         push(&state.http, &meta.server_url, &keys, group_id, &bytes).await?;
         state.store().mark_pushed(group_id, &pushed)?;
     }
 
-    let mut changed = false;
     loop {
         let after = state
             .store()
             .sync_meta(group_id)
             .map(|m| m.cursor)
-            .ok_or_else(|| "This group is not shared".to_string())?;
-        let (updates, has_more) =
-            pull_page(&state.http, &meta.server_url, &keys, group_id, after).await?;
-        if !updates.is_empty() {
-            changed |= state.store().import_remote(group_id, &updates)?;
+            .ok_or_else(not_shared)?;
+        let page = pull_page(&state.http, &meta.server_url, &keys, group_id, after).await?;
+        state
+            .store()
+            .check_relay(group_id, page.relay_id.as_deref())?;
+        if !page.updates.is_empty() {
+            changed |= state.store().import_remote(group_id, &page.updates)?;
         }
-        if !has_more {
+        if !page.has_more {
             break;
         }
     }
@@ -453,10 +501,11 @@ pub async fn sign_up(
         .send()
         .await
         .map_err(request_err)?;
-    if response.status() == reqwest::StatusCode::CONFLICT {
-        return Err(format!("The username \"{username}\" is already taken"));
-    }
-    check_status(response).await?;
+    match response.status().as_u16() {
+        409 => return Err(format!("The username \"{username}\" is already taken")),
+        404 => return Err(NO_ACCOUNTS.to_string()),
+        _ => check_status(response).await?,
+    };
 
     let session = Session {
         server_url: server_url.clone(),
@@ -494,6 +543,7 @@ pub async fn log_in(state: &AppState, server_url: &str, username: &str, password
         .map_err(request_err)?;
     let found: LogInResponse = match response.status().as_u16() {
         401 => return Err("Wrong username or password".to_string()),
+        404 => return Err(NO_ACCOUNTS.to_string()),
         429 => {
             return Err("Too many failed attempts. Wait a few minutes and try again.".to_string())
         }
@@ -882,6 +932,43 @@ mod end_to_end {
         (url, dir)
     }
 
+    /// A relay that can be swapped for an empty one on the same address, as if its database
+    /// had been lost.
+    struct ReplaceableRelay {
+        addr: std::net::SocketAddr,
+        url: String,
+        dir: PathBuf,
+        task: tokio::task::JoinHandle<std::io::Result<()>>,
+    }
+
+    impl ReplaceableRelay {
+        async fn start() -> Self {
+            let dir = std::env::temp_dir().join(format!("ezcount-relay-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self::spawn(dir, "127.0.0.1:0".parse().unwrap(), "first").await
+        }
+
+        async fn spawn(dir: PathBuf, addr: std::net::SocketAddr, db: &str) -> Self {
+            let relay =
+                ezcount_sync_server::Relay::open(&dir.join(format!("{db}.sqlite3"))).unwrap();
+            let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let task = tokio::spawn(ezcount_sync_server::serve(listener, relay));
+            Self {
+                addr,
+                url: format!("http://{addr}"),
+                dir,
+                task,
+            }
+        }
+
+        async fn replace_with_empty(self) -> Self {
+            self.task.abort();
+            let _ = self.task.await;
+            Self::spawn(self.dir, self.addr, "second").await
+        }
+    }
+
     fn split(id: &str) -> ExpenseSplit {
         ExpenseSplit {
             participant_id: id.to_string(),
@@ -973,6 +1060,74 @@ mod end_to_end {
         );
 
         let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn devices_upload_again_when_the_relay_loses_its_data() {
+        let relay = ReplaceableRelay::start().await;
+        let alice = Device::signed_up(&relay.url, "alice").await;
+        let group = alice.create("Trip", &["Alice", "Bob"]);
+        let (gid, a, b) = (
+            group.id.clone(),
+            group.participants[0].id.clone(),
+            group.participants[1].id.clone(),
+        );
+        alice.sync().await;
+        let bob = Device::signed_up(&relay.url, "bob").await;
+        join_group(&bob.state, &alice.invite(&gid)).await.unwrap();
+        bob.sync().await;
+
+        let relay = relay.replace_with_empty().await;
+
+        // Bob syncs first: the relay doesn't know the group any more, so he uploads all of it.
+        bob.edit(&gid, |d| {
+            doc::add_expense(
+                d,
+                "Museum",
+                3000,
+                b.clone(),
+                vec![split(&a), split(&b)],
+                None,
+            )
+        });
+        bob.sync().await;
+        // Alice's position refers to the old database. The new relay id tells her to start
+        // over: she uploads everything too, and reads Bob's upload from the beginning.
+        alice.edit(&gid, |d| {
+            doc::add_expense(
+                d,
+                "Dinner",
+                6000,
+                a.clone(),
+                vec![split(&a), split(&b)],
+                None,
+            )
+        });
+        alice.sync().await;
+        bob.sync().await;
+
+        let (ga, gb) = (alice.group(&gid), bob.group(&gid));
+        assert_eq!(ga, gb, "both devices converge again");
+        let mut titles: Vec<&str> = ga.expenses.iter().map(|e| e.title.as_str()).collect();
+        titles.sort();
+        assert_eq!(titles, vec!["Dinner", "Museum"]);
+
+        // The accounts' documents were uploaded again as well, so their other devices can sync.
+        let db = rusqlite::Connection::open(relay.dir.join("second.sqlite3")).unwrap();
+        let alice_account = alice.state.store().session().unwrap().account_id.clone();
+        let known: bool = db
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM groups WHERE id = ?1)",
+                [&alice_account],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(known);
+        // Another round moves nothing.
+        assert!(!sync_group(&alice.state, &gid).await.unwrap());
+
+        relay.task.abort();
+        let _ = std::fs::remove_dir_all(&relay.dir);
     }
 
     #[tokio::test(flavor = "multi_thread")]

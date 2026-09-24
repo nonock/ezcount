@@ -16,7 +16,8 @@ Split group expenses (Tricount-style) on Windows, Linux and Android. Built with 
 ```sh
 bun install
 bun run tauri dev          # desktop app
-bun run tauri android dev  # Android (needs the Android SDK/NDK and Rust Android targets)
+bun run tauri android dev  # Android on a connected phone (see "Android toolchain" below)
+bun run android:apk        # installable arm64 APK in src-tauri/gen/android/app/build/outputs/apk/
 bun run relay              # local sync relay on :8787
 bun run test:rust          # app + relay tests, including end-to-end sync against a real relay
 bun run test:e2e           # Playwright UI tests against a mocked backend
@@ -30,6 +31,29 @@ Git hooks ([lefthook](https://lefthook.dev), installed by `bun install`):
 - **pre-push** runs the Rust tests and the Playwright suite.
 
 Skip them once with `LEFTHOOK=0`. CI (`.github/workflows/ci.yml`) runs the same checks on Linux and builds the relay image. Dependabot proposes weekly updates, waiting 7 days after each release.
+
+## Test builds for phones and Linux
+
+Every push to `main` runs `.github/workflows/packages.yml`, which builds:
+
+- **`ezcount-android`**: an optimized APK for arm64 phones (about 15 MB),
+- **`ezcount-linux`**: a `.deb` and an `.AppImage`.
+
+Download them from the run's **Artifacts** section on GitHub. To install the APK, enable USB debugging on the phone and run `adb install -r <file>.apk`, or copy the file to the phone and open it. Every APK, local or from CI, is signed with the committed test key `src-tauri/gen/android/app/debug.keystore`, so a new one installs over the previous one and keeps the app's data. That key is public: replace it with a private one before publishing the app.
+
+Set the repository variable `EZCOUNT_SERVER` (Settings → Secrets and variables → Actions → Variables) to your relay URL so the login screen is pre-filled.
+
+To try the phone on your home network without deploying anything, run `bun run relay` on your computer, allow it through the firewall, and use `http://<computer's LAN IP>:8787` as the server on both devices. `localhost` on the phone means the phone itself.
+
+### Android toolchain
+
+Building Android locally needs, besides Rust and Bun:
+
+- JDK 17, the Android SDK (platform 36, build-tools) and the NDK, found through the `JAVA_HOME`, `ANDROID_HOME` and `NDK_HOME` environment variables,
+- `rustup target add aarch64-linux-android`,
+- on Windows, **Developer Mode** (Settings → System → For developers), because Tauri symlinks the Rust library into the Android project.
+
+Keep `GRADLE_USER_HOME` on the same drive as the project if you can; `gradle.properties` already works around the Kotlin daemon's cross-drive failure.
 
 ## Running the sync relay
 
@@ -48,6 +72,21 @@ Or with Docker (data lives in the `ezcount-relay` volume; `GET /health` answers 
 docker build -t ezcount-relay sync-server
 docker run -d --name ezcount-relay --restart unless-stopped -p 8787:8787 -v ezcount-relay:/data ezcount-relay
 ```
+
+### On a public server, with HTTPS
+
+`deploy/` runs the relay behind [Caddy](https://caddyserver.com), which gets and renews a Let's Encrypt certificate automatically. You need a server with ports 80 and 443 open and a domain whose DNS record points at it.
+
+```sh
+cd deploy
+cp .env.example .env        # set EZCOUNT_DOMAIN=ezcount.example.com
+docker compose up -d --build
+curl https://ezcount.example.com/health   # → ok
+```
+
+Then use `https://ezcount.example.com` as the server in the app. The relay's data is in the `ezcount_relay-data` volume; back it up to keep your accounts and groups.
+
+If the relay loses its data anyway, or you move to a new one at the same address, devices notice (each relay database has a random ID) and upload their groups and account lists again, so nothing is lost while one device still has them. Logins are not restored: the relay only knows your password's hash, so after such a loss, devices that are still logged in keep working but new ones can't log in. Back up the database.
 
 Enter the relay URL on the login screen when you create your account (set `VITE_EZCOUNT_SERVER` at build time to pre-fill it). To add people to a group, open it, tap **Invite** and send them the invite code; they use **Join with Code** from their own account and pick who they are in the group.
 

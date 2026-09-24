@@ -24,6 +24,16 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    signingConfigs {
+        // Fixed test key, committed on purpose: every test APK (local or CI) is signed the same
+        // way, so a newer one installs over an older one. Replace it before publishing the app.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -37,6 +47,9 @@ android {
             }
         }
         getByName("release") {
+            // Optimized test builds for phones, signed with the test key until the app has a
+            // real release key.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

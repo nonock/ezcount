@@ -43,3 +43,8 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly

@@ -13,6 +13,7 @@
 *.ico binary
 *.icns binary
 *.jar binary
+*.keystore binary
 *.woff2 binary
 
 # Generated files: hide from diffs and GitHub language stats.

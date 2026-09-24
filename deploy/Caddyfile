@@ -1,0 +1,4 @@
+{$EZCOUNT_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy relay:8787
+}
