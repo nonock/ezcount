@@ -5,6 +5,7 @@ import type {
   Group,
   NativeFeatures,
   ParticipantBalance,
+  PasswordStrength,
   SettlementTransfer,
   SyncInfo,
 } from "../types";
@@ -138,6 +139,11 @@ export const api = {
 
   async getSettlements(groupId: string): Promise<SettlementTransfer[]> {
     return unwrap(await commands.getSettlements(groupId));
+  },
+
+  /** How hard a new password is to guess; signing up requires `acceptable`. */
+  async passwordStrength(password: string, username: string): Promise<PasswordStrength> {
+    return commands.passwordStrength(password, username);
   },
 
   async nativeFeatures(): Promise<NativeFeatures> {

@@ -208,6 +208,12 @@ async shareText(text: string, title: string) : Promise<Result<null, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * How hard a password is to guess. Signing up requires `acceptable`.
+ */
+async passwordStrength(password: string, username: string) : Promise<PasswordStrength> {
+    return await TAURI_INVOKE("password_strength", { password, username });
 }
 }
 
@@ -229,6 +235,7 @@ export type Group = { id: string; name: string; currency: string; participants: 
 export type NativeFeatures = { share: boolean; scan: boolean }
 export type Participant = { id: string; name: string; removed?: boolean }
 export type ParticipantBalance = { participant_id: string; participant_name: string; paid_cents: number; owed_cents: number; net_cents: number; removed: boolean }
+export type PasswordStrength = { score: number; acceptable: boolean; warning: string | null; suggestions: string[] }
 export type SettlementTransfer = { from_id: string; from_name: string; to_id: string; to_name: string; amount_cents: number }
 export type SyncInfo = { group_id: string; enabled: boolean; server_url: string | null; invite_code: string | null; last_synced_at: string | null; last_error: string | null }
 

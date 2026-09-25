@@ -86,6 +86,18 @@ pub struct SyncInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct PasswordStrength {
+    // 0 (guessed at once) to 4 (very hard to guess), from zxcvbn.
+    pub score: u8,
+    // Strong and long enough to sign up with.
+    pub acceptable: bool,
+    // What makes it weak, like "This is a top-10 common password.".
+    pub warning: Option<String>,
+    // How to make it stronger.
+    pub suggestions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct NativeFeatures {
     // The system share sheet (`share_text`).
     pub share: bool,

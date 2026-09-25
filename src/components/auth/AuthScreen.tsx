@@ -7,12 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/services/api";
-import type { AccountInfo } from "@/types";
+import type { AccountInfo, PasswordStrength } from "@/types";
 import { errorMessage } from "@/utils/errors";
 import { serverName } from "@/utils/formatters";
 import { LockIcon } from "lucide-react";
 import type React from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
 
 type Mode = "login" | "signup";
 
@@ -56,6 +57,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
   const [error, setError] = useState<string | null>(null);
 
   const signingUp = mode === "signup";
+
+  // Rated as the user types, by the same check sign-up enforces.
+  const [strength, setStrength] = useState<PasswordStrength | null>(null);
+  useEffect(() => {
+    if (!signingUp || !password) {
+      setStrength(null);
+      return;
+    }
+    let current = true;
+    api
+      .passwordStrength(password, username)
+      .then((s) => current && setStrength(s))
+      .catch((err) => console.error("Could not rate the password:", err));
+    return () => {
+      current = false;
+    };
+  }, [signingUp, password, username]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,7 +155,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     autoComplete={signingUp ? "new-password" : "current-password"}
+                    aria-describedby={signingUp && strength ? "password-strength" : undefined}
                   />
+                  {signingUp && strength && (
+                    <PasswordStrengthMeter strength={strength} id="password-strength" />
+                  )}
                 </Field>
                 {signingUp && (
                   <Field>
@@ -194,7 +216,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
 
                 <FieldError>{error}</FieldError>
 
-                <Button type="submit" disabled={submitting} className="w-full">
+                <Button
+                  type="submit"
+                  disabled={submitting || (signingUp && !strength?.acceptable)}
+                  className="w-full"
+                >
                   {submitting && <Spinner data-icon="inline-start" />}
                   {signingUp ? "Create Account" : "Log In"}
                 </Button>

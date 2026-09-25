@@ -100,6 +100,28 @@ export function installTauriMock() {
     return groups;
   }
 
+  // A stand-in for zxcvbn: longer is stronger, a few common passwords and the username are weak.
+  function passwordStrength(password: string, username: string) {
+    const pw = String(password || "");
+    let score =
+      pw.length < 8 ? 0 : pw.length < 10 ? 1 : pw.length < 12 ? 2 : pw.length < 16 ? 3 : 4;
+    let warning: string | null = null;
+    if (["password", "password123", "qwertyuiop"].includes(pw.toLowerCase())) {
+      score = 0;
+      warning = "This is a top-10 common password.";
+    }
+    const name = String(username || "")
+      .trim()
+      .toLowerCase();
+    if (name && pw.toLowerCase().includes(name)) score = Math.min(score, 1);
+    return {
+      score,
+      acceptable: pw.length >= 8 && score >= 3,
+      warning,
+      suggestions: score < 3 ? ["Add another word or two. Uncommon words are better."] : [],
+    };
+  }
+
   function checkCredentials(username: string, password: string, signingUp: boolean) {
     const name = String(username || "")
       .trim()
@@ -113,6 +135,9 @@ export function installTauriMock() {
     }
     if (signingUp && String(password).length < 8) {
       throw new Error("Use a password of at least 8 characters");
+    }
+    if (signingUp && !passwordStrength(password, name).acceptable) {
+      throw new Error("This password is too easy to guess. Try a few unrelated words.");
     }
     return name;
   }
@@ -267,6 +292,9 @@ export function installTauriMock() {
 
         case "plugin:deep-link|get_current":
           return w.__OPENED_WITH__ ? [w.__OPENED_WITH__] : null;
+
+        case "password_strength":
+          return passwordStrength(args.password, args.username);
 
         case "native_features":
           return { share: false, scan: false, ...w.__NATIVE__ };

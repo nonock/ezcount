@@ -24,7 +24,7 @@ use url::Url;
 use crate::account;
 use crate::crypto::{GroupKeys, PasswordKeys};
 use crate::doc;
-use crate::models::Group;
+use crate::models::{Group, PasswordStrength};
 use crate::storage::{import_remote_update, Session, SyncMeta};
 use crate::AppState;
 
@@ -182,10 +182,41 @@ pub fn normalize_username(raw: &str) -> Res<String> {
     }
 }
 
-fn check_password(password: &str) -> Res<()> {
+/// Lowest zxcvbn score accepted at sign-up. 3 is "safely unguessable": over 10^8 guesses,
+/// which matters because a stolen relay database lets an attacker guess offline.
+const MIN_PASSWORD_SCORE: u8 = 3;
+
+/// How hard `password` is to guess, with the username and the app's name counted as known
+/// to an attacker. zxcvbn looks at the first 100 characters only, so this stays fast.
+pub fn password_strength(password: &str, username: &str) -> PasswordStrength {
+    let username = username.trim().to_lowercase();
+    let entropy = zxcvbn::zxcvbn(password, &[&username, "ezcount"]);
+    let score = u8::from(entropy.score());
+    let feedback = entropy.feedback();
+    PasswordStrength {
+        score,
+        acceptable: password.chars().count() >= MIN_PASSWORD_LEN && score >= MIN_PASSWORD_SCORE,
+        warning: feedback.and_then(|f| f.warning()).map(|w| w.to_string()),
+        suggestions: feedback
+            .map(|f| f.suggestions().iter().map(ToString::to_string).collect())
+            .unwrap_or_default(),
+    }
+}
+
+fn check_password(password: &str, username: &str) -> Res<()> {
     if password.chars().count() < MIN_PASSWORD_LEN {
         return Err(format!(
             "Use a password of at least {MIN_PASSWORD_LEN} characters"
+        ));
+    }
+    let strength = password_strength(password, username);
+    if !strength.acceptable {
+        let why = strength
+            .warning
+            .map(|w| format!(" {w}"))
+            .unwrap_or_default();
+        return Err(format!(
+            "This password is too easy to guess.{why} Try a few unrelated words."
         ));
     }
     Ok(())
@@ -516,7 +547,7 @@ pub async fn sign_up(
 ) -> Res<()> {
     let server_url = normalize_server_url(server_url)?;
     let username = normalize_username(username)?;
-    check_password(password)?;
+    check_password(password, &username)?;
     ensure_logged_out(state)?;
 
     let keys = password_keys(&username, password).await?;
@@ -889,8 +920,47 @@ mod tests {
         for bad in ["ab", "-alice", "al ice", "élodie", &"x".repeat(33)] {
             assert!(normalize_username(bad).is_err(), "{bad}");
         }
-        assert!(check_password("short").is_err());
-        assert!(check_password("long enough").is_ok());
+    }
+
+    #[test]
+    fn weak_passwords_are_refused() {
+        for weak in [
+            "password",
+            "password123",
+            "qwertyuiop",
+            "alice2024",
+            "ezcount2024",
+        ] {
+            let strength = password_strength(weak, "alice");
+            assert!(!strength.acceptable, "{weak}: score {}", strength.score);
+            assert!(check_password(weak, "alice").is_err(), "{weak}");
+        }
+        let common = password_strength("password", "alice");
+        assert_eq!(common.score, 0);
+        assert_eq!(
+            common.warning.as_deref(),
+            Some("This is a top-10 common password.")
+        );
+        let err = check_password("password", "alice").unwrap_err();
+        assert!(
+            err.contains("too easy to guess") && err.contains("top-10"),
+            "{err}"
+        );
+        assert!(check_password("short", "alice")
+            .unwrap_err()
+            .contains("at least"));
+
+        for strong in [
+            "correct horse battery",
+            "tangerine kayak mosaic",
+            "v8#Lq2!mZr9@wT",
+        ] {
+            let strength = password_strength(strong, "alice");
+            assert!(strength.acceptable, "{strong}: score {}", strength.score);
+            assert!(check_password(strong, "alice").is_ok(), "{strong}");
+        }
+        // A strong password is still refused when it's mostly the username.
+        assert!(!password_strength("maximilianmaximilian", "maximilian").acceptable);
     }
 }
 
@@ -1290,6 +1360,10 @@ mod end_to_end {
             .await
             .unwrap_err();
         assert!(err.contains("at least"), "{err}");
+        let err = sign_up(&other.state, &url, "dave", "password123")
+            .await
+            .unwrap_err();
+        assert!(err.contains("too easy to guess"), "{err}");
 
         let err = log_in(&other.state, &url, "alice", "wrong password")
             .await

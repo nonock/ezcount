@@ -7,6 +7,7 @@ export type {
   NativeFeatures,
   Participant,
   ParticipantBalance,
+  PasswordStrength,
   SettlementTransfer,
   SyncInfo,
 } from "../bindings";

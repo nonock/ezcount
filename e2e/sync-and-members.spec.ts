@@ -255,12 +255,12 @@ test.describe("Account", () => {
 
     await page.getByRole("tab", { name: "Sign up" }).click();
     await page.getByLabel("Username").fill("bob");
-    await page.getByLabel("Password", { exact: true }).fill("long enough");
+    await page.getByLabel("Password", { exact: true }).fill("tangerine kayak mosaic");
     await page.getByLabel("Confirm password").fill("different");
     await page.getByRole("button", { name: "Create Account" }).click();
     await expect(page.getByText("The passwords don't match.")).toBeVisible();
 
-    await page.getByLabel("Confirm password").fill("long enough");
+    await page.getByLabel("Confirm password").fill("tangerine kayak mosaic");
     await page.getByRole("button", { name: "Create Account" }).click();
     await expect(page.getByText('The username "bob" is already taken')).toBeVisible();
 
@@ -273,6 +273,39 @@ test.describe("Account", () => {
     await page.getByRole("menuitem", { name: "Log out" }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Log Out" }).click();
     await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+  });
+
+  test("rates the new password and refuses weak ones", async ({ page }) => {
+    await seed(page, { __LOGGED_OUT__: true });
+    await page.goto("/");
+    await page.getByRole("tab", { name: "Sign up" }).click();
+    await page.getByLabel("Username").fill("carol");
+    const password = page.getByLabel("Password", { exact: true });
+    const create = page.getByRole("button", { name: "Create Account" });
+
+    await password.fill("password");
+    await expect(password).toHaveAccessibleDescription(
+      "Too weak · This is a top-10 common password."
+    );
+    await expect(create).toBeDisabled();
+
+    await password.fill("carol-rocks-99");
+    await expect(password).toHaveAccessibleDescription(/^Too weak · /);
+    await expect(create).toBeDisabled();
+
+    await password.fill("tangerine kayak mosaic");
+    await expect(password).toHaveAccessibleDescription("Strong");
+    await page.getByLabel("Confirm password").fill("tangerine kayak mosaic");
+    await create.click();
+    await expect(page.getByText("No groups yet")).toBeVisible();
+  });
+
+  test("logging in doesn't rate the password", async ({ page }) => {
+    await seed(page, { __LOGGED_OUT__: true });
+    await page.goto("/");
+    await page.getByLabel("Password").fill("x");
+    await expect(page.getByText("Too weak")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Log In" })).toBeEnabled();
   });
 
   test("the server is built in, and can be changed", async ({ page }) => {

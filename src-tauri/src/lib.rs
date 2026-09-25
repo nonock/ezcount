@@ -15,8 +15,8 @@ use std::sync::{Mutex, MutexGuard};
 use tauri::{Manager, State};
 
 use crate::models::{
-    AccountInfo, ExpenseSplit, Group, NativeFeatures, ParticipantBalance, SettlementTransfer,
-    SyncInfo,
+    AccountInfo, ExpenseSplit, Group, NativeFeatures, ParticipantBalance, PasswordStrength,
+    SettlementTransfer, SyncInfo,
 };
 use crate::storage::Store;
 
@@ -315,6 +315,13 @@ fn add_self(state: State<AppState>, group_id: String, name: String) -> Result<Gr
     sync::add_self(&state, &group_id, &name)
 }
 
+/// How hard a password is to guess. Signing up requires `acceptable`.
+#[tauri::command]
+#[specta::specta]
+async fn password_strength(password: String, username: String) -> PasswordStrength {
+    sync::password_strength(&password, &username)
+}
+
 /// What this platform can do natively, beyond the web view.
 #[tauri::command]
 #[specta::specta]
@@ -361,7 +368,8 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         set_identity,
         add_self,
         native_features,
-        share_text
+        share_text,
+        password_strength
     ])
 }
 
