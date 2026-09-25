@@ -535,6 +535,7 @@ export const App: React.FC = () => {
         onNavigateHome={handleNavigateHome}
         onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
         username={account.username}
+        serverUrl={account.server_url}
         onLogOut={handleLogOut}
       />
 

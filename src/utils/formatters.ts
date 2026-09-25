@@ -92,3 +92,12 @@ export function formatDateGroupHeader(isoString: string): string {
     return isoString;
   }
 }
+
+/** `https://relay.example.com` → `relay.example.com`, for display. */
+export function serverName(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}

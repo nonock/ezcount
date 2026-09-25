@@ -8,20 +8,34 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/services/api";
 import type { AccountInfo } from "@/types";
 import { errorMessage } from "@/utils/errors";
+import { serverName } from "@/utils/formatters";
 import { LockIcon } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
 
 type Mode = "login" | "signup";
 
+// A relay the user picked instead of the default; unset when they use the default.
 const SERVER_KEY = "ezcount_sync_server";
-const DEFAULT_SERVER = import.meta.env.VITE_EZCOUNT_SERVER || "http://localhost:8787";
+/** The relay accounts live on unless the user picks another. */
+const DEFAULT_SERVER =
+  import.meta.env.VITE_EZCOUNT_SERVER ||
+  (import.meta.env.DEV ? "http://localhost:8787" : "https://ezcount-relay.fly.dev");
 
 function rememberedServer(): string {
   try {
     return localStorage.getItem(SERVER_KEY) || DEFAULT_SERVER;
   } catch {
     return DEFAULT_SERVER;
+  }
+}
+
+function rememberServer(server: string) {
+  try {
+    if (server === DEFAULT_SERVER) localStorage.removeItem(SERVER_KEY);
+    else localStorage.setItem(SERVER_KEY, server);
+  } catch {
+    // Remembering the server is only a convenience.
   }
 }
 
@@ -35,6 +49,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [serverUrl, setServerUrl] = useState(rememberedServer);
+  // Most people use the default relay, so the field stays out of the way until asked for.
+  const [editingServer, setEditingServer] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,11 +69,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
       const account = signingUp
         ? await api.signUp(server, username, password)
         : await api.logIn(server, username, password);
-      try {
-        localStorage.setItem(SERVER_KEY, server);
-      } catch {
-        // Remembering the server is only a convenience.
-      }
+      rememberServer(server);
       onAuthenticated(account);
     } catch (err) {
       setError(errorMessage(err));
@@ -141,19 +153,35 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
                     />
                   </Field>
                 )}
-                <Field>
-                  <FieldLabel htmlFor="input-server">Server</FieldLabel>
-                  <Input
-                    id="input-server"
-                    type="url"
-                    required
-                    value={serverUrl}
-                    onChange={(e) => setServerUrl(e.target.value)}
-                    autoComplete="url"
-                    className="font-mono text-sm"
-                  />
-                  <FieldDescription>The ezcount relay that keeps your account.</FieldDescription>
-                </Field>
+                {editingServer && (
+                  <Field>
+                    <FieldLabel htmlFor="input-server">Server</FieldLabel>
+                    <Input
+                      id="input-server"
+                      type="url"
+                      required
+                      value={serverUrl}
+                      onChange={(e) => setServerUrl(e.target.value)}
+                      autoComplete="url"
+                      className="font-mono text-sm"
+                    />
+                    <FieldDescription>
+                      Only for a relay you run yourself. Your account and groups live on it.
+                      {serverUrl.trim() !== DEFAULT_SERVER && (
+                        <>
+                          {" "}
+                          <button
+                            type="button"
+                            className="underline underline-offset-4 hover:text-foreground"
+                            onClick={() => setServerUrl(DEFAULT_SERVER)}
+                          >
+                            Use the default server
+                          </button>
+                        </>
+                      )}
+                    </FieldDescription>
+                  </Field>
+                )}
 
                 {signingUp && (
                   <Alert>
@@ -171,6 +199,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
                   {submitting && <Spinner data-icon="inline-start" />}
                   {signingUp ? "Create Account" : "Log In"}
                 </Button>
+
+                {!editingServer && (
+                  <p className="text-center text-sm text-muted-foreground">
+                    Server: <span className="font-mono">{serverName(serverUrl)}</span> ·{" "}
+                    <button
+                      type="button"
+                      className="underline underline-offset-4 hover:text-foreground"
+                      onClick={() => setEditingServer(true)}
+                      aria-label="Change server"
+                    >
+                      Change
+                    </button>
+                  </p>
+                )}
               </FieldGroup>
             </form>
           </CardContent>

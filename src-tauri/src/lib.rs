@@ -416,9 +416,10 @@ pub fn run() {
     }
 
     app.setup(|app| {
-        // Installers register the ezcount:// scheme; this covers dev builds and portable
-        // copies. Invite links still work without it, by pasting.
-        #[cfg(any(windows, target_os = "linux"))]
+        // Installers register the ezcount:// scheme; this covers portable copies. Not dev
+        // builds: links would start a debug copy outside `tauri dev`, without its dev server,
+        // and that copy would then hold the single instance. Pasting invites always works.
+        #[cfg(all(any(windows, target_os = "linux"), not(debug_assertions)))]
         {
             use tauri_plugin_deep_link::DeepLinkExt;
             if let Err(e) = app.deep_link().register_all() {

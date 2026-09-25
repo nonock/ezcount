@@ -3,8 +3,9 @@
 # - ezcount-linux:   .deb and .AppImage
 # release.yml also calls this workflow to build a release's packages.
 #
-# Set the repository variable EZCOUNT_SERVER (Settings > Secrets and variables > Actions >
-# Variables) to pre-fill your relay URL on the login screen.
+# The app uses the official relay (https://ezcount-relay.fly.dev) by default. To build for
+# another one, set the repository variable EZCOUNT_SERVER (Settings > Secrets and variables >
+# Actions > Variables) to its URL.
 name: Packages
 
 on:

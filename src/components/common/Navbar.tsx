@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Group } from "@/types";
+import { serverName } from "@/utils/formatters";
 import {
   ChevronRightIcon,
   LogOutIcon,
@@ -27,6 +28,7 @@ interface NavbarProps {
   onNavigateHome: () => void;
   onOpenCreateGroup: () => void;
   username: string;
+  serverUrl: string;
   onLogOut: () => void;
 }
 
@@ -57,8 +59,9 @@ const ThemeMenu: React.FC = () => {
   );
 };
 
-const AccountMenu: React.FC<{ username: string; onLogOut: () => void }> = ({
+const AccountMenu: React.FC<{ username: string; serverUrl: string; onLogOut: () => void }> = ({
   username,
+  serverUrl,
   onLogOut,
 }) => (
   <DropdownMenu>
@@ -73,6 +76,9 @@ const AccountMenu: React.FC<{ username: string; onLogOut: () => void }> = ({
       <DropdownMenuLabel>
         <span className="block text-xs font-normal text-muted-foreground">Logged in as</span>
         <span className="block truncate">{username}</span>
+        <span className="block truncate font-mono text-xs font-normal text-muted-foreground">
+          {serverName(serverUrl)}
+        </span>
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
       <DropdownMenuItem onSelect={onLogOut}>
@@ -87,6 +93,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onNavigateHome,
   onOpenCreateGroup,
   username,
+  serverUrl,
   onLogOut,
 }) => {
   return (
@@ -115,7 +122,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         <div className="flex shrink-0 items-center gap-1">
           <ThemeMenu />
-          <AccountMenu username={username} onLogOut={onLogOut} />
+          <AccountMenu username={username} serverUrl={serverUrl} onLogOut={onLogOut} />
           <Button onClick={onOpenCreateGroup} aria-label="New group">
             <PlusIcon data-icon="inline-start" />
             <span className="hidden sm:inline">New Group</span>

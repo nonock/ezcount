@@ -24,6 +24,8 @@ bun run test:e2e           # Playwright UI tests against a mocked backend
 bun run verify             # everything CI runs
 ```
 
+Only one copy of the desktop app runs at a time: launching another (or opening an `ezcount://` link) hands over to the running one. So if `bun run tauri dev` quits right after `Running target\debug\ezcount.exe`, close the ezcount window that's already open.
+
 Git hooks ([lefthook](https://lefthook.dev), installed by `bun install`):
 
 - **pre-commit** regenerates `src/bindings.ts` when Rust changes, then in parallel: rustfmt and Biome (both fix and re-stage), clippy on the touched crate, and `tsc`. Only jobs whose files are staged run.
@@ -41,7 +43,7 @@ Every push to `main` that touches the app runs `.github/workflows/packages.yml` 
 
 Download them from the run's **Artifacts** section on GitHub. To install the APK, enable USB debugging on the phone and run `adb install -r <file>.apk`, or copy the file to the phone and open it. Every APK, local or from CI, is signed with the committed test key `src-tauri/gen/android/app/debug.keystore`, so a new one installs over the previous one and keeps the app's data. That key is public: replace it with a private one before publishing the app.
 
-Set the repository variable `EZCOUNT_SERVER` (Settings → Secrets and variables → Actions → Variables) to your relay URL so the login screen is pre-filled.
+The app uses the official relay, `https://ezcount-relay.fly.dev`, unless the login screen's **Change** link says otherwise. To build packages for another relay by default, set the repository variable `EZCOUNT_SERVER` (Settings → Secrets and variables → Actions → Variables) to its URL.
 
 To try the phone on your home network without deploying anything, run `bun run relay` on your computer, allow it through the firewall, and use `http://<computer's LAN IP>:8787` as the server on both devices. `localhost` on the phone means the phone itself.
 
@@ -119,7 +121,7 @@ One-time setup:
 
    Always keep `--ha=false`: each machine gets its own volume, so a second machine would hold a second, separate database.
 3. Let releases deploy it: run `fly tokens create deploy -a ezcount-relay`, then in GitHub go to Settings → Environments, create `production`, and add the token as the secret `FLY_API_TOKEN`. Optionally add yourself as a required reviewer there, so each deploy waits for your approval.
-4. Set the repository variable `EZCOUNT_SERVER` to `https://ezcount-relay.fly.dev`, so the app's login screen is pre-filled.
+4. If you picked another app name, update the default server in `src/components/auth/AuthScreen.tsx` and the App Links host in `src-tauri/tauri.conf.json`.
 
 Accounts and groups don't move to a new relay address: each group remembers the URL of the relay it syncs through. Create your account on the new relay and your groups there; moving existing ones would need a "relay moved" feature in the app. Pick the final address before real use.
 
@@ -140,7 +142,7 @@ Then use `https://ezcount.example.com` as the server in the app. The relay's dat
 
 If the relay loses its data anyway, or you move to a new one at the same address, devices notice (each relay database has a random ID) and upload their groups and account lists again, so nothing is lost while one device still has them. Logins are not restored: the relay only knows your password's hash, so after such a loss, devices that are still logged in keep working but new ones can't log in. Back up the database.
 
-Enter the relay URL on the login screen when you create your account (set `VITE_EZCOUNT_SERVER` at build time to pre-fill it).
+Accounts are created on the official relay by default. Dev builds (`tauri dev`) use `http://localhost:8787` instead, and `VITE_EZCOUNT_SERVER` overrides both at build time. On the login screen, **Change** under the form picks another relay; the app remembers it.
 
 ### Inviting people
 

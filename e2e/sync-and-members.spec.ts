@@ -275,6 +275,31 @@ test.describe("Account", () => {
     await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   });
 
+  test("the server is built in, and can be changed", async ({ page }) => {
+    await seed(page, { __LOGGED_OUT__: true });
+    await page.goto("/");
+    await expect(page.getByLabel("Server", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Server: localhost:8787")).toBeVisible();
+
+    // A relay of your own.
+    await page.getByRole("button", { name: "Change server" }).click();
+    await expect(page.getByLabel("Server", { exact: true })).toHaveValue("http://localhost:8787");
+    await page.getByLabel("Server", { exact: true }).fill("https://relay.example.com");
+    await page.getByLabel("Username").fill("alice");
+    await page.getByLabel("Password").fill(MOCK_PASSWORD);
+    await page.getByRole("button", { name: "Log In" }).click();
+    await page.getByRole("button", { name: "Account" }).click();
+    await expect(page.getByRole("menu")).toContainText("relay.example.com");
+
+    // It's remembered for the next login, with a way back to the default.
+    await page.getByRole("menuitem", { name: "Log out" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Log Out" }).click();
+    await expect(page.getByText("Server: relay.example.com")).toBeVisible();
+    await page.getByRole("button", { name: "Change server" }).click();
+    await page.getByRole("button", { name: "Use the default server" }).click();
+    await expect(page.getByLabel("Server", { exact: true })).toHaveValue("http://localhost:8787");
+  });
+
   test("logs in and rejects a wrong password", async ({ page }) => {
     await seed(page, { __LOGGED_OUT__: true });
     await page.goto("/");
