@@ -315,6 +315,20 @@ test.describe("Account", () => {
     await expect(page.getByText("No groups yet")).toBeVisible();
   });
 
+  test("warns when the server can't store a recovery key", async ({ page }) => {
+    await seed(page, { __LOGGED_OUT__: true, __OLD_RELAY__: true });
+    await page.goto("/");
+    await page.getByRole("tab", { name: "Sign up" }).click();
+    await page.getByLabel("Username").fill("carol");
+    await page.getByLabel("Password", { exact: true }).fill("tangerine kayak mosaic");
+    await page.getByLabel("Confirm password").fill("tangerine kayak mosaic");
+    await page.getByRole("button", { name: "Create Account" }).click();
+
+    await expect(page.getByText("No groups yet")).toBeVisible();
+    await expect(page.getByText("Your account has no recovery key")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Save your recovery key" })).toHaveCount(0);
+  });
+
   test("resets a forgotten password with the recovery key", async ({ page }) => {
     const key = "7KQ2-M9XD-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF";
     await seed(page, { __LOGGED_OUT__: true, __RECOVERY_KEY__: key });

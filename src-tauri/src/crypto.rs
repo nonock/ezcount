@@ -81,6 +81,38 @@ fn open_with(cipher: &XChaCha20Poly1305, aad: &[u8], blob: &[u8]) -> Result<Vec<
         .map_err(|_| OpenError::Unreadable)
 }
 
+/// A group secret or account key (32 random bytes, base64url, as in invite links).
+///
+/// Its own type, so it can't be passed where a group id or URL is expected, or the other way
+/// round; `Debug` hides it, so logging a struct doesn't leak it. Get the text with `expose()`,
+/// only where it has to leave memory (storage, invite links, derivation).
+#[derive(Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(transparent)]
+pub struct Secret(String);
+
+impl Secret {
+    pub fn new(value: String) -> Self {
+        Self(value)
+    }
+
+    /// A new random secret.
+    pub fn generate() -> Res<Self> {
+        let mut bytes = [0u8; SECRET_LEN];
+        getrandom::fill(&mut bytes).map_err(|e| format!("Could not generate a key: {e}"))?;
+        Ok(Self(URL_SAFE_NO_PAD.encode(bytes)))
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(…)")
+    }
+}
+
 pub struct GroupKeys {
     /// Bearer token proving access to the relay. Safe to send; reveals nothing about the data.
     pub auth_token: String,
@@ -88,10 +120,12 @@ pub struct GroupKeys {
 }
 
 impl GroupKeys {
-    /// Derives the keys from a group secret (32 random bytes, base64url, as in invite codes).
-    pub fn derive(secret: &str) -> Res<Self> {
+    /// Derives the keys from a group secret.
+    pub fn derive(secret: &Secret) -> Res<Self> {
         let invalid = || "The group key is malformed".to_string();
-        let secret = URL_SAFE_NO_PAD.decode(secret).map_err(|_| invalid())?;
+        let secret = URL_SAFE_NO_PAD
+            .decode(secret.expose())
+            .map_err(|_| invalid())?;
         if secret.len() != SECRET_LEN {
             return Err(invalid());
         }
@@ -240,14 +274,18 @@ impl CredentialKeys {
     }
 
     /// Encrypts the account key (a secret in the same format as group secrets).
-    pub fn wrap_account_key(&self, account_id: &str, account_key: &str) -> Res<Vec<u8>> {
-        seal_with(&self.wrap, account_id.as_bytes(), account_key.as_bytes())
+    pub fn wrap_account_key(&self, account_id: &str, account_key: &Secret) -> Res<Vec<u8>> {
+        seal_with(
+            &self.wrap,
+            account_id.as_bytes(),
+            account_key.expose().as_bytes(),
+        )
     }
 
-    pub fn unwrap_account_key(&self, account_id: &str, blob: &[u8]) -> Res<String> {
+    pub fn unwrap_account_key(&self, account_id: &str, blob: &[u8]) -> Res<Secret> {
         let unreadable = || "Your account key could not be decrypted".to_string();
         let key = open_with(&self.wrap, account_id.as_bytes(), blob).map_err(|_| unreadable())?;
-        let key = String::from_utf8(key).map_err(|_| unreadable())?;
+        let key = Secret::new(String::from_utf8(key).map_err(|_| unreadable())?);
         GroupKeys::derive(&key).map_err(|_| unreadable())?;
         Ok(key)
     }
@@ -278,7 +316,11 @@ mod tests {
             GroupKeys::derive(&secret).unwrap(),
         );
         assert_eq!(a.auth_token, b.auth_token);
-        assert_ne!(a.auth_token, secret, "the secret itself is never sent");
+        assert_ne!(
+            a.auth_token,
+            secret.expose(),
+            "the secret itself is never sent"
+        );
         assert_eq!(b.open("g", &a.seal("g", b"x").unwrap()).unwrap(), b"x");
     }
 
@@ -303,8 +345,8 @@ mod tests {
         let keys = CredentialKeys::from_password("alice", "correct horse").unwrap();
         let blob = keys.wrap_account_key("acc-1", &account_key).unwrap();
         assert!(!blob
-            .windows(account_key.len())
-            .any(|w| w == account_key.as_bytes()));
+            .windows(account_key.expose().len())
+            .any(|w| w == account_key.expose().as_bytes()));
 
         // Same username and password on another device: same token, same key.
         let again = CredentialKeys::from_password("alice", "correct horse").unwrap();
@@ -370,7 +412,7 @@ mod tests {
 
     #[test]
     fn rejects_malformed_secrets() {
-        assert!(GroupKeys::derive("short").is_err());
-        assert!(GroupKeys::derive("not base64 !!").is_err());
+        assert!(GroupKeys::derive(&Secret::new("short".into())).is_err());
+        assert!(GroupKeys::derive(&Secret::new("not base64 !!".into())).is_err());
     }
 }

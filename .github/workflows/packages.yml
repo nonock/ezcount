@@ -66,7 +66,26 @@ jobs:
       - run: bun install --frozen-lockfile
       # The runner image ships the Android SDK and NDK; Tauri looks for the NDK in NDK_HOME.
       - run: echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+      # These APKs go to other people's phones, so they must carry the private release key:
+      # the committed test key is public (see README, "Signing key"). No key, no build.
+      - name: Release signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_RELEASE_KEYSTORE }}
+          PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE" ] || [ -z "$PASSWORD" ]; then
+            echo "::error::Set the ANDROID_RELEASE_KEYSTORE and ANDROID_RELEASE_KEYSTORE_PASSWORD secrets (README, \"Signing key\")."
+            exit 1
+          fi
+          echo "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/release.p12"
+          echo "EZCOUNT_RELEASE_KEYSTORE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
+          echo "EZCOUNT_RELEASE_KEYSTORE_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
       - run: bunx tauri android build --apk --target aarch64
+      - name: Check the APK carries the release key
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk \
+            | tee /dev/stderr | grep -q "CN=ezcount"
       - uses: actions/upload-artifact@v7
         with:
           name: ezcount-android

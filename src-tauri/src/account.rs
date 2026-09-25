@@ -8,6 +8,7 @@
 //! "you" are in each. Identities live in their own map so that choosing who you are never
 //! conflicts with joining or leaving a group on another device.
 
+use crate::crypto::Secret;
 use chrono::{SecondsFormat, Utc};
 use loro::{LoroDoc, LoroValue};
 use serde::Deserialize;
@@ -28,7 +29,7 @@ pub struct AccountGroup {
     #[serde(skip)]
     pub group_id: String,
     pub server_url: String,
-    pub secret: String,
+    pub secret: Secret,
 }
 
 fn root(doc: &LoroDoc) -> Res<serde_json::Value> {
@@ -58,10 +59,10 @@ pub fn groups(doc: &LoroDoc) -> Res<Vec<AccountGroup>> {
         .collect())
 }
 
-pub fn add_group(doc: &LoroDoc, group_id: &str, server_url: &str, secret: &str) -> Res<()> {
+pub fn add_group(doc: &LoroDoc, group_id: &str, server_url: &str, secret: &Secret) -> Res<()> {
     let entry: HashMap<String, LoroValue> = [
         ("server_url", server_url.into()),
-        ("secret", secret.into()),
+        ("secret", secret.expose().into()),
         (
             "added_at",
             Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true).into(),
@@ -108,15 +109,16 @@ mod tests {
     #[test]
     fn groups_and_identities_round_trip() {
         let doc = LoroDoc::new();
-        add_group(&doc, "g1", "http://relay", "secret-1").unwrap();
-        add_group(&doc, "g2", "http://relay", "secret-2").unwrap();
+        let secret = |s: &str| Secret::new(s.to_string());
+        add_group(&doc, "g1", "http://relay", &secret("secret-1")).unwrap();
+        add_group(&doc, "g2", "http://relay", &secret("secret-2")).unwrap();
         set_identity(&doc, "g1", "p-alice").unwrap();
 
         let mut list = groups(&doc).unwrap();
         list.sort_by(|a, b| a.group_id.cmp(&b.group_id));
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].group_id, "g1");
-        assert_eq!(list[0].secret, "secret-1");
+        assert_eq!(list[0].secret.expose(), "secret-1");
         assert_eq!(identities(&doc).unwrap().get("g1").unwrap(), "p-alice");
 
         remove_group(&doc, "g1").unwrap();
@@ -127,13 +129,13 @@ mod tests {
     #[test]
     fn concurrent_join_and_identity_both_survive() {
         let (a, b) = (LoroDoc::new(), LoroDoc::new());
-        add_group(&a, "g1", "http://relay", "s").unwrap();
+        add_group(&a, "g1", "http://relay", &Secret::new("s".into())).unwrap();
         a.commit();
         b.import(&a.export(loro::ExportMode::Snapshot).unwrap())
             .unwrap();
 
         // Phone joins another group while the laptop picks an identity in the first.
-        add_group(&a, "g2", "http://relay", "s2").unwrap();
+        add_group(&a, "g2", "http://relay", &Secret::new("s2".into())).unwrap();
         set_identity(&b, "g1", "p-bob").unwrap();
         a.commit();
         b.commit();

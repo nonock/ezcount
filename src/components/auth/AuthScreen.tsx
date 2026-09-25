@@ -13,6 +13,7 @@ import { serverName } from "@/utils/formatters";
 import { KeyRoundIcon } from "lucide-react";
 import type React from "react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { PasswordStrengthMeter, usePasswordStrength } from "./PasswordStrengthMeter";
 
 type Mode = "login" | "signup" | "recover";
@@ -102,6 +103,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
           ? await api.signUp(server, username, password)
           : await api.recoverAccount(server, username, recoveryKey, password);
       rememberServer(server);
+      if (!signedIn.recovery_key) {
+        // A relay from before recovery keys: say so, rather than leave the user thinking they
+        // have a way back in.
+        toast.warning("Your account has no recovery key", {
+          description:
+            "This server can't store recovery keys yet, so a forgotten password can't be reset. Once the server is updated, create one from the account menu: New recovery key.",
+          duration: Number.POSITIVE_INFINITY,
+          closeButton: true,
+        });
+      }
       onAuthenticated(
         signedIn.account,
         signedIn.recovery_key

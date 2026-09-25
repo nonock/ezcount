@@ -13,7 +13,7 @@
 //! with the same groups: `reconcile` downloads groups added on another device and drops the
 //! ones left there. Every group of a logged-in device is shared through the relay.
 
-use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use loro::{ExportMode, LoroDoc};
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
 
 use crate::account;
-use crate::crypto::{new_recovery_key, CredentialKeys, GroupKeys};
+use crate::crypto::{new_recovery_key, CredentialKeys, GroupKeys, Secret};
 use crate::doc;
 use crate::models::{Group, PasswordStrength};
 use crate::storage::{import_remote_update, Session, SyncMeta};
@@ -50,7 +50,10 @@ struct SyncEvent {
 pub fn http_client() -> Res<reqwest::Client> {
     let builder = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30));
+        .timeout(Duration::from_secs(30))
+        // The relay never redirects. Following one could resend tokens elsewhere, or over
+        // plain HTTP.
+        .redirect(reqwest::redirect::Policy::none());
     // Tests swap relays on one address; a pooled connection would still reach the old one.
     #[cfg(test)]
     let builder = builder.pool_max_idle_per_host(0);
@@ -66,7 +69,7 @@ pub fn http_client() -> Res<reqwest::Client> {
 pub struct Invite {
     pub server_url: String,
     pub group_id: String,
-    pub secret: String,
+    pub secret: Secret,
 }
 
 /// Invite format version. Version 2 means end-to-end encrypted updates.
@@ -77,11 +80,11 @@ const INVITE_VERSION: &str = "2";
 /// It is a web link, so chat apps make it clickable. The relay's `/join` page opens the app
 /// (or tells how to join by hand). The secret is in the fragment, which browsers never send
 /// to the server.
-pub fn invite_code(server_url: &str, group_id: &str, secret: &str) -> String {
+pub fn invite_code(server_url: &str, group_id: &str, secret: &Secret) -> String {
     let fragment = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("v", INVITE_VERSION)
         .append_pair("g", group_id)
-        .append_pair("k", secret)
+        .append_pair("k", secret.expose())
         .finish();
     format!("{server_url}/join#{fragment}")
 }
@@ -137,7 +140,7 @@ pub fn parse_invite(code: &str) -> Res<Invite> {
             "This invite is for a different version of ezcount. Ask for a new one.".to_string(),
         );
     }
-    let secret = param("k")?;
+    let secret = Secret::new(param("k")?);
     GroupKeys::derive(&secret).map_err(|_| invalid())?;
     Ok(Invite {
         server_url: normalize_server_url(&server)?,
@@ -149,16 +152,49 @@ pub fn parse_invite(code: &str) -> Res<Invite> {
 pub fn normalize_server_url(raw: &str) -> Res<String> {
     let trimmed = raw.trim().trim_end_matches('/');
     let url = Url::parse(trimmed).map_err(|_| format!("'{trimmed}' is not a valid server URL"))?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err("The server URL must start with http:// or https://".to_string());
+    match url.scheme() {
+        "https" => {}
+        // Plain HTTP would send login and group tokens readable to anyone on the way.
+        "http" if is_local(&url) => {}
+        "http" => {
+            return Err(
+                "Use an https:// address. Plain http:// only works for a server on \
+                        this device or your local network: over the internet it would send \
+                        your login unencrypted."
+                    .to_string(),
+            )
+        }
+        _ => return Err("The server URL must start with https://".to_string()),
     }
     Ok(trimmed.to_string())
 }
 
-pub fn new_secret() -> Res<String> {
-    let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).map_err(|e| format!("Could not generate a key: {e}"))?;
-    Ok(URL_SAFE_NO_PAD.encode(bytes))
+/// This device or a private network (home network, emulator, Tailscale): where plain HTTP to
+/// a relay you run yourself is acceptable.
+fn is_local(url: &Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => {
+            let [a, b, ..] = ip.octets();
+            // 100.64.0.0/10: carrier-grade NAT, which Tailscale uses for its private network.
+            ip.is_loopback()
+                || ip.is_private()
+                || ip.is_link_local()
+                || (a == 100 && b & 0xc0 == 64)
+        }
+        Some(url::Host::Ipv6(ip)) => {
+            let first = ip.segments()[0];
+            // fc00::/7 unique local, fe80::/10 link-local.
+            ip.is_loopback() || first & 0xfe00 == 0xfc00 || first & 0xffc0 == 0xfe80
+        }
+        Some(url::Host::Domain(name)) => {
+            name == "localhost" || name.ends_with(".localhost") || name.ends_with(".local")
+        }
+        None => false,
+    }
+}
+
+pub fn new_secret() -> Res<Secret> {
+    Secret::generate()
 }
 
 // ---------------------------------------------------------------------------
@@ -327,8 +363,26 @@ fn request_err(e: reqwest::Error) -> String {
 async fn check_status(response: reqwest::Response) -> Res<reqwest::Response> {
     match response.status().as_u16() {
         200..=299 => Ok(response),
+        300..=399 => {
+            let target = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("another address")
+                .to_string();
+            Err(format!(
+                "The sync server redirects to {target}, which ezcount doesn't follow. Check the \
+                 server address."
+            ))
+        }
         401 | 403 => Err("The sync server rejected this group's key".to_string()),
         404 => Err(NOT_ON_SERVER.to_string()),
+        413 => Err("This group has reached the sync server's size limit".to_string()),
+        429 => Err(
+            "The sync server is getting too many requests from your network. Try again in a while."
+                .to_string(),
+        ),
+        507 => Err("The sync server is full. Try again later.".to_string()),
         status => {
             let body = response.text().await.unwrap_or_default();
             Err(format!("The sync server answered {status}: {body}"))
@@ -401,12 +455,12 @@ async fn pull_page(
 async fn download(
     http: &reqwest::Client,
     server_url: &str,
-    secret: &str,
+    secret: &Secret,
     id: &str,
 ) -> Res<(LoroDoc, SyncMeta)> {
     let keys = GroupKeys::derive(secret)?;
     let doc = LoroDoc::new();
-    let mut meta = SyncMeta::new(server_url.to_string(), secret.to_string());
+    let mut meta = SyncMeta::new(server_url.to_string(), secret.clone());
     loop {
         let page = pull_page(http, server_url, &keys, id, meta.cursor).await?;
         meta.relay_id = page.relay_id;
@@ -665,7 +719,7 @@ const OLD_RELAY: &str =
 const TOO_MANY_ATTEMPTS: &str = "Too many failed attempts. Wait a few minutes and try again.";
 
 /// The logged-in account's username, relay, id and key.
-fn account_credentials(state: &AppState) -> Res<(String, String, String, String)> {
+fn account_credentials(state: &AppState) -> Res<(String, String, String, Secret)> {
     let store = state.store();
     let session = store
         .session()
@@ -1087,7 +1141,7 @@ mod tests {
         url.query_pairs_mut()
             .append_pair("server", "https://sync.example.com")
             .append_pair("group", "g-1")
-            .append_pair("key", &secret)
+            .append_pair("key", secret.expose())
             .append_pair("v", "2");
         let invite = parse_invite(url.as_str()).unwrap();
         assert_eq!(invite.server_url, "https://sync.example.com");
@@ -1101,7 +1155,12 @@ mod tests {
         let without_version = invite_code("http://a", "g", &secret).replace("v=2&", "");
         let err = parse_invite(&without_version).err().unwrap();
         assert!(err.contains("different version"), "{err}");
-        assert!(parse_invite(&invite_code("http://a", "g", "too-short")).is_err());
+        assert!(parse_invite(&invite_code(
+            "http://a",
+            "g",
+            &Secret::new("too-short".into())
+        ))
+        .is_err());
         assert!(parse_invite("https://example.com/join?group=x").is_err());
         let elsewhere = invite_code("http://a", "g", &secret).replace("/join#", "/other#");
         assert!(parse_invite(&elsewhere).is_err());
@@ -1111,6 +1170,47 @@ mod tests {
             normalize_server_url(" http://192.168.1.10:8787/ ").unwrap(),
             "http://192.168.1.10:8787"
         );
+    }
+
+    #[test]
+    fn plain_http_only_on_this_device_or_a_private_network() {
+        for local in [
+            "http://localhost:8787",
+            "http://127.0.0.1:8787",
+            "http://192.168.1.10:8787",
+            "http://10.0.2.2:8787",
+            "http://172.20.0.5",
+            "http://100.101.1.2:8787",
+            "http://[::1]:8787",
+            "http://[fd12::1]",
+            "http://my-laptop.local:8787",
+            "https://ezcount-relay.fly.dev",
+            "https://203.0.113.9",
+        ] {
+            assert!(normalize_server_url(local).is_ok(), "{local}");
+        }
+        for public in [
+            "http://ezcount-relay.fly.dev",
+            "http://203.0.113.9:8787",
+            "http://8.8.8.8",
+            "http://[2001:db8::1]",
+            "http://localhost.example.com",
+        ] {
+            let err = normalize_server_url(public).unwrap_err();
+            assert!(err.contains("https://"), "{public}: {err}");
+        }
+        // Invites to such a server are refused too.
+        let invite = invite_code("http://example.com", "g", &new_secret().unwrap());
+        assert!(parse_invite(&invite).err().unwrap().contains("https://"));
+    }
+
+    #[test]
+    fn secrets_stay_out_of_debug_output() {
+        let secret = new_secret().unwrap();
+        let meta = SyncMeta::new("https://relay".into(), secret.clone());
+        let printed = format!("{secret:?} {meta:?}");
+        assert!(!printed.contains(secret.expose()), "{printed}");
+        assert!(printed.contains("Secret(…)"));
     }
 
     #[test]
@@ -1263,7 +1363,7 @@ mod end_to_end {
         let relay = ezcount_sync_server::Relay::open(&dir.join("relay.sqlite3")).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(ezcount_sync_server::serve(listener, relay, None));
+        tokio::spawn(ezcount_sync_server::serve(listener, relay));
         (url, dir)
     }
 
@@ -1288,7 +1388,7 @@ mod end_to_end {
                 ezcount_sync_server::Relay::open(&dir.join(format!("{db}.sqlite3"))).unwrap();
             let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
             let addr = listener.local_addr().unwrap();
-            let task = tokio::spawn(ezcount_sync_server::serve(listener, relay, None));
+            let task = tokio::spawn(ezcount_sync_server::serve(listener, relay));
             Self {
                 addr,
                 url: format!("http://{addr}"),
@@ -1479,10 +1579,14 @@ mod end_to_end {
             }),
         ] {
             let db = dir.join(format!("{}.sqlite3", urls.len()));
-            let relay = ezcount_sync_server::Relay::open(&db).unwrap();
+            let settings = ezcount_sync_server::Settings {
+                android_app,
+                ..Default::default()
+            };
+            let relay = ezcount_sync_server::Relay::open_with(&db, settings).unwrap();
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             urls.push(format!("http://{}", listener.local_addr().unwrap()));
-            tokio::spawn(ezcount_sync_server::serve(listener, relay, android_app));
+            tokio::spawn(ezcount_sync_server::serve(listener, relay));
         }
 
         // The page an invite link opens builds the app link from the fragment.
@@ -1549,6 +1653,142 @@ mod end_to_end {
         assert!(err.contains("rejected"), "{err}");
 
         let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    /// A relay with the given limits, taking the client's address from `x-test-client`.
+    async fn start_limited_relay(limits: ezcount_sync_server::Limits) -> (String, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("ezcount-relay-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let settings = ezcount_sync_server::Settings {
+            client_ip_header: Some("x-test-client".parse().unwrap()),
+            limits,
+            ..Default::default()
+        };
+        let relay =
+            ezcount_sync_server::Relay::open_with(&dir.join("relay.sqlite3"), settings).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(ezcount_sync_server::serve(listener, relay));
+        (url, dir)
+    }
+
+    /// Uploads `size` bytes to a document as `client`; returns the HTTP status.
+    async fn raw_push(url: &str, client: &str, doc: &str, token: &str, size: usize) -> u16 {
+        reqwest::Client::new()
+            .post(updates_url(url, doc))
+            .header("x-test-client", client)
+            .bearer_auth(token)
+            .body(vec![7u8; size])
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_relay_caps_sizes_and_upload_rates() {
+        let token = "t".repeat(43);
+        let limits = |f: fn(&mut ezcount_sync_server::Limits)| {
+            let mut limits = ezcount_sync_server::Limits::default();
+            f(&mut limits);
+            limits
+        };
+
+        // Per document, then in all: 413, then 507. Existing data stays readable.
+        let (url, dir) = start_limited_relay(limits(|l| {
+            l.max_document_bytes = 1000;
+            l.max_total_bytes = 1500;
+        }))
+        .await;
+        assert_eq!(raw_push(&url, "10.0.0.1", "g1", &token, 600).await, 200);
+        assert_eq!(raw_push(&url, "10.0.0.1", "g1", &token, 600).await, 413);
+        assert_eq!(raw_push(&url, "10.0.0.1", "g2", &token, 600).await, 200);
+        assert_eq!(raw_push(&url, "10.0.0.2", "g3", &token, 600).await, 507);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Per client: new documents and uploaded bytes per hour. Other clients are unaffected.
+        let (url, dir) = start_limited_relay(limits(|l| {
+            l.new_documents_per_hour = 2;
+            l.upload_bytes_per_hour = 1000;
+        }))
+        .await;
+        assert_eq!(raw_push(&url, "10.0.0.1", "g1", &token, 100).await, 200);
+        assert_eq!(raw_push(&url, "10.0.0.1", "g2", &token, 100).await, 200);
+        assert_eq!(raw_push(&url, "10.0.0.1", "g3", &token, 100).await, 429);
+        assert_eq!(raw_push(&url, "10.0.0.1", "g1", &token, 900).await, 429);
+        assert_eq!(raw_push(&url, "10.0.0.2", "g3", &token, 900).await, 200);
+        // IPv6 clients count per /64: another address in it shares the quota.
+        assert_eq!(
+            raw_push(&url, "2001:db8:1:2::1", "g4", &token, 600).await,
+            200
+        );
+        assert_eq!(
+            raw_push(&url, "2001:db8:1:2::99", "g4", &token, 600).await,
+            429
+        );
+        assert_eq!(
+            raw_push(&url, "2001:db8:1:3::1", "g4", &token, 600).await,
+            200
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Sign-ups per client; the app reports the limit.
+        let (url, dir) = start_limited_relay(limits(|l| l.sign_ups_per_hour = 1)).await;
+        let _alice = Device::signed_up(&url, "alice").await;
+        let err = sign_up(&Device::new().state, &url, "bob", PASSWORD)
+            .await
+            .unwrap_err();
+        assert!(err.contains("too many requests"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failed_logins_lock_one_network_not_the_account() {
+        let (url, dir) = start_limited_relay(ezcount_sync_server::Limits {
+            login_failures_per_client: 3,
+            login_failures_per_username: 5,
+            ..Default::default()
+        })
+        .await;
+        // The app sends no x-test-client header: it counts as another network.
+        let _alice = Device::signed_up(&url, "alice").await;
+        let wrong_login = |client: &'static str| {
+            let url = url.clone();
+            async move {
+                reqwest::Client::new()
+                    .post(format!("{url}/v1/accounts/login"))
+                    .header("x-test-client", client)
+                    .json(
+                        &serde_json::json!({ "username": "alice", "login_token": "w".repeat(43) }),
+                    )
+                    .send()
+                    .await
+                    .unwrap()
+                    .status()
+                    .as_u16()
+            }
+        };
+        for _ in 0..3 {
+            assert_eq!(wrong_login("203.0.113.7").await, 401);
+        }
+        assert_eq!(
+            wrong_login("203.0.113.7").await,
+            429,
+            "that network is blocked"
+        );
+        let phone = Device::new();
+        log_in(&phone.state, &url, "alice", PASSWORD).await.unwrap();
+
+        // Past the per-username ceiling, spread over networks, everyone waits.
+        for _ in 0..2 {
+            assert_eq!(wrong_login("198.51.100.1").await, 401);
+        }
+        let err = log_in(&Device::new().state, &url, "alice", PASSWORD)
+            .await
+            .unwrap_err();
+        assert!(err.contains("Too many failed attempts"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     const NEW_PASSWORD: &str = "juniper walrus lantern";
@@ -1927,7 +2167,7 @@ mod end_to_end {
             for needle in [
                 marker.as_bytes(),
                 b"Zoe-Marker",
-                secret.as_bytes(),
+                secret.expose().as_bytes(),
                 PASSWORD.as_bytes(),
             ] {
                 assert!(
@@ -1945,7 +2185,7 @@ mod end_to_end {
             .unwrap();
         let token = GroupKeys::derive(&secret).unwrap().auth_token;
         assert_eq!(stored, Sha256::digest(token.as_bytes()).to_vec());
-        assert_ne!(stored, Sha256::digest(secret.as_bytes()).to_vec());
+        assert_ne!(stored, Sha256::digest(secret.expose().as_bytes()).to_vec());
         let login_hash: Vec<u8> = relay
             .query_row("SELECT login_hash FROM accounts", [], |r| r.get(0))
             .unwrap();

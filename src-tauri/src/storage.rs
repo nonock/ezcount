@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use crate::crypto::Secret;
 use crate::doc;
 use crate::models::Group;
 
@@ -59,7 +60,7 @@ pub struct Session {
 #[derive(Debug, Clone)]
 pub struct SyncMeta {
     pub server_url: String,
-    pub secret: String,
+    pub secret: Secret,
     /// Operations the server is known to hold. Local operations beyond this still need pushing.
     pub server_vv: VersionVector,
     /// Highest server sequence number already imported.
@@ -83,7 +84,7 @@ impl SyncMeta {
         self.relay_id = relay_id;
     }
 
-    pub fn new(server_url: String, secret: String) -> Self {
+    pub fn new(server_url: String, secret: Secret) -> Self {
         Self {
             server_url,
             secret,
@@ -182,7 +183,7 @@ impl Store {
                     r.get::<_, String>(0)?,
                     SyncMeta {
                         server_url: r.get(1)?,
-                        secret: r.get(2)?,
+                        secret: Secret::new(r.get(2)?),
                         // An unreadable version only means everything gets pushed again.
                         server_vv: VersionVector::decode(&r.get::<_, Vec<u8>>(3)?)
                             .unwrap_or_default(),
@@ -644,7 +645,7 @@ fn save_sync(conn: &Connection, id: &str, meta: &SyncMeta) -> Res<()> {
         params![
             id,
             meta.server_url,
-            meta.secret,
+            meta.secret.expose(),
             meta.server_vv.encode(),
             meta.cursor,
             meta.last_synced_at.map(|d| d.to_rfc3339()),
@@ -757,7 +758,10 @@ mod tests {
                 .unwrap()
                 .id;
             store
-                .set_sync(&id, SyncMeta::new("http://relay".into(), "old".into()))
+                .set_sync(
+                    &id,
+                    SyncMeta::new("http://relay".into(), Secret::new("old".into())),
+                )
                 .unwrap();
             // Simulate a database written before encryption existed.
             store.conn.execute_batch("PRAGMA user_version = 0").unwrap();

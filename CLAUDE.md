@@ -45,6 +45,7 @@ bunx playwright test e2e/group-journey.spec.ts -g "<test title>"
 
 - `bun run release <x.y.z>` (`scripts/release.ts`, must be on a clean `main`) sets the version in `package.json`, `tauri.conf.json` and both `Cargo.toml`s, commits `chore(release): vX.Y.Z` and tags it; `git push --follow-tags` publishes. No pre-release suffixes (Android derives its versionCode from the version).
 - The tag runs `.github/workflows/release.yml`: version check (`release.ts --check`), then `packages.yml` (called as a reusable workflow, with LTO on for tags) and the Fly.io relay deploy in parallel, then the GitHub release. `packages.yml` skips `chore(release)` pushes to `main`, since the tag builds them.
+- Android APKs: CI signs with the private release key from GitHub secrets (`ANDROID_RELEASE_KEYSTORE`, `…_PASSWORD`) and fails without it; local builds use the public test key `gen/android/app/debug.keystore` unless `EZCOUNT_RELEASE_KEYSTORE`/`…_PASSWORD` are set. Test-key APKs must never go to other people. See README "Signing key".
 - The relay runs on Fly.io (`sync-server/fly.toml`, app `ezcount-relay`, Paris) from the Dockerfile's root `fly` stage (Fly volumes are root-owned; the default image stays non-root). Always deploy with `--ha=false`: the data is one SQLite file on one machine's volume.
 - **The relay API must stay backward compatible**: phones update at different times, so only add endpoints/fields, never change or remove them.
 - Groups remember their relay URL, so changing the relay address strands existing accounts and groups.

@@ -25,13 +25,24 @@ android {
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
     signingConfigs {
-        // Fixed test key, committed on purpose: every test APK (local or CI) is signed the same
-        // way, so a newer one installs over an older one. Replace it before publishing the app.
+        // Public test key, committed on purpose, for builds that stay on your own devices.
+        // Anyone can sign with it, so an APK signed with it must never be given to others.
         getByName("debug") {
             storeFile = file("debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+        }
+        // The private release key, for every APK given to other people: CI sets these from
+        // GitHub secrets (see README, "Signing key"). Android only installs an update signed
+        // with the same key, and App Links only trust this one.
+        System.getenv("EZCOUNT_RELEASE_KEYSTORE")?.let { keystore ->
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = System.getenv("EZCOUNT_RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = "ezcount"
+                keyPassword = System.getenv("EZCOUNT_RELEASE_KEYSTORE_PASSWORD")
+            }
         }
     }
     buildTypes {
@@ -47,9 +58,8 @@ android {
             }
         }
         getByName("release") {
-            // Optimized test builds for phones, signed with the test key until the app has a
-            // real release key.
-            signingConfig = signingConfigs.getByName("debug")
+            // The release key when configured; otherwise the test key, for a local build.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

@@ -12,6 +12,12 @@ services:
     restart: unless-stopped
     volumes:
       - relay-data:/data
+    environment:
+      # Caddy puts the client's address here (ignoring any the client sent), for the relay's
+      # per-client limits. Safe only because the relay is reachable through Caddy alone.
+      EZCOUNT_CLIENT_IP_HEADER: X-Forwarded-For
+      # Stored data in all; keep it under the disk space you give the relay.
+      EZCOUNT_MAX_STORAGE_MB: ${EZCOUNT_MAX_STORAGE_MB:-1024}
     # Only Caddy talks to the relay; it is not published on the host.
     expose:
       - "8787"

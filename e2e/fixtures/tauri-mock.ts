@@ -49,6 +49,7 @@ export const MOCK_SERVER = "http://localhost:8787";
  * - `__UNSYNCED__`: log out fails unless forced
  * - `__OPENED_WITH__`: the link the app was opened with (deep link)
  * - `__RECOVERY_KEY__`: the account's recovery key; new ones are `MOCK-KEY<n>-AAAA-…`
+ * - `__OLD_RELAY__`: sign-up gets no recovery key, like on a relay from before them
  * - `__NATIVE__`: `{ share, scan }` features, none by default; shared texts land in
  *   `window.__shared`
  * - `__SCANNED__`: what the camera "scans"
@@ -340,7 +341,10 @@ export function installTauriMock() {
           }
           account = { username, server_url: args.serverUrl, identities: {} };
           password = args.password;
-          return { account: clone(account), recovery_key: nextRecoveryKey() };
+          return {
+            account: clone(account),
+            recovery_key: w.__OLD_RELAY__ ? null : nextRecoveryKey(),
+          };
         }
 
         case "log_in": {

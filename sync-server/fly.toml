@@ -16,12 +16,18 @@ kill_timeout = "10s"
 dockerfile = "Dockerfile"
 build-target = "fly"
 
-# Lets the Android app open this relay's invite links directly (Android App Links). The
-# fingerprint is the committed test key's (src-tauri/gen/android/app/debug.keystore): update
-# it when the app gets a real signing key. The app declares this host in tauri.conf.json.
 [env]
+# Fly's proxy sets this to the client's address (and overwrites any sent by the client), for
+# the relay's per-client limits.
+EZCOUNT_CLIENT_IP_HEADER = "Fly-Client-IP"
+# Stored data in all: under the 1 GB volume, leaving room for SQLite and snapshots. Raise it
+# with the volume (`fly volumes extend`).
+EZCOUNT_MAX_STORAGE_MB = "800"
+# Lets the Android app open this relay's invite links directly (Android App Links); the app
+# declares this host in tauri.conf.json. Only the private release key's fingerprint: builds
+# signed with the public test key must not receive invite links, which carry group keys.
 EZCOUNT_ANDROID_PACKAGE = "com.ezvany.ezcount"
-EZCOUNT_ANDROID_CERT_SHA256 = "6F:9C:7E:56:4A:DE:3E:1A:C4:8B:32:C6:F5:34:EE:C4:E4:8B:E1:DA:57:01:0F:F0:82:13:B0:C0:29:80:DE:4F"
+EZCOUNT_ANDROID_CERT_SHA256 = "64:BA:09:A3:99:66:5A:79:4C:F6:FC:18:EC:49:82:E0:87:30:9C:2A:05:35:F2:09:D7:F4:35:52:9F:72:48:21"
 
 [[mounts]]
 source = "relay_data"
