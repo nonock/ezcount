@@ -17,6 +17,7 @@ bun run lint:rust           # clippy -D warnings, both crates
 bun run check               # biome check --write (format + lint)
 bun run typecheck
 bun run bindings            # regenerate src/bindings.ts from Rust commands
+bun run release 0.2.0       # bump versions, commit and tag (see Releases below)
 ```
 
 Single tests:
@@ -37,6 +38,14 @@ bunx playwright test e2e/group-journey.spec.ts -g "<test title>"
 - **Tauri Rust crates and npm packages must share major.minor** (`tauri = "2.11"` / `~2.11`). `bun run check:tauri` compares the lock files; see README "Upgrading Tauri" to bump.
 - Biome (2-space, 100 cols) ignores `src/bindings.ts` and `src/components/ui/**` (shadcn-generated; add components with `bunx shadcn@latest add <name>`).
 - pre-push runs Rust tests and Playwright. Skip hooks once with `LEFTHOOK=0`.
+
+## Releases and relay hosting
+
+- `bun run release <x.y.z>` (`scripts/release.ts`, must be on a clean `main`) sets the version in `package.json`, `tauri.conf.json` and both `Cargo.toml`s, commits `chore(release): vX.Y.Z` and tags it; `git push --follow-tags` publishes. No pre-release suffixes (Android derives its versionCode from the version).
+- The tag runs `.github/workflows/release.yml`: version check (`release.ts --check`), then `packages.yml` (called as a reusable workflow, with LTO on for tags) and the Fly.io relay deploy in parallel, then the GitHub release. `packages.yml` skips `chore(release)` pushes to `main`, since the tag builds them.
+- The relay runs on Fly.io (`sync-server/fly.toml`, app `ezcount-relay`, Paris) from the Dockerfile's root `fly` stage (Fly volumes are root-owned; the default image stays non-root). Always deploy with `--ha=false`: the data is one SQLite file on one machine's volume.
+- **The relay API must stay backward compatible**: phones update at different times, so only add endpoints/fields, never change or remove them.
+- Groups remember their relay URL, so changing the relay address strands existing accounts and groups.
 
 ## Architecture
 
