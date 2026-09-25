@@ -1,0 +1,83 @@
+# Publishes a release when a version tag is pushed. Create one with:
+#   bun run release 0.2.0 && git push --follow-tags
+#
+# 1. checks the tag matches the version in every manifest,
+# 2. builds the APK and Linux packages (packages.yml) and deploys the relay to Fly.io,
+# 3. once both succeeded, creates the GitHub release with the packages attached.
+#
+# The deploy needs the FLY_API_TOKEN secret in the "production" environment
+# (see "Hosting the relay on Fly.io" in the README).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Never cancel a release halfway, but don't run two at once either.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun scripts/release.ts --check "$GITHUB_REF_NAME"
+
+  packages:
+    needs: version
+    uses: ./.github/workflows/packages.yml
+
+  relay:
+    needs: version
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://${{ steps.deploy.outputs.app }}.fly.dev
+    steps:
+      - uses: actions/checkout@v7
+      - uses: superfly/flyctl-actions/setup-flyctl@v1
+      - name: Deploy
+        id: deploy
+        working-directory: sync-server
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          echo "app=$(sed -n 's/^app = "\(.*\)"/\1/p' fly.toml)" >> "$GITHUB_OUTPUT"
+          flyctl deploy --remote-only --ha=false --image-label "$GITHUB_REF_NAME"
+      - name: Health check
+        run: |
+          for i in $(seq 1 20); do
+            curl -fsS "https://${{ steps.deploy.outputs.app }}.fly.dev/health" && exit 0
+            sleep 3
+          done
+          exit 1
+
+  release:
+    needs: [packages, relay]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ezcount-*
+          path: dist
+          merge-multiple: true
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mv dist/*.apk "dist/ezcount-${version}-arm64.apk"
+          find dist -type f
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+            --title "ezcount $version" $(find dist -type f)

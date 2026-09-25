@@ -1,6 +1,7 @@
 # Installable test builds, downloadable from the run's "Artifacts" section:
 # - ezcount-android: optimized APK for arm64 phones, signed with the committed test key
 # - ezcount-linux:   .deb and .AppImage
+# release.yml also calls this workflow to build a release's packages.
 #
 # Set the repository variable EZCOUNT_SERVER (Settings > Secrets and variables > Actions >
 # Variables) to pre-fill your relay URL on the login screen.
@@ -22,6 +23,7 @@ on:
       - "biome.json"
       - "playwright.config.ts"
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: packages-${{ github.ref }}
@@ -35,11 +37,14 @@ env:
   VITE_EZCOUNT_SERVER: ${{ vars.EZCOUNT_SERVER }}
   # Test builds skip the release profile's whole-program optimization (`lto`, one codegen
   # unit), which takes most of the build time on a runner, for a somewhat larger binary.
-  CARGO_PROFILE_RELEASE_LTO: "false"
-  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
+  # Tagged releases keep it.
+  CARGO_PROFILE_RELEASE_LTO: ${{ github.ref_type == 'tag' && 'true' || 'false' }}
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ github.ref_type == 'tag' && 1 || 16 }}
 
 jobs:
   android:
+    # A release commit is built by its tag's release run instead.
+    if: github.ref_type == 'tag' || !startsWith(github.event.head_commit.message, 'chore(release)')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -69,6 +74,7 @@ jobs:
           retention-days: 14
 
   linux:
+    if: github.ref_type == 'tag' || !startsWith(github.event.head_commit.message, 'chore(release)')
     # The oldest supported runner, so the packages run on older distributions too.
     runs-on: ubuntu-22.04
     steps:

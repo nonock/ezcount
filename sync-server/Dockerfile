@@ -15,7 +15,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Distroless has no shell, so prepare the data directory here for the non-root user.
 RUN mkdir /data
 
-# glibc + libgcc only, runs as uid 65532.
+# Fly.io (fly.toml's build target): its volumes are mounted owned by root, and every app
+# already runs in its own VM, so this variant runs as root.
+FROM gcr.io/distroless/cc-debian12 AS fly
+COPY --from=build /ezcount-sync-server /usr/local/bin/ezcount-sync-server
+ENV EZCOUNT_SYNC_ADDR=0.0.0.0:8787 \
+    EZCOUNT_SYNC_DB=/data/ezcount-sync.sqlite3
+EXPOSE 8787
+ENTRYPOINT ["/usr/local/bin/ezcount-sync-server"]
+
+# Default image: glibc + libgcc only, runs as uid 65532.
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=build /ezcount-sync-server /usr/local/bin/ezcount-sync-server
 COPY --from=build --chown=65532:65532 /data /data

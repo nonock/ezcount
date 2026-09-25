@@ -126,6 +126,13 @@ jobs:
           tags: ezcount-relay:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Build the Fly.io variant
+        uses: docker/build-push-action@v7
+        with:
+          context: sync-server
+          target: fly
+          push: false
+          cache-from: type=gha
       - name: Smoke test
         run: |
           docker run -d --name relay -p 8787:8787 ezcount-relay:ci

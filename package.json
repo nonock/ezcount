@@ -13,6 +13,7 @@
     "bindings": "cargo run --manifest-path src-tauri/Cargo.toml --bin export_bindings",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "check:tauri": "bun scripts/check-tauri-versions.ts",
+    "release": "bun scripts/release.ts",
     "format": "biome format --write .",
     "lint": "biome lint .",
     "check": "biome check --write .",

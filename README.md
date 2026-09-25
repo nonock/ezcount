@@ -45,6 +45,17 @@ Set the repository variable `EZCOUNT_SERVER` (Settings → Secrets and variables
 
 To try the phone on your home network without deploying anything, run `bun run relay` on your computer, allow it through the firewall, and use `http://<computer's LAN IP>:8787` as the server on both devices. `localhost` on the phone means the phone itself.
 
+### Releases
+
+```sh
+bun run release 0.2.0     # sets the version everywhere, commits "chore(release): v0.2.0", tags v0.2.0
+git push --follow-tags
+```
+
+The tag starts `.github/workflows/release.yml`: it checks the tag matches every manifest, builds the APK and Linux packages with full optimization, deploys the relay to Fly.io, and once both succeeded creates the GitHub release with the packages attached. If a step fails, nothing is published; fix it, delete the tag (`git tag -d v0.2.0 && git push origin :v0.2.0`) and release again.
+
+The relay must keep working with the previous app versions, since phones don't all update at once: only add to its API, never change or remove what's there.
+
 ### Upgrading Tauri
 
 Tauri's Rust crates and npm packages must be on the same major.minor version, or the Tauri CLI refuses to build in CI. So they are pinned to one minor (`tauri = "2.11"` in `src-tauri/Cargo.toml`, `~2.11` in `package.json`), Dependabot only proposes patch updates for them, and `bun run check:tauri` (run by CI and the pre-commit hook) compares both lock files. To move to a new minor, say 2.12, change both sides in one commit:
@@ -85,7 +96,32 @@ docker build -t ezcount-relay sync-server
 docker run -d --name ezcount-relay --restart unless-stopped -p 8787:8787 -v ezcount-relay:/data ezcount-relay
 ```
 
-### On a public server, with HTTPS
+### Hosting the relay on Fly.io
+
+[Fly.io](https://fly.io) runs the relay's Docker image on a small machine in Paris with a persistent volume for its database, and gives it an HTTPS address, so there is no server to maintain. It costs a few dollars a month. `sync-server/fly.toml` holds the setup: one machine that stops when idle and starts on the next request, and daily volume snapshots kept 14 days.
+
+One-time setup:
+
+1. Create an account on fly.io (it needs a card) and install [flyctl](https://fly.io/docs/flyctl/install/).
+2. Create the app and deploy it once by hand. The app name is global on Fly.io: if `ezcount-relay` is taken, pick another and put it in `sync-server/fly.toml`.
+
+   ```sh
+   fly auth login
+   fly apps create ezcount-relay
+   cd sync-server
+   fly deploy --ha=false        # creates the volume on first deploy
+   curl https://ezcount-relay.fly.dev/health   # → ok
+   ```
+
+   Always keep `--ha=false`: each machine gets its own volume, so a second machine would hold a second, separate database.
+3. Let releases deploy it: run `fly tokens create deploy -a ezcount-relay`, then in GitHub go to Settings → Environments, create `production`, and add the token as the secret `FLY_API_TOKEN`. Optionally add yourself as a required reviewer there, so each deploy waits for your approval.
+4. Set the repository variable `EZCOUNT_SERVER` to `https://ezcount-relay.fly.dev`, so the app's login screen is pre-filled.
+
+Accounts and groups don't move to a new relay address: each group remembers the URL of the relay it syncs through. Create your account on the new relay and your groups there; moving existing ones would need a "relay moved" feature in the app. Pick the final address before real use.
+
+Useful commands: `fly logs`, `fly status`, `fly volumes snapshots list <volume id>` (restore one with `fly volumes create relay_data --snapshot-id <id>`).
+
+### On your own server, with HTTPS
 
 `deploy/` runs the relay behind [Caddy](https://caddyserver.com), which gets and renews a Let's Encrypt certificate automatically. You need a server with ports 80 and 443 open and a domain whose DNS record points at it.
 

@@ -1,0 +1,45 @@
+# Fly.io config for the relay. First setup: "Hosting the relay on Fly.io" in the README.
+# Releases deploy it from .github/workflows/release.yml; by hand, from this directory:
+#   fly deploy --ha=false
+#
+# One machine only (--ha=false): the data is a SQLite file on the machine's volume, and a
+# second machine would get its own, separate volume.
+
+# Globally unique on Fly.io; change it if the name is taken.
+app = "ezcount-relay"
+primary_region = "cdg" # Paris
+# The relay shuts down cleanly on SIGINT.
+kill_signal = "SIGINT"
+kill_timeout = "10s"
+
+[build]
+dockerfile = "Dockerfile"
+build-target = "fly"
+
+[[mounts]]
+source = "relay_data"
+destination = "/data"
+# Created on the first deploy; grow it later with `fly volumes extend`.
+initial_size = "1gb"
+# Fly snapshots the volume daily; keep two weeks of them.
+snapshot_retention = 14
+
+[http_service]
+internal_port = 8787
+force_https = true
+# Stops when no app has talked to it for a few minutes and starts again on the next request,
+# in about a second. Open apps pull every 20 seconds, which keeps it running meanwhile.
+auto_stop_machines = "stop"
+auto_start_machines = true
+min_machines_running = 0
+
+[[http_service.checks]]
+method = "GET"
+path = "/health"
+interval = "30s"
+timeout = "5s"
+grace_period = "10s"
+
+[[vm]]
+size = "shared-cpu-1x"
+memory = "256mb"
