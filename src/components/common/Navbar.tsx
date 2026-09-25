@@ -1,3 +1,4 @@
+import { LogoMark, Wordmark } from "@/components/common/Logo";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -105,10 +106,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={onNavigateHome}
             className="flex shrink-0 items-center gap-2 rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           >
-            <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-sm font-black text-primary-foreground">
-              ez
-            </span>
-            <span className="text-base font-semibold tracking-tight">ezcount</span>
+            <LogoMark className="size-8" />
+            <Wordmark className="text-base" />
           </button>
           {currentGroup && (
             <>

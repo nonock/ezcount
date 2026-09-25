@@ -1,3 +1,4 @@
+import { LogoMark, Wordmark } from "@/components/common/Logo";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,10 +83,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
     <main className="flex min-h-screen items-center justify-center px-4 py-10 pt-[max(2.5rem,env(safe-area-inset-top))]">
       <div className="w-full max-w-sm space-y-6">
         <div className="flex items-center justify-center gap-2">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-base font-black text-primary-foreground">
-            ez
-          </span>
-          <span className="text-xl font-semibold tracking-tight">ezcount</span>
+          <LogoMark className="size-10" />
+          <Wordmark className="text-xl" />
         </div>
 
         <Card>

@@ -384,6 +384,41 @@ pub fn export_bindings(
     Ok(path)
 }
 
+/// Windows draws the title bar and taskbar icons by scaling the one bitmap Tauri gives the
+/// window, which blurs them on scaled displays. Load them from the .exe's icon instead: it
+/// holds a version drawn for each size, and Windows picks the one for the window's DPI.
+#[cfg(windows)]
+fn set_crisp_window_icons(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        LoadImageW, SendMessageW, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTCOLOR, SM_CXICON,
+        SM_CXSMICON, WM_SETICON,
+    };
+    // The resource id tauri-build gives the app icon (IDI_APPLICATION).
+    const APP_ICON: usize = 32512;
+    // SAFETY: plain Win32 calls on this process's own module and a live window handle; a
+    // missing resource makes LoadImageW return null, and the icon Tauri set stays.
+    unsafe {
+        let module = GetModuleHandleW(std::ptr::null());
+        let dpi = GetDpiForWindow(hwnd);
+        for (kind, metric) in [(ICON_SMALL, SM_CXSMICON), (ICON_BIG, SM_CXICON)] {
+            let size = GetSystemMetricsForDpi(metric, dpi);
+            let icon = LoadImageW(
+                module,
+                APP_ICON as *const u16,
+                IMAGE_ICON,
+                size,
+                size,
+                LR_DEFAULTCOLOR,
+            );
+            if !icon.is_null() {
+                SendMessageW(hwnd, WM_SETICON, kind as usize, icon as isize);
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = create_specta_builder();
@@ -415,7 +450,28 @@ pub fn run() {
         app = app.plugin(share::init());
     }
 
+    #[cfg(windows)]
+    {
+        // Moved to a screen with another scale: load the icons drawn for that size.
+        app = app.on_window_event(|window, event| {
+            if let tauri::WindowEvent::ScaleFactorChanged { .. } = event {
+                if let Ok(hwnd) = window.hwnd() {
+                    set_crisp_window_icons(hwnd.0);
+                }
+            }
+        });
+    }
+
     app.setup(|app| {
+        #[cfg(windows)]
+        {
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(hwnd) = window.hwnd() {
+                    set_crisp_window_icons(hwnd.0);
+                }
+            }
+        }
+
         // Installers register the ezcount:// scheme; this covers portable copies. Not dev
         // builds: links would start a debug copy outside `tauri dev`, without its dev server,
         // and that copy would then hold the single instance. Pasting invites always works.
