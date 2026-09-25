@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ezcount splits group expenses (Tricount-style) on Windows, Linux and Android: Tauri 2 app with a Rust core (`src-tauri/`), a React 19 + Tailwind v4 + shadcn/ui frontend (`src/`), and a separate sync relay crate (`sync-server/`). Package manager and script runner is **Bun**. README.md covers deployment, the Android toolchain and the security model in detail.
 
+Project skills (`.claude/skills/`): `add-command` (a Tauri command end to end, with its traps), `phone-test` (build, install and drive the app on the USB-connected Android phone), `deploy-relay` (manual Fly.io deploy and checks).
+
 ## Commands
 
 ```sh
