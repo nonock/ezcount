@@ -1,4 +1,5 @@
 import { useConfirm } from "@/components/common/ConfirmDialog";
+import { Splash } from "@/components/common/Splash";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -510,11 +511,7 @@ export const App: React.FC = () => {
   };
 
   if (account === undefined) {
-    return (
-      <div className="flex min-h-screen items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Spinner /> Loading…
-      </div>
-    );
+    return <Splash />;
   }
 
   if (account === null) {

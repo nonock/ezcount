@@ -6,9 +6,56 @@
     <title>ezcount — Split Expenses Simply</title>
     <meta name="description" content="Tricount-like expense sharing and debt simplification app with zero-loss integer cents arithmetic." />
     <link rel="icon" type="image/x-icon" href="/src-tauri/icons/icon.ico" />
+    <script>
+      // Apply the saved theme (next-themes' "theme" key) before the first paint, so the
+      // splash and the app never flash the wrong background.
+      (function () {
+        try {
+          var t = localStorage.getItem("theme");
+          var dark = t === "dark" || ((!t || t === "system") && matchMedia("(prefers-color-scheme: dark)").matches);
+          var root = document.documentElement;
+          root.classList.add(dark ? "dark" : "light");
+          root.style.colorScheme = dark ? "dark" : "light";
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      /* Splash, shown until React has an account state. Also rendered by src/components/common/Splash.tsx. */
+      html { background: #ffffff; }
+      html.dark { background: #0a0a0a; }
+      .ez-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        font-family: "Geist Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .ez-splash-name { font-size: 22px; font-weight: 600; letter-spacing: -0.03em; color: #0a0a0a; }
+      .ez-splash-name span { color: #4f39f6; }
+      html.dark .ez-splash-name { color: #fafafa; }
+      html.dark .ez-splash-name span { color: #9b8cff; }
+      /* Only a slow start gets motion: the green share pulses after 0.8 s. */
+      .ez-splash-part { animation: ez-splash-pulse 1.2s ease-in-out 0.8s infinite; }
+      @keyframes ez-splash-pulse { 50% { opacity: 0.35; } }
+      @media (prefers-reduced-motion: reduce) { .ez-splash-part { animation: none; } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <output class="ez-splash" aria-label="Loading ezcount">
+        <svg width="96" height="96" viewBox="0 0 100 100" aria-hidden="true">
+          <rect width="100" height="100" rx="22" fill="#4f39f6" />
+          <rect x="20" y="31" width="17" height="13" rx="6.5" fill="#ffffff" />
+          <rect x="42" y="31" width="13" height="13" rx="6.5" fill="#ffffff" />
+          <rect class="ez-splash-part" x="60" y="31" width="20" height="13" rx="6.5" fill="#7ee2a8" />
+          <rect x="20" y="56" width="60" height="13" rx="6.5" fill="#ffffff" />
+        </svg>
+        <span class="ez-splash-name"><span>ez</span>count</span>
+      </output>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
