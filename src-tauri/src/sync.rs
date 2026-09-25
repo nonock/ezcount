@@ -72,40 +72,76 @@ pub struct Invite {
 /// Invite format version. Version 2 means end-to-end encrypted updates.
 const INVITE_VERSION: &str = "2";
 
+/// An invite link: `<relay>/join#v=2&g=<group id>&k=<secret>`.
+///
+/// It is a web link, so chat apps make it clickable. The relay's `/join` page opens the app
+/// (or tells how to join by hand). The secret is in the fragment, which browsers never send
+/// to the server.
 pub fn invite_code(server_url: &str, group_id: &str, secret: &str) -> String {
-    let mut url = Url::parse("ezcount://join").expect("static URL is valid");
-    url.query_pairs_mut()
-        .append_pair("server", server_url)
-        .append_pair("group", group_id)
-        .append_pair("key", secret)
-        .append_pair("v", INVITE_VERSION);
-    url.to_string()
+    let fragment = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("v", INVITE_VERSION)
+        .append_pair("g", group_id)
+        .append_pair("k", secret)
+        .finish();
+    format!("{server_url}/join#{fragment}")
 }
 
+/// Accepts invite links (see [`invite_code`]) and the `ezcount://join?server=…&group=…&key=…&v=2`
+/// form, which the join page and older versions of the app use.
 pub fn parse_invite(code: &str) -> Res<Invite> {
-    let invalid = || "This is not a valid ezcount invite code".to_string();
+    let invalid = || "This is not a valid ezcount invite".to_string();
     let url = Url::parse(code.trim()).map_err(|_| invalid())?;
-    if url.scheme() != "ezcount" || url.host_str() != Some("join") {
-        return Err(invalid());
-    }
+    let (server, params): (String, Vec<(String, String)>) = match url.scheme() {
+        "ezcount" if url.host_str() == Some("join") => {
+            let params: Vec<_> = url.query_pairs().into_owned().collect();
+            let server = params
+                .iter()
+                .find(|(k, _)| k == "server")
+                .map(|(_, v)| v.clone())
+                .ok_or_else(invalid)?;
+            let renamed = params.into_iter().map(|(k, v)| {
+                let short = match k.as_str() {
+                    "group" => "g",
+                    "key" => "k",
+                    other => other,
+                };
+                (short.to_string(), v)
+            });
+            (server, renamed.collect())
+        }
+        "http" | "https" => {
+            let prefix = url.path().trim_end_matches('/').strip_suffix("/join");
+            let (Some(prefix), Some(fragment)) = (prefix, url.fragment()) else {
+                return Err(invalid());
+            };
+            let params = url::form_urlencoded::parse(fragment.as_bytes())
+                .into_owned()
+                .collect();
+            (
+                format!("{}{prefix}", url.origin().ascii_serialization()),
+                params,
+            )
+        }
+        _ => return Err(invalid()),
+    };
     let param = |name: &str| {
-        url.query_pairs()
+        params
+            .iter()
             .find(|(k, _)| k == name)
-            .map(|(_, v)| v.into_owned())
+            .map(|(_, v)| v.clone())
             .filter(|v| !v.is_empty())
             .ok_or_else(invalid)
     };
     if param("v").ok().as_deref() != Some(INVITE_VERSION) {
         return Err(
-            "This invite code is for a different version of ezcount. Ask for a new code."
-                .to_string(),
+            "This invite is for a different version of ezcount. Ask for a new one.".to_string(),
         );
     }
-    let secret = param("key")?;
+    let secret = param("k")?;
     GroupKeys::derive(&secret).map_err(|_| invalid())?;
     Ok(Invite {
-        server_url: normalize_server_url(&param("server")?)?,
-        group_id: param("group")?,
+        server_url: normalize_server_url(&server)?,
+        group_id: param("g")?,
         secret,
     })
 }
@@ -794,8 +830,30 @@ mod tests {
     #[test]
     fn invite_code_round_trips() {
         let secret = new_secret().unwrap();
-        let code = invite_code("https://sync.example.com", "g-1", &secret);
-        let invite = parse_invite(&format!("  {code}\n")).unwrap();
+        for server in [
+            "https://sync.example.com",
+            "http://192.168.1.10:8787",
+            "https://example.com/relay",
+        ] {
+            let code = invite_code(server, "g-1", &secret);
+            assert!(code.starts_with(&format!("{server}/join#")), "{code}");
+            let invite = parse_invite(&format!("  {code}\n")).unwrap();
+            assert_eq!(invite.server_url, server);
+            assert_eq!(invite.group_id, "g-1");
+            assert_eq!(invite.secret, secret);
+        }
+    }
+
+    #[test]
+    fn accepts_app_links_from_the_join_page() {
+        let secret = new_secret().unwrap();
+        let mut url = Url::parse("ezcount://join").unwrap();
+        url.query_pairs_mut()
+            .append_pair("server", "https://sync.example.com")
+            .append_pair("group", "g-1")
+            .append_pair("key", &secret)
+            .append_pair("v", "2");
+        let invite = parse_invite(url.as_str()).unwrap();
         assert_eq!(invite.server_url, "https://sync.example.com");
         assert_eq!(invite.group_id, "g-1");
         assert_eq!(invite.secret, secret);
@@ -804,11 +862,13 @@ mod tests {
     #[test]
     fn rejects_bad_invites_and_urls() {
         let secret = new_secret().unwrap();
-        let without_version = invite_code("http://a", "g", &secret).replace("&v=2", "");
+        let without_version = invite_code("http://a", "g", &secret).replace("v=2&", "");
         let err = parse_invite(&without_version).err().unwrap();
         assert!(err.contains("different version"), "{err}");
         assert!(parse_invite(&invite_code("http://a", "g", "too-short")).is_err());
         assert!(parse_invite("https://example.com/join?group=x").is_err());
+        let elsewhere = invite_code("http://a", "g", &secret).replace("/join#", "/other#");
+        assert!(parse_invite(&elsewhere).is_err());
         assert!(parse_invite("ezcount://join?server=http%3A%2F%2Fa&group=g").is_err());
         assert!(normalize_server_url("ftp://example.com").is_err());
         assert_eq!(
@@ -928,7 +988,7 @@ mod end_to_end {
         let relay = ezcount_sync_server::Relay::open(&dir.join("relay.sqlite3")).unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        tokio::spawn(ezcount_sync_server::serve(listener, relay));
+        tokio::spawn(ezcount_sync_server::serve(listener, relay, None));
         (url, dir)
     }
 
@@ -953,7 +1013,7 @@ mod end_to_end {
                 ezcount_sync_server::Relay::open(&dir.join(format!("{db}.sqlite3"))).unwrap();
             let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
             let addr = listener.local_addr().unwrap();
-            let task = tokio::spawn(ezcount_sync_server::serve(listener, relay));
+            let task = tokio::spawn(ezcount_sync_server::serve(listener, relay, None));
             Self {
                 addr,
                 url: format!("http://{addr}"),
@@ -1128,6 +1188,46 @@ mod end_to_end {
 
         relay.task.abort();
         let _ = std::fs::remove_dir_all(&relay.dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_relay_serves_the_join_page_and_app_links() {
+        let dir = std::env::temp_dir().join(format!("ezcount-relay-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let http = reqwest::Client::new();
+        let mut urls = Vec::new();
+        for android_app in [
+            None,
+            Some(ezcount_sync_server::AndroidApp {
+                package: "com.example.app".into(),
+                cert_sha256: vec!["AB:CD".into()],
+            }),
+        ] {
+            let db = dir.join(format!("{}.sqlite3", urls.len()));
+            let relay = ezcount_sync_server::Relay::open(&db).unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            urls.push(format!("http://{}", listener.local_addr().unwrap()));
+            tokio::spawn(ezcount_sync_server::serve(listener, relay, android_app));
+        }
+
+        // The page an invite link opens builds the app link from the fragment.
+        let page = http.get(format!("{}/join", urls[0])).send().await.unwrap();
+        assert_eq!(page.status(), 200);
+        assert!(page.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("default-src 'none'"));
+        let html = page.text().await.unwrap();
+        assert!(html.contains(r#"new URL("ezcount://join")"#));
+
+        let links = format!("{}/.well-known/assetlinks.json", urls[0]);
+        assert_eq!(http.get(links).send().await.unwrap().status(), 404);
+        let links = format!("{}/.well-known/assetlinks.json", urls[1]);
+        let links: serde_json::Value = http.get(links).send().await.unwrap().json().await.unwrap();
+        assert_eq!(links[0]["target"]["package_name"], "com.example.app");
+        assert_eq!(links[0]["target"]["sha256_cert_fingerprints"][0], "AB:CD");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test(flavor = "multi_thread")]

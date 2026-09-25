@@ -28,6 +28,11 @@
 //! - `POST /v1/accounts/login`: `{ username, login_token }` returns
 //!   `{ account_id, wrapped_key }`; 401 on a wrong username or password, 429 after
 //!   repeated failures
+//!
+//! Invite links point at the relay: `GET /join` is a small page that opens the app with the
+//! invite in the link's fragment, which never reaches the relay. With [`AndroidApp`]
+//! configured, `GET /.well-known/assetlinks.json` lets that Android app open invite links
+//! directly (Android App Links).
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
@@ -105,9 +110,33 @@ impl Relay {
     }
 }
 
-pub fn router(relay: Arc<Relay>) -> Router {
+/// An Android app allowed to open this relay's invite links directly.
+#[derive(Clone, Debug)]
+pub struct AndroidApp {
+    pub package: String,
+    /// SHA-256 fingerprints of the app's signing certificates, as `AB:CD:…`.
+    pub cert_sha256: Vec<String>,
+}
+
+pub fn router(relay: Arc<Relay>, android_app: Option<AndroidApp>) -> Router {
+    let asset_links = match android_app {
+        Some(app) => {
+            let links = serde_json::json!([{
+                "relation": ["delegate_permission/common.handle_all_urls"],
+                "target": {
+                    "namespace": "android_app",
+                    "package_name": app.package,
+                    "sha256_cert_fingerprints": app.cert_sha256,
+                },
+            }]);
+            get(move || async move { Json(links) })
+        }
+        None => get(|| async { StatusCode::NOT_FOUND }),
+    };
     Router::new()
         .route("/health", get(|| async { "ok" }))
+        .route("/join", get(join_page))
+        .route("/.well-known/assetlinks.json", asset_links)
         .route("/v1/groups/{id}/updates", get(pull).post(push))
         .route("/v1/accounts", post(sign_up))
         .route("/v1/accounts/login", post(log_in))
@@ -115,8 +144,27 @@ pub fn router(relay: Arc<Relay>) -> Router {
         .with_state(relay)
 }
 
-pub async fn serve(listener: tokio::net::TcpListener, relay: Arc<Relay>) -> std::io::Result<()> {
-    axum::serve(listener, router(relay)).await
+pub async fn serve(
+    listener: tokio::net::TcpListener,
+    relay: Arc<Relay>,
+    android_app: Option<AndroidApp>,
+) -> std::io::Result<()> {
+    axum::serve(listener, router(relay, android_app)).await
+}
+
+async fn join_page() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; \
+                 base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            ),
+            (header::REFERRER_POLICY, "no-referrer"),
+        ],
+        include_str!("join.html"),
+    )
 }
 
 // ---------------------------------------------------------------------------

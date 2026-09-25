@@ -3,6 +3,8 @@ mod crypto;
 mod doc;
 mod engine;
 pub mod models;
+#[cfg(target_os = "android")]
+mod share;
 pub mod storage;
 pub mod sync;
 
@@ -13,7 +15,8 @@ use std::sync::{Mutex, MutexGuard};
 use tauri::{Manager, State};
 
 use crate::models::{
-    AccountInfo, ExpenseSplit, Group, ParticipantBalance, SettlementTransfer, SyncInfo,
+    AccountInfo, ExpenseSplit, Group, NativeFeatures, ParticipantBalance, SettlementTransfer,
+    SyncInfo,
 };
 use crate::storage::Store;
 
@@ -312,6 +315,27 @@ fn add_self(state: State<AppState>, group_id: String, name: String) -> Result<Gr
     sync::add_self(&state, &group_id, &name)
 }
 
+/// What this platform can do natively, beyond the web view.
+#[tauri::command]
+#[specta::specta]
+fn native_features() -> NativeFeatures {
+    NativeFeatures {
+        share: cfg!(target_os = "android"),
+        scan: cfg!(mobile),
+    }
+}
+
+/// Opens the system share sheet with `text`. Only where `native_features().share` is true.
+#[tauri::command]
+#[specta::specta]
+#[allow(unused_variables)]
+async fn share_text(app: tauri::AppHandle, text: String, title: String) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    return share::share_text(&app, &text, &title);
+    #[cfg(not(target_os = "android"))]
+    Err("Sharing is not available on this device".to_string())
+}
+
 pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
     tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
         get_groups,
@@ -335,7 +359,9 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         log_in,
         log_out,
         set_identity,
-        add_self
+        add_self,
+        native_features,
+        share_text
     ])
 }
 
@@ -365,25 +391,57 @@ pub fn run() {
     #[cfg(all(debug_assertions, not(mobile)))]
     export_bindings(&builder).expect("Failed to export typescript bindings");
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
-            let app_data = app
-                .path()
-                .app_data_dir()
-                .unwrap_or_else(|_| PathBuf::from("./"));
-            let (store, warnings) = Store::open(
-                &app_data.join("ezcount.sqlite3"),
-                &app_data.join("ezcount_data.json"),
-            )?;
-            for warning in &warnings {
-                eprintln!("[storage] {warning}");
+    let mut app = tauri::Builder::default();
+    // First, so a second launch (say, from an invite link) hands its link to this instance
+    // and quits.
+    #[cfg(desktop)]
+    {
+        app = app.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
             }
-            app.manage(AppState::new(store, warnings)?);
-            sync::spawn_background_sync(app.handle().clone());
-            Ok(())
-        })
-        .invoke_handler(builder.invoke_handler())
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        }));
+    }
+    app = app
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init());
+    #[cfg(mobile)]
+    {
+        app = app.plugin(tauri_plugin_barcode_scanner::init());
+    }
+    #[cfg(target_os = "android")]
+    {
+        app = app.plugin(share::init());
+    }
+
+    app.setup(|app| {
+        // Installers register the ezcount:// scheme; this covers dev builds and portable
+        // copies. Invite links still work without it, by pasting.
+        #[cfg(any(windows, target_os = "linux"))]
+        {
+            use tauri_plugin_deep_link::DeepLinkExt;
+            if let Err(e) = app.deep_link().register_all() {
+                eprintln!("[deep-link] could not register ezcount://: {e}");
+            }
+        }
+
+        let app_data = app
+            .path()
+            .app_data_dir()
+            .unwrap_or_else(|_| PathBuf::from("./"));
+        let (store, warnings) = Store::open(
+            &app_data.join("ezcount.sqlite3"),
+            &app_data.join("ezcount_data.json"),
+        )?;
+        for warning in &warnings {
+            eprintln!("[storage] {warning}");
+        }
+        app.manage(AppState::new(store, warnings)?);
+        sync::spawn_background_sync(app.handle().clone());
+        Ok(())
+    })
+    .invoke_handler(builder.invoke_handler())
+    .run(tauri::generate_context!())
+    .expect("error while running tauri application");
 }

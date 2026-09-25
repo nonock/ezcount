@@ -11,7 +11,9 @@ import {
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { useNativeFeatures } from "@/services/native";
 import { errorMessage } from "@/utils/errors";
+import { ScanQrCodeIcon } from "lucide-react";
 import type React from "react";
 import { useEffect, useState } from "react";
 
@@ -19,18 +21,31 @@ interface JoinGroupModalProps {
   isOpen: boolean;
   onClose: () => void;
   onJoinGroup: (inviteCode: string) => Promise<void>;
+  /** Pre-fills the invite, say from a link the app was opened with. */
+  initialCode?: string;
+  initialError?: string | null;
+  /** Scans an invite's QR code instead; offered where the device has a camera scanner. */
+  onScan: () => void;
 }
 
-export const JoinGroupModal: React.FC<JoinGroupModalProps> = ({ isOpen, onClose, onJoinGroup }) => {
+export const JoinGroupModal: React.FC<JoinGroupModalProps> = ({
+  isOpen,
+  onClose,
+  onJoinGroup,
+  initialCode = "",
+  initialError = null,
+  onScan,
+}) => {
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const native = useNativeFeatures();
 
   useEffect(() => {
     if (!isOpen) return;
-    setCode("");
-    setError(null);
-  }, [isOpen]);
+    setCode(initialCode);
+    setError(initialError);
+  }, [isOpen, initialCode, initialError]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,20 +68,27 @@ export const JoinGroupModal: React.FC<JoinGroupModalProps> = ({ isOpen, onClose,
         <DialogHeader>
           <DialogTitle>Join a Group</DialogTitle>
           <DialogDescription>
-            Ask a member to open the group, tap Share and send you the invite code.
+            Open the invite link a member sent you, or paste it here. To get one, a member opens the
+            group and taps Invite.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <FieldGroup>
+            {native.scan && (
+              <Button type="button" variant="outline" size="lg" onClick={onScan}>
+                <ScanQrCodeIcon data-icon="inline-start" />
+                Scan QR Code
+              </Button>
+            )}
             <Field>
-              <FieldLabel htmlFor="input-invite-code">Invite code</FieldLabel>
+              <FieldLabel htmlFor="input-invite-code">Invite link</FieldLabel>
               <Textarea
                 id="input-invite-code"
                 required
                 rows={3}
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                placeholder="ezcount://join?…"
+                placeholder="https://…/join#…"
                 spellCheck={false}
                 autoCapitalize="off"
                 autoCorrect="off"

@@ -91,11 +91,13 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
               syncProblem ? `Last sync failed: ${syncInfo?.last_error}` : "Invite other members"
             }
           >
+            {/* The dot tells the sync state; the dialog explains a failure. */}
             <span
               aria-hidden
               className={cn("size-2 rounded-full", syncProblem ? "bg-negative" : "bg-positive")}
             />
-            {syncProblem ? "Sync issue" : "Invite"}
+            Invite
+            {syncProblem && <span className="sr-only">(last sync failed)</span>}
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

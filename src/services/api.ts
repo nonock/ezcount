@@ -3,6 +3,7 @@ import type {
   AccountInfo,
   ExpenseSplit,
   Group,
+  NativeFeatures,
   ParticipantBalance,
   SettlementTransfer,
   SyncInfo,
@@ -137,5 +138,14 @@ export const api = {
 
   async getSettlements(groupId: string): Promise<SettlementTransfer[]> {
     return unwrap(await commands.getSettlements(groupId));
+  },
+
+  async nativeFeatures(): Promise<NativeFeatures> {
+    return commands.nativeFeatures();
+  },
+
+  /** Opens the system share sheet; only where `nativeFeatures().share`. */
+  async shareText(text: string, title: string): Promise<void> {
+    unwrap(await commands.shareText(text, title));
   },
 };

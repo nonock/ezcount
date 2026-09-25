@@ -35,6 +35,20 @@
       "dangerousDisableAssetCspModification": ["style-src"]
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": { "schemes": ["ezcount"] },
+      "mobile": [
+        { "scheme": ["ezcount"], "host": "join", "appLink": false },
+        {
+          "scheme": ["https"],
+          "host": "ezcount-relay.fly.dev",
+          "pathPrefix": ["/join"],
+          "appLink": true
+        }
+      ]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

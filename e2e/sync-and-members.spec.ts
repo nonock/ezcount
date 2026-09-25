@@ -95,16 +95,85 @@ test.describe("Confirmations", () => {
 });
 
 test.describe("Sharing and joining", () => {
-  test("every group has an invite code", async ({ page }) => {
+  test("every group has an invite link and QR code", async ({ page }) => {
     await seed(page, { __SEED_GROUPS__: [tripGroup] });
     await page.goto("/");
     await page.getByRole("button", { name: /Lisbon Trip/ }).click();
 
     await page.getByRole("button", { name: "Invite", exact: true }).click();
     await expect(page.locator("#share-invite-code")).toHaveValue(
-      /^ezcount:\/\/join\?server=http%3A%2F%2Flocalhost%3A8787&group=group-trip&key=/
+      /^http:\/\/localhost:8787\/join#v=2&g=group-trip&k=/
     );
+    await expect(
+      page.getByRole("img", { name: 'QR code of the invite to "Lisbon Trip"' })
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copy Link" })).toBeVisible();
     await page.getByRole("button", { name: "Close" }).click();
+  });
+
+  test("shares the invite through the phone's share sheet", async ({ page }) => {
+    await seed(page, { __SEED_GROUPS__: [tripGroup], __NATIVE__: { share: true } });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Lisbon Trip/ }).click();
+    await page.getByRole("button", { name: "Invite", exact: true }).click();
+
+    await page.getByRole("button", { name: "Share", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__shared))
+      .toEqual([
+        'Join "Lisbon Trip" on ezcount: http://localhost:8787/join#v=2&g=group-trip&k=mock-key',
+      ]);
+  });
+
+  test("opening an invite link fills in the join dialog", async ({ page }) => {
+    await seed(page, {
+      __REMOTE_GROUPS__: [tripGroup],
+      __OPENED_WITH__: "https://sync.example.com/join#v=2&g=group-trip&k=k",
+    });
+    await page.goto("/");
+
+    const join = page.getByRole("dialog", { name: "Join a Group" });
+    await expect(join.getByLabel("Invite link")).toHaveValue(
+      "https://sync.example.com/join#v=2&g=group-trip&k=k"
+    );
+    await join.getByRole("button", { name: "Join Group" }).click();
+    await expect(page.getByRole("heading", { name: "Lisbon Trip" })).toBeVisible();
+  });
+
+  test("an invite link opened while logged out waits for the login", async ({ page }) => {
+    await seed(page, {
+      __LOGGED_OUT__: true,
+      __OPENED_WITH__:
+        "ezcount://join?server=https%3A%2F%2Fsync.example.com&group=group-trip&key=k&v=2",
+    });
+    await page.goto("/");
+    await page.getByLabel("Username").fill("alice");
+    await page.getByLabel("Password").fill(MOCK_PASSWORD);
+    await page.getByRole("button", { name: "Log In" }).click();
+
+    const join = page.getByRole("dialog", { name: "Join a Group" });
+    await expect(join.getByLabel("Invite link")).toHaveValue(/^ezcount:\/\/join\?server=/);
+  });
+
+  test("scanning an invite QR code joins the group", async ({ page }) => {
+    await seed(page, {
+      __REMOTE_GROUPS__: [tripGroup],
+      __NATIVE__: { scan: true },
+      __SCANNED__: "https://sync.example.com/join#v=2&g=group-trip&k=k",
+    });
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Join with Code" }).click();
+    await page.getByRole("button", { name: "Scan QR Code" }).click();
+    await expect(page.getByRole("heading", { name: "Lisbon Trip" })).toBeVisible();
+    await expect(page.locator("html")).not.toHaveClass(/scanning/);
+  });
+
+  test("scanning is offered only where the device can", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Join with Code" }).click();
+    await expect(page.getByRole("dialog", { name: "Join a Group" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Scan QR Code" })).toHaveCount(0);
   });
 
   test("joins a group from an invite code", async ({ page }) => {
@@ -118,7 +187,7 @@ test.describe("Sharing and joining", () => {
 
     await page
       .locator("#input-invite-code")
-      .fill("ezcount://join?server=https%3A%2F%2Fsync.example.com&group=group-trip&key=k");
+      .fill("https://sync.example.com/join#v=2&g=group-trip&k=k");
     await page.getByRole("button", { name: "Join Group" }).click();
     await expect(page.getByRole("heading", { name: "Lisbon Trip" })).toBeVisible();
 

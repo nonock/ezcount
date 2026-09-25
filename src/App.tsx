@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AuthScreen } from "./components/auth/AuthScreen";
 import { Navbar } from "./components/common/Navbar";
+import { QrScanOverlay } from "./components/common/QrScanOverlay";
 import { GroupDashboard } from "./components/dashboard/GroupDashboard";
 import { AddExpenseModal } from "./components/modals/AddExpenseModal";
 import { AddMemberModal } from "./components/modals/AddMemberModal";
@@ -32,6 +33,7 @@ import { ExpensesTab } from "./components/workspace/ExpensesTab";
 import { GroupHeader } from "./components/workspace/GroupHeader";
 import { SettleUpTab } from "./components/workspace/SettleUpTab";
 import { api } from "./services/api";
+import { ScanCancelled, cancelScan, onInviteLink, scanQrCode } from "./services/native";
 import type {
   AccountInfo,
   Expense,
@@ -69,6 +71,14 @@ export const App: React.FC = () => {
   const [isReimburseOpen, setIsReimburseOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isJoinOpen, setIsJoinOpen] = useState(false);
+  // What the join dialog opens with: an invite from a link or a scan, and why it failed.
+  const [joinPrefill, setJoinPrefill] = useState<{ code: string; error: string | null }>({
+    code: "",
+    error: null,
+  });
+  // An invite link the app was opened with, kept until the user is logged in.
+  const [pendingInvite, setPendingInvite] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
   const [isWhoOpen, setIsWhoOpen] = useState(false);
   // Groups where the user closed the "Who are you?" prompt without answering, this session.
   const [identitySkipped, setIdentitySkipped] = useState<Set<string>>(() => new Set());
@@ -130,7 +140,16 @@ export const App: React.FC = () => {
       .catch((err) => console.error("Failed to load storage warnings:", err));
   }, [refreshAccount]);
 
+  useEffect(() => onInviteLink(setPendingInvite), []);
+
   const loggedIn = Boolean(account);
+  useEffect(() => {
+    if (!loggedIn || !pendingInvite) return;
+    setJoinPrefill({ code: pendingInvite, error: null });
+    setIsJoinOpen(true);
+    setPendingInvite(null);
+  }, [loggedIn, pendingInvite]);
+
   useEffect(() => {
     if (loggedIn) refreshGroups();
   }, [loggedIn, refreshGroups]);
@@ -312,7 +331,7 @@ export const App: React.FC = () => {
     const confirmed = await askConfirm({
       title: `Leave "${currentGroup.name}"?`,
       description:
-        "It's removed from your account on all your devices. Other members keep the group, and you can rejoin with an invite code.",
+        "It's removed from your account on all your devices. Other members keep the group, and you can rejoin with an invite link.",
       confirmLabel: "Leave Group",
       destructive: true,
     });
@@ -352,6 +371,32 @@ export const App: React.FC = () => {
     setSelectedGroupId(group.id);
     setActiveTab("expenses");
     toast.success(`Joined "${group.name}"`);
+  };
+
+  const openJoin = (code = "", error: string | null = null) => {
+    setJoinPrefill({ code, error });
+    setIsJoinOpen(true);
+  };
+
+  // Scanning is a deliberate act, so a scanned invite is joined right away. Problems, or
+  // cancelling, lead back to the join dialog.
+  const handleScan = async () => {
+    setIsJoinOpen(false);
+    setScanning(true);
+    let code: string;
+    try {
+      code = await scanQrCode();
+    } catch (err) {
+      setScanning(false);
+      openJoin("", err instanceof ScanCancelled ? null : errorMessage(err));
+      return;
+    }
+    setScanning(false);
+    try {
+      await handleJoinGroup(code);
+    } catch (err) {
+      openJoin(code, errorMessage(err));
+    }
   };
 
   const handleAddMember = async (name: string) => {
@@ -523,7 +568,7 @@ export const App: React.FC = () => {
             groups={groups}
             onSelectGroup={handleSelectGroup}
             onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
-            onOpenJoinGroup={() => setIsJoinOpen(true)}
+            onOpenJoinGroup={() => openJoin()}
           />
         ) : (
           <div className="space-y-4">
@@ -614,7 +659,18 @@ export const App: React.FC = () => {
         isOpen={isJoinOpen}
         onClose={() => setIsJoinOpen(false)}
         onJoinGroup={handleJoinGroup}
+        initialCode={joinPrefill.code}
+        initialError={joinPrefill.error}
+        onScan={handleScan}
       />
+
+      {scanning && (
+        <QrScanOverlay
+          onCancel={() =>
+            cancelScan().catch((err) => console.error("Could not stop scanning:", err))
+          }
+        />
+      )}
 
       {currentGroup && (
         <>

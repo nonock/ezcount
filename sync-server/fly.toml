@@ -16,6 +16,13 @@ kill_timeout = "10s"
 dockerfile = "Dockerfile"
 build-target = "fly"
 
+# Lets the Android app open this relay's invite links directly (Android App Links). The
+# fingerprint is the committed test key's (src-tauri/gen/android/app/debug.keystore): update
+# it when the app gets a real signing key. The app declares this host in tauri.conf.json.
+[env]
+EZCOUNT_ANDROID_PACKAGE = "com.ezvany.ezcount"
+EZCOUNT_ANDROID_CERT_SHA256 = "6F:9C:7E:56:4A:DE:3E:1A:C4:8B:32:C6:F5:34:EE:C4:E4:8B:E1:DA:57:01:0F:F0:82:13:B0:C0:29:80:DE:4F"
+
 [[mounts]]
 source = "relay_data"
 destination = "/data"

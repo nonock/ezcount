@@ -47,6 +47,10 @@ export const MOCK_SERVER = "http://localhost:8787";
  * - `__LOGGED_OUT__`: start on the login screen
  * - `__REMOTE_GROUPS__`: groups that can be joined with an invite code
  * - `__UNSYNCED__`: log out fails unless forced
+ * - `__OPENED_WITH__`: the link the app was opened with (deep link)
+ * - `__NATIVE__`: `{ share, scan }` features, none by default; shared texts land in
+ *   `window.__shared`
+ * - `__SCANNED__`: what the camera "scans"
  * - `__STORAGE_WARNINGS__`
  */
 export function installTauriMock() {
@@ -219,7 +223,7 @@ export function installTauriMock() {
     );
   }
   function inviteFor(serverUrl: string, groupId: string) {
-    return `ezcount://join?server=${encodeURIComponent(serverUrl)}&group=${groupId}&key=mock-key&v=2`;
+    return `${serverUrl}/join#v=2&g=${groupId}&k=mock-key`;
   }
 
   // Minimal event plugin: `listen` registers a callback that tests can fire with
@@ -259,6 +263,22 @@ export function installTauriMock() {
         }
 
         case "plugin:event|unlisten":
+          return null;
+
+        case "plugin:deep-link|get_current":
+          return w.__OPENED_WITH__ ? [w.__OPENED_WITH__] : null;
+
+        case "native_features":
+          return { share: false, scan: false, ...w.__NATIVE__ };
+
+        case "plugin:barcode-scanner|check_permissions":
+          return { camera: "granted" };
+
+        case "plugin:barcode-scanner|scan":
+          return { content: w.__SCANNED__, format: "QR_CODE", bounds: null };
+
+        case "share_text":
+          w.__shared = [...(w.__shared || []), args.text];
           return null;
 
         case "get_storage_warnings":
@@ -330,12 +350,20 @@ export function installTauriMock() {
         }
 
         case "join_group": {
-          const code = String(args?.inviteCode || "");
-          if (!code.startsWith("ezcount://join?")) {
-            throw new Error("This is not a valid ezcount invite code");
+          // Invite links (<server>/join#g=…) and the ezcount://join?group=… form.
+          const code = String(args?.inviteCode || "").trim();
+          let server = "";
+          let groupId = "";
+          const link = code.match(/^(https?:\/\/.*)\/join#(.*)$/);
+          if (link) {
+            server = link[1];
+            groupId = new URLSearchParams(link[2]).get("g") || "";
+          } else if (code.startsWith("ezcount://join?")) {
+            const params = new URL(code.replace("ezcount://", "https://")).searchParams;
+            server = params.get("server") || "";
+            groupId = params.get("group") || "";
           }
-          const params = new URL(code.replace("ezcount://", "https://")).searchParams;
-          const groupId = params.get("group") || "";
+          if (!groupId) throw new Error("This is not a valid ezcount invite");
           requireAccount();
           if (getGroups().some((x) => x.id === groupId)) {
             throw new Error("This group is already in your account");
@@ -345,7 +373,6 @@ export function installTauriMock() {
           );
           if (!remote) throw new Error("The sync server does not know this group");
           getGroups().push(clone(remote));
-          const server = params.get("server") || "";
           syncInfos.set(groupId, {
             group_id: groupId,
             enabled: true,

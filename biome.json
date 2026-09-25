@@ -22,7 +22,7 @@
       "src-tauri/tauri.conf.json",
       "src-tauri/capabilities/**"
     ],
-    "ignore": ["src/bindings.ts", "src/components/ui/**"]
+    "ignore": ["src/bindings.ts", "src/components/ui/**", "src-tauri/gen/**"]
   },
   "formatter": {
     "enabled": true,

@@ -84,10 +84,14 @@ Keep `GRADLE_USER_HOME` on the same drive as the project if you can; `gradle.pro
 cargo run --release --manifest-path sync-server/Cargo.toml
 ```
 
-| Variable            | Default                | Meaning               |
-| ------------------- | ---------------------- | --------------------- |
-| `EZCOUNT_SYNC_ADDR` | `0.0.0.0:8787`         | Listen address        |
-| `EZCOUNT_SYNC_DB`   | `ezcount-sync.sqlite3` | SQLite file for data  |
+| Variable                      | Default                | Meaning                                                                    |
+| ----------------------------- | ---------------------- | -------------------------------------------------------------------------- |
+| `EZCOUNT_SYNC_ADDR`           | `0.0.0.0:8787`         | Listen address                                                             |
+| `EZCOUNT_SYNC_DB`             | `ezcount-sync.sqlite3` | SQLite file for data                                                       |
+| `EZCOUNT_ANDROID_PACKAGE`     | (none)                 | With the next one, the Android app that may open invite links directly    |
+| `EZCOUNT_ANDROID_CERT_SHA256` | (none)                 | That app's signing certificate fingerprints (`AB:CD:…`), comma-separated |
+
+Besides the sync API, the relay serves `/join`, the page invite links open (see "Inviting people" below), and, with both Android variables set, `/.well-known/assetlinks.json` for Android App Links.
 
 Or with Docker (data lives in the `ezcount-relay` volume; `GET /health` answers `ok`):
 
@@ -136,10 +140,21 @@ Then use `https://ezcount.example.com` as the server in the app. The relay's dat
 
 If the relay loses its data anyway, or you move to a new one at the same address, devices notice (each relay database has a random ID) and upload their groups and account lists again, so nothing is lost while one device still has them. Logins are not restored: the relay only knows your password's hash, so after such a loss, devices that are still logged in keep working but new ones can't log in. Back up the database.
 
-Enter the relay URL on the login screen when you create your account (set `VITE_EZCOUNT_SERVER` at build time to pre-fill it). To add people to a group, open it, tap **Invite** and send them the invite code; they use **Join with Code** from their own account and pick who they are in the group.
+Enter the relay URL on the login screen when you create your account (set `VITE_EZCOUNT_SERVER` at build time to pre-fill it).
 
-- **Access:** anyone with a group's invite code can read and edit that group.
-- **End-to-end encryption** (`src-tauri/src/crypto.rs`): the secret in the invite code never leaves the devices. Two keys are derived from it with HKDF-SHA256:
+### Inviting people
+
+Open the group and tap **Invite**. It shows an invite link, `https://<relay>/join#v=2&g=<group>&k=<key>`, and its QR code:
+
+- **Share** (Android) sends the link through any app with the system share sheet; **Copy Link** works everywhere.
+- **Opening the link** on a phone with ezcount installed opens the app with the invite filled in. For the Fly.io relay, Android opens it directly (App Links, declared in `tauri.conf.json` and verified against the relay's `assetlinks.json`). Otherwise the relay's `/join` page shows an **Open in ezcount** button (an `ezcount://join?…` link, also registered on Windows and Linux) and the invite to paste by hand.
+- **Scanning:** in **Join with Code**, Android offers **Scan QR Code**, which joins right away. A phone's own camera app also reads the code and opens the link.
+- The newcomer then picks who they are in the group. An invite link opened before logging in waits for the login.
+
+The key sits after the `#`, which browsers never send to a server, so the relay never sees it, not even when the `/join` page is opened. Invites in the older `ezcount://join?…` form keep working.
+
+- **Access:** anyone with a group's invite link can read and edit that group.
+- **End-to-end encryption** (`src-tauri/src/crypto.rs`): the secret in the invite link never leaves the devices. Two keys are derived from it with HKDF-SHA256:
   - an auth token, the only thing sent to the relay (which stores its hash),
   - an encryption key, used with XChaCha20-Poly1305 to seal every update, with the group ID bound in.
 
@@ -149,4 +164,4 @@ Enter the relay URL on the login screen when you create your account (set `VITE_
   - Someone who steals the relay's database can try to guess passwords offline, at Argon2's cost per guess, so use a strong one. The relay also blocks a username for 15 minutes after 5 failed logins.
   - Logging out removes the account's data from the device. It refuses while edits aren't uploaded yet, unless you confirm.
 - **Transport:** the relay speaks plain HTTP. Updates are already encrypted, but outside a trusted local network put it behind a TLS reverse proxy (Caddy, nginx) and share an `https://` URL anyway: TLS protects the auth token and the metadata.
-- **Limitations:** removing a member doesn't revoke their access; a removed member who kept the invite code can still read and edit the group. Likewise, logging out of a lost device doesn't lock it out. Both need key rotation. Passwords can't be changed yet.
+- **Limitations:** removing a member doesn't revoke their access; a removed member who kept the invite link can still read and edit the group. Likewise, logging out of a lost device doesn't lock it out. Both need key rotation. Passwords can't be changed yet.

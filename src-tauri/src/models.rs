@@ -86,6 +86,14 @@ pub struct SyncInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct NativeFeatures {
+    // The system share sheet (`share_text`).
+    pub share: bool,
+    // QR code scanning with the camera (barcode-scanner plugin).
+    pub scan: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct AccountInfo {
     pub username: String,
     pub server_url: String,

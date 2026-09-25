@@ -153,3 +153,13 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.673 0.182 276.935);
 }
+
+/* While scanning a QR code, the camera preview is behind the (then transparent) web view:
+   let it show through and hide everything but the scan overlay. */
+html.scanning,
+html.scanning body {
+  background: transparent !important;
+}
+html.scanning body > :not(.scan-overlay) {
+  visibility: hidden;
+}
