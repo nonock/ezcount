@@ -15,6 +15,8 @@ import type { Group } from "@/types";
 import { serverName } from "@/utils/formatters";
 import {
   ChevronRightIcon,
+  KeyRoundIcon,
+  LockKeyholeIcon,
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
@@ -30,6 +32,8 @@ interface NavbarProps {
   onOpenCreateGroup: () => void;
   username: string;
   serverUrl: string;
+  onChangePassword: () => void;
+  onNewRecoveryKey: () => void;
   onLogOut: () => void;
 }
 
@@ -60,9 +64,16 @@ const ThemeMenu: React.FC = () => {
   );
 };
 
-const AccountMenu: React.FC<{ username: string; serverUrl: string; onLogOut: () => void }> = ({
+type AccountMenuProps = Pick<
+  NavbarProps,
+  "username" | "serverUrl" | "onChangePassword" | "onNewRecoveryKey" | "onLogOut"
+>;
+
+const AccountMenu: React.FC<AccountMenuProps> = ({
   username,
   serverUrl,
+  onChangePassword,
+  onNewRecoveryKey,
   onLogOut,
 }) => (
   <DropdownMenu>
@@ -82,6 +93,13 @@ const AccountMenu: React.FC<{ username: string; serverUrl: string; onLogOut: () 
         </span>
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
+      <DropdownMenuItem onSelect={onChangePassword}>
+        <LockKeyholeIcon /> Change password
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={onNewRecoveryKey}>
+        <KeyRoundIcon /> New recovery key
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
       <DropdownMenuItem onSelect={onLogOut}>
         <LogOutIcon /> Log out
       </DropdownMenuItem>
@@ -95,6 +113,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenCreateGroup,
   username,
   serverUrl,
+  onChangePassword,
+  onNewRecoveryKey,
   onLogOut,
 }) => {
   return (
@@ -121,7 +141,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         <div className="flex shrink-0 items-center gap-1">
           <ThemeMenu />
-          <AccountMenu username={username} serverUrl={serverUrl} onLogOut={onLogOut} />
+          <AccountMenu
+            username={username}
+            serverUrl={serverUrl}
+            onChangePassword={onChangePassword}
+            onNewRecoveryKey={onNewRecoveryKey}
+            onLogOut={onLogOut}
+          />
           <Button onClick={onOpenCreateGroup} aria-label="New group">
             <PlusIcon data-icon="inline-start" />
             <span className="hidden sm:inline">New Group</span>

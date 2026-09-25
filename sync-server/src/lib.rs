@@ -29,6 +29,19 @@
 //!   `{ account_id, wrapped_key }`; 401 on a wrong username or password, 429 after
 //!   repeated failures
 //!
+//! A recovery key works like a second password, for when the password is forgotten: the device
+//! derives a recovery token from it and a key that encrypts the account key a second time. The
+//! relay stores the token's hash and that second blob.
+//!
+//! - `POST /v1/accounts` also takes `recovery_token` and `recovery_wrapped_key`, and answers
+//!   `{ "recovery": true }` (relays before recovery keys answer with an empty body)
+//! - `POST /v1/accounts/recover`: `{ username, recovery_token }` returns
+//!   `{ account_id, wrapped_key }` with the recovery blob; errors as for login
+//! - `POST /v1/accounts/credentials`: proves the account with `login_token` or
+//!   `recovery_token`, and replaces the password (`new_login_token`, `new_wrapped_key`), the
+//!   recovery key (`new_recovery_token`, `new_recovery_wrapped_key`), or both. A recovery key
+//!   works once: proving with it requires replacing it. 204, or errors as for login
+//!
 //! Invite links point at the relay: `GET /join` is a small page that opens the app with the
 //! invite in the link's fragment, which never reaches the relay. With [`AndroidApp`]
 //! configured, `GET /.well-known/assetlinks.json` lets that Android app open invite links
@@ -97,6 +110,18 @@ impl Relay {
              INSERT OR IGNORE INTO relay_meta (key, value)
                  VALUES ('relay_id', lower(hex(randomblob(16))));",
         )?;
+        // Recovery keys came after accounts: add their columns to older databases too.
+        let has_recovery: bool = db.query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info('accounts') WHERE name = 'recovery_hash')",
+            [],
+            |r| r.get(0),
+        )?;
+        if !has_recovery {
+            db.execute_batch(
+                "ALTER TABLE accounts ADD COLUMN recovery_hash BLOB;
+                 ALTER TABLE accounts ADD COLUMN recovery_wrapped_key BLOB;",
+            )?;
+        }
         let relay_id = db.query_row(
             "SELECT value FROM relay_meta WHERE key = 'relay_id'",
             [],
@@ -140,6 +165,8 @@ pub fn router(relay: Arc<Relay>, android_app: Option<AndroidApp>) -> Router {
         .route("/v1/groups/{id}/updates", get(pull).post(push))
         .route("/v1/accounts", post(sign_up))
         .route("/v1/accounts/login", post(log_in))
+        .route("/v1/accounts/recover", post(recover))
+        .route("/v1/accounts/credentials", post(update_credentials))
         .layer(DefaultBodyLimit::max(MAX_UPDATE_BYTES))
         .with_state(relay)
 }
@@ -376,21 +403,59 @@ struct SignUpRequest {
     account_id: String,
     /// Bearer token for the account document, registered like a group's.
     doc_token: String,
+    /// Absent from apps before recovery keys.
+    #[serde(default)]
+    recovery_token: Option<String>,
+    #[serde(default)]
+    recovery_wrapped_key: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SignUpResponse {
+    /// The recovery key was stored.
+    recovery: bool,
+}
+
+/// An account key encrypted on the device, sent in standard base64.
+fn wrapped_key(encoded: &str) -> Result<Vec<u8>, ApiError> {
+    STANDARD
+        .decode(encoded)
+        .ok()
+        .filter(|k| !k.is_empty() && k.len() <= 1024)
+        .ok_or(ApiError::BadRequest("invalid wrapped key"))
+}
+
+/// A token's hash and the account key it unlocks, encrypted.
+type Credential = (Vec<u8>, Vec<u8>);
+
+/// A token and its wrapped key, both given or neither.
+fn credential(
+    token: Option<&String>,
+    wrapped: Option<&String>,
+) -> Result<Option<Credential>, ApiError> {
+    match (token, wrapped) {
+        (Some(token), Some(wrapped)) => Ok(Some((token_hash(token)?, wrapped_key(wrapped)?))),
+        (None, None) => Ok(None),
+        _ => Err(ApiError::BadRequest(
+            "a token needs its wrapped key, and back",
+        )),
+    }
 }
 
 async fn sign_up(
     State(relay): State<Arc<Relay>>,
     Json(req): Json<SignUpRequest>,
-) -> Result<StatusCode, ApiError> {
+) -> Result<(StatusCode, Json<SignUpResponse>), ApiError> {
     check_username(&req.username)?;
     check_group_id(&req.account_id)?;
     let login_hash = token_hash(&req.login_token)?;
     let doc_hash = token_hash(&req.doc_token)?;
-    let wrapped_key = STANDARD
-        .decode(&req.wrapped_key)
-        .ok()
-        .filter(|k| !k.is_empty() && k.len() <= 1024)
-        .ok_or(ApiError::BadRequest("invalid wrapped key"))?;
+    let wrapped_key = wrapped_key(&req.wrapped_key)?;
+    let recovery = credential(
+        req.recovery_token.as_ref(),
+        req.recovery_wrapped_key.as_ref(),
+    )?;
+    let (recovery_hash, recovery_wrapped_key) = recovery.clone().unzip();
 
     let mut db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
     let tx = db.transaction()?;
@@ -406,16 +471,29 @@ async fn sign_up(
         return Err(ApiError::Conflict("account id taken"));
     }
     tx.execute(
-        "INSERT INTO accounts (username, account_id, login_hash, wrapped_key)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![req.username, req.account_id, login_hash, wrapped_key],
+        "INSERT INTO accounts
+             (username, account_id, login_hash, wrapped_key, recovery_hash, recovery_wrapped_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            req.username,
+            req.account_id,
+            login_hash,
+            wrapped_key,
+            recovery_hash,
+            recovery_wrapped_key
+        ],
     )?;
     tx.execute(
         "INSERT INTO groups (id, key_hash) VALUES (?1, ?2)",
         params![req.account_id, doc_hash],
     )?;
     tx.commit()?;
-    Ok(StatusCode::CREATED)
+    Ok((
+        StatusCode::CREATED,
+        Json(SignUpResponse {
+            recovery: recovery.is_some(),
+        }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -506,5 +584,137 @@ async fn log_in(
             relay.record_login(&req.username, false);
             Err(ApiError::BadLogin)
         }
+    }
+}
+
+#[derive(Deserialize)]
+struct RecoverRequest {
+    username: String,
+    recovery_token: String,
+}
+
+/// Like logging in, with the recovery key: hands back the account key it encrypts.
+async fn recover(
+    State(relay): State<Arc<Relay>>,
+    Json(req): Json<RecoverRequest>,
+) -> Result<Json<LogInResponse>, ApiError> {
+    check_username(&req.username)?;
+    relay.check_throttle(&req.username)?;
+    let recovery_hash = token_hash(&req.recovery_token)?;
+
+    let found = {
+        let db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.query_row(
+            "SELECT account_id, recovery_hash, recovery_wrapped_key FROM accounts
+             WHERE username = ?1",
+            [&req.username],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<Vec<u8>>>(1)?,
+                    r.get::<_, Option<Vec<u8>>>(2)?,
+                ))
+            },
+        )
+        .optional()?
+    };
+    match found {
+        Some((account_id, Some(stored), Some(wrapped_key))) if stored == recovery_hash => {
+            relay.record_login(&req.username, true);
+            Ok(Json(LogInResponse {
+                account_id,
+                wrapped_key: STANDARD.encode(wrapped_key),
+            }))
+        }
+        // Including accounts without a recovery key: same answer as a wrong key.
+        _ => {
+            relay.record_login(&req.username, false);
+            Err(ApiError::BadLogin)
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct CredentialsRequest {
+    username: String,
+    /// Proof of the account: one of the two.
+    #[serde(default)]
+    login_token: Option<String>,
+    #[serde(default)]
+    recovery_token: Option<String>,
+    /// A new password: its login token and the account key it encrypts.
+    #[serde(default)]
+    new_login_token: Option<String>,
+    #[serde(default)]
+    new_wrapped_key: Option<String>,
+    /// A new recovery key, likewise.
+    #[serde(default)]
+    new_recovery_token: Option<String>,
+    #[serde(default)]
+    new_recovery_wrapped_key: Option<String>,
+}
+
+/// Changes the password, the recovery key, or both. See the module docs.
+async fn update_credentials(
+    State(relay): State<Arc<Relay>>,
+    Json(req): Json<CredentialsRequest>,
+) -> Result<StatusCode, ApiError> {
+    check_username(&req.username)?;
+    let new_login = credential(req.new_login_token.as_ref(), req.new_wrapped_key.as_ref())?;
+    let new_recovery = credential(
+        req.new_recovery_token.as_ref(),
+        req.new_recovery_wrapped_key.as_ref(),
+    )?;
+    let (proof_column, proof) = match (&req.login_token, &req.recovery_token) {
+        (Some(token), None) => ("login_hash", token_hash(token)?),
+        (None, Some(_)) if new_recovery.is_none() => {
+            return Err(ApiError::BadRequest(
+                "a recovery key works once: replace it",
+            ))
+        }
+        (None, Some(token)) => ("recovery_hash", token_hash(token)?),
+        _ => return Err(ApiError::BadRequest("prove the account with one token")),
+    };
+    if new_login.is_none() && new_recovery.is_none() {
+        return Err(ApiError::BadRequest("nothing to change"));
+    }
+    relay.check_throttle(&req.username)?;
+
+    let proven = {
+        let mut db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
+        let tx = db.transaction()?;
+        // `proof_column` is one of two literals above, never user input.
+        let stored: Option<Vec<u8>> = tx
+            .query_row(
+                &format!("SELECT {proof_column} FROM accounts WHERE username = ?1"),
+                [&req.username],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        let proven = stored == Some(proof);
+        if proven {
+            if let Some((hash, wrapped)) = new_login {
+                tx.execute(
+                    "UPDATE accounts SET login_hash = ?2, wrapped_key = ?3 WHERE username = ?1",
+                    params![req.username, hash, wrapped],
+                )?;
+            }
+            if let Some((hash, wrapped)) = new_recovery {
+                tx.execute(
+                    "UPDATE accounts SET recovery_hash = ?2, recovery_wrapped_key = ?3
+                     WHERE username = ?1",
+                    params![req.username, hash, wrapped],
+                )?;
+            }
+            tx.commit()?;
+        }
+        proven
+    };
+    relay.record_login(&req.username, proven);
+    if proven {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::BadLogin)
     }
 }

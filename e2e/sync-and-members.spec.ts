@@ -247,6 +247,19 @@ test.describe("Sharing and joining", () => {
   });
 });
 
+/** The recovery key dialog: it shows the key and stays up until the user says they saved it. */
+async function saveRecoveryKey(page: import("@playwright/test").Page, key: RegExp) {
+  const dialog = page.getByRole("dialog", { name: "Save your recovery key" });
+  await expect(dialog.getByLabel("Recovery key")).toHaveText(key);
+  const done = dialog.getByRole("button", { name: "Done" });
+  await expect(done).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("I've saved it somewhere safe").check();
+  await done.click();
+  await expect(dialog).not.toBeVisible();
+}
+
 test.describe("Account", () => {
   test("signs up, then logs out", async ({ page }) => {
     await seed(page, { __LOGGED_OUT__: true, __TAKEN_USERNAMES__: ["bob"] });
@@ -266,6 +279,7 @@ test.describe("Account", () => {
 
     await page.getByLabel("Username").fill("Robert");
     await page.getByRole("button", { name: "Create Account" }).click();
+    await saveRecoveryKey(page, /^MOCK-KEY1-/);
     await expect(page.getByText("No groups yet")).toBeVisible();
 
     await page.getByRole("button", { name: "Account" }).click();
@@ -297,7 +311,75 @@ test.describe("Account", () => {
     await expect(password).toHaveAccessibleDescription("Strong");
     await page.getByLabel("Confirm password").fill("tangerine kayak mosaic");
     await create.click();
+    await saveRecoveryKey(page, /^MOCK-KEY1-/);
     await expect(page.getByText("No groups yet")).toBeVisible();
+  });
+
+  test("resets a forgotten password with the recovery key", async ({ page }) => {
+    const key = "7KQ2-M9XD-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF";
+    await seed(page, { __LOGGED_OUT__: true, __RECOVERY_KEY__: key });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Forgot password?" }).click();
+    await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible();
+
+    await page.getByLabel("Username").fill("alice");
+    await page.getByLabel("Recovery key").fill("7KQ2-M9XD-0000-0000-0000-0000-0000-0000");
+    await page.getByLabel("New password", { exact: true }).fill("juniper walrus lantern");
+    await page.getByLabel("Confirm new password").fill("juniper walrus lantern");
+    await page.getByRole("button", { name: "Reset Password" }).click();
+    await expect(page.getByText("Wrong username or recovery key")).toBeVisible();
+
+    // Typed as people do: lowercase, spaces instead of dashes.
+    await page.getByLabel("Recovery key").fill(key.toLowerCase().replaceAll("-", " "));
+    await page.getByRole("button", { name: "Reset Password" }).click();
+    await expect(page.getByText("The recovery key you used no longer works")).toBeVisible();
+    await saveRecoveryKey(page, /^MOCK-KEY1-/);
+
+    // The new password is the one that works now.
+    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByRole("menuitem", { name: "Log out" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Log Out" }).click();
+    await page.getByLabel("Username").fill("alice");
+    await page.getByLabel("Password").fill(MOCK_PASSWORD);
+    await page.getByRole("button", { name: "Log In" }).click();
+    await expect(page.getByText("Wrong username or password")).toBeVisible();
+    await page.getByLabel("Password").fill("juniper walrus lantern");
+    await page.getByRole("button", { name: "Log In" }).click();
+    await expect(page.getByText("No groups yet")).toBeVisible();
+  });
+
+  test("changes the password from the account menu", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByRole("menuitem", { name: "Change password" }).click();
+    const dialog = page.getByRole("dialog", { name: "Change password" });
+
+    await dialog.getByLabel("Current password").fill("not my password");
+    await dialog.getByLabel("New password", { exact: true }).fill("juniper walrus lantern");
+    await dialog.getByLabel("Confirm new password").fill("juniper walrus lantern");
+    await dialog.getByRole("button", { name: "Change Password" }).click();
+    await expect(dialog.getByText("Your current password is wrong")).toBeVisible();
+
+    await dialog.getByLabel("Current password").fill(MOCK_PASSWORD);
+    await dialog.getByRole("button", { name: "Change Password" }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByText("Password changed")).toBeVisible();
+  });
+
+  test("makes a new recovery key from the account menu", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByRole("menuitem", { name: "New recovery key" }).click();
+    const dialog = page.getByRole("dialog", { name: "New recovery key" });
+
+    await dialog.getByLabel("Password").fill("not my password");
+    await dialog.getByRole("button", { name: "Create New Key" }).click();
+    await expect(dialog.getByText("Wrong password")).toBeVisible();
+
+    await dialog.getByLabel("Password").fill(MOCK_PASSWORD);
+    await dialog.getByRole("button", { name: "Create New Key" }).click();
+    await expect(page.getByText("Your previous recovery key no longer works")).toBeVisible();
+    await saveRecoveryKey(page, /^MOCK-KEY1-/);
   });
 
   test("logging in doesn't rate the password", async ({ page }) => {

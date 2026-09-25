@@ -48,6 +48,7 @@ export const MOCK_SERVER = "http://localhost:8787";
  * - `__REMOTE_GROUPS__`: groups that can be joined with an invite code
  * - `__UNSYNCED__`: log out fails unless forced
  * - `__OPENED_WITH__`: the link the app was opened with (deep link)
+ * - `__RECOVERY_KEY__`: the account's recovery key; new ones are `MOCK-KEY<n>-AAAA-…`
  * - `__NATIVE__`: `{ share, scan }` features, none by default; shared texts land in
  *   `window.__shared`
  * - `__SCANNED__`: what the camera "scans"
@@ -65,6 +66,17 @@ export function installTauriMock() {
     identities: Record<string, string>;
   } | null = null;
   let accountLoaded = false;
+  // The account's current password and recovery key; each new key is numbered.
+  let password = MOCK_PASSWORD;
+  // Seeds are set after this script runs, so the seeded key is read when first needed.
+  let recoveryKey: string | null = null;
+  const currentRecoveryKey = () => recoveryKey ?? w.__RECOVERY_KEY__ ?? "";
+  let keysIssued = 0;
+  function nextRecoveryKey() {
+    keysIssued += 1;
+    recoveryKey = `MOCK-KEY${keysIssued}-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF`;
+    return recoveryKey;
+  }
 
   function getAccount() {
     if (!accountLoaded) {
@@ -327,16 +339,44 @@ export function installTauriMock() {
             throw new Error(`The username "${username}" is already taken`);
           }
           account = { username, server_url: args.serverUrl, identities: {} };
-          return clone(account);
+          password = args.password;
+          return { account: clone(account), recovery_key: nextRecoveryKey() };
         }
 
         case "log_in": {
           if (getAccount()) throw new Error("This device is already logged in");
           const username = checkCredentials(args.username, args.password, false);
-          if (args.password !== MOCK_PASSWORD) throw new Error("Wrong username or password");
+          if (args.password !== password) throw new Error("Wrong username or password");
           account = { username, server_url: args.serverUrl, identities: {} };
           groups = [];
           return clone(account);
+        }
+
+        case "recover_account": {
+          if (getAccount()) throw new Error("This device is already logged in");
+          const username = checkCredentials(args.username, args.newPassword, true);
+          const typed = String(args.recoveryKey).toUpperCase().replace(/[\s-]/g, "");
+          if (!currentRecoveryKey() || typed !== currentRecoveryKey().replace(/-/g, "")) {
+            throw new Error("Wrong username or recovery key");
+          }
+          account = { username, server_url: args.serverUrl, identities: {} };
+          groups = [];
+          password = args.newPassword;
+          return { account: clone(account), recovery_key: nextRecoveryKey() };
+        }
+
+        case "change_password": {
+          requireAccount();
+          if (args.currentPassword !== password) throw new Error("Your current password is wrong");
+          checkCredentials(getAccount()?.username ?? "", args.newPassword, true);
+          password = args.newPassword;
+          return null;
+        }
+
+        case "replace_recovery_key": {
+          requireAccount();
+          if (args.password !== password) throw new Error("Wrong password");
+          return nextRecoveryKey();
         }
 
         case "log_out": {

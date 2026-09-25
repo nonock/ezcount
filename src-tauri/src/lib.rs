@@ -16,7 +16,7 @@ use tauri::{Manager, State};
 
 use crate::models::{
     AccountInfo, ExpenseSplit, Group, NativeFeatures, ParticipantBalance, PasswordStrength,
-    SettlementTransfer, SyncInfo,
+    SettlementTransfer, SignedIn, SyncInfo,
 };
 use crate::storage::Store;
 
@@ -271,9 +271,51 @@ async fn sign_up(
     server_url: String,
     username: String,
     password: String,
-) -> Result<AccountInfo, String> {
-    sync::sign_up(&state, &server_url, &username, &password).await?;
-    state.require_account_info()
+) -> Result<SignedIn, String> {
+    let recovery_key = sync::sign_up(&state, &server_url, &username, &password).await?;
+    Ok(SignedIn {
+        account: state.require_account_info()?,
+        recovery_key,
+    })
+}
+
+/// Sets a new password with the recovery key and logs in. Returns the replacement recovery
+/// key: each one works once.
+#[tauri::command]
+#[specta::specta]
+async fn recover_account(
+    state: State<'_, AppState>,
+    server_url: String,
+    username: String,
+    recovery_key: String,
+    new_password: String,
+) -> Result<SignedIn, String> {
+    let next =
+        sync::recover_account(&state, &server_url, &username, &recovery_key, &new_password).await?;
+    Ok(SignedIn {
+        account: state.require_account_info()?,
+        recovery_key: Some(next),
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn change_password(
+    state: State<'_, AppState>,
+    current_password: String,
+    new_password: String,
+) -> Result<(), String> {
+    sync::change_password(&state, &current_password, &new_password).await
+}
+
+/// A new recovery key, replacing the old one. Returned to show once.
+#[tauri::command]
+#[specta::specta]
+async fn replace_recovery_key(
+    state: State<'_, AppState>,
+    password: String,
+) -> Result<String, String> {
+    sync::replace_recovery_key(&state, &password).await
 }
 
 #[tauri::command]
@@ -369,7 +411,10 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         add_self,
         native_features,
         share_text,
-        password_strength
+        password_strength,
+        recover_account,
+        change_password,
+        replace_recovery_key
     ])
 }
 

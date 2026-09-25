@@ -142,7 +142,7 @@ async getAccount() : Promise<Result<AccountInfo | null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async signUp(serverUrl: string, username: string, password: string) : Promise<Result<AccountInfo, string>> {
+async signUp(serverUrl: string, username: string, password: string) : Promise<Result<SignedIn, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("sign_up", { serverUrl, username, password }) };
 } catch (e) {
@@ -214,6 +214,37 @@ async shareText(text: string, title: string) : Promise<Result<null, string>> {
  */
 async passwordStrength(password: string, username: string) : Promise<PasswordStrength> {
     return await TAURI_INVOKE("password_strength", { password, username });
+},
+/**
+ * Sets a new password with the recovery key and logs in. Returns the replacement recovery
+ * key: each one works once.
+ */
+async recoverAccount(serverUrl: string, username: string, recoveryKey: string, newPassword: string) : Promise<Result<SignedIn, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("recover_account", { serverUrl, username, recoveryKey, newPassword }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async changePassword(currentPassword: string, newPassword: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("change_password", { currentPassword, newPassword }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * A new recovery key, replacing the old one. Returned to show once.
+ */
+async replaceRecoveryKey(password: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("replace_recovery_key", { password }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -237,6 +268,10 @@ export type Participant = { id: string; name: string; removed?: boolean }
 export type ParticipantBalance = { participant_id: string; participant_name: string; paid_cents: number; owed_cents: number; net_cents: number; removed: boolean }
 export type PasswordStrength = { score: number; acceptable: boolean; warning: string | null; suggestions: string[] }
 export type SettlementTransfer = { from_id: string; from_name: string; to_id: string; to_name: string; amount_cents: number }
+/**
+ * After signing up or recovering an account.
+ */
+export type SignedIn = { account: AccountInfo; recovery_key: string | null }
 export type SyncInfo = { group_id: string; enabled: boolean; server_url: string | null; invite_code: string | null; last_synced_at: string | null; last_error: string | null }
 
 /** tauri-specta globals **/

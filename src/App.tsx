@@ -17,16 +17,18 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AuthScreen } from "./components/auth/AuthScreen";
+import { AuthScreen, type NewRecoveryKey } from "./components/auth/AuthScreen";
 import { Navbar } from "./components/common/Navbar";
 import { QrScanOverlay } from "./components/common/QrScanOverlay";
 import { GroupDashboard } from "./components/dashboard/GroupDashboard";
 import { AddExpenseModal } from "./components/modals/AddExpenseModal";
 import { AddMemberModal } from "./components/modals/AddMemberModal";
+import { ChangePasswordDialog } from "./components/modals/ChangePasswordDialog";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
 import { ExpenseHistoryModal } from "./components/modals/ExpenseHistoryModal";
 import { JoinGroupModal } from "./components/modals/JoinGroupModal";
 import { RecordReimbursementModal } from "./components/modals/RecordReimbursementModal";
+import { RecoveryKeyDialog } from "./components/modals/RecoveryKeyDialog";
 import { ShareGroupModal } from "./components/modals/ShareGroupModal";
 import { WhoAreYouModal } from "./components/modals/WhoAreYouModal";
 import { BalancesTab } from "./components/workspace/BalancesTab";
@@ -80,6 +82,11 @@ export const App: React.FC = () => {
   // An invite link the app was opened with, kept until the user is logged in.
   const [pendingInvite, setPendingInvite] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  // A recovery key from sign-up or recovery, shown once over the app; or the dialog making a
+  // new one from the account menu.
+  const [recoveryKey, setRecoveryKey] = useState<NewRecoveryKey | null>(null);
+  const [isNewRecoveryKeyOpen, setIsNewRecoveryKeyOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isWhoOpen, setIsWhoOpen] = useState(false);
   // Groups where the user closed the "Who are you?" prompt without answering, this session.
   const [identitySkipped, setIdentitySkipped] = useState<Set<string>>(() => new Set());
@@ -517,9 +524,10 @@ export const App: React.FC = () => {
   if (account === null) {
     return (
       <AuthScreen
-        onAuthenticated={(acc) => {
+        onAuthenticated={(acc, key) => {
           setLoading(true);
           setAccount(acc);
+          setRecoveryKey(key ?? null);
         }}
       />
     );
@@ -533,6 +541,8 @@ export const App: React.FC = () => {
         onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
         username={account.username}
         serverUrl={account.server_url}
+        onChangePassword={() => setIsChangePasswordOpen(true)}
+        onNewRecoveryKey={() => setIsNewRecoveryKeyOpen(true)}
         onLogOut={handleLogOut}
       />
 
@@ -660,6 +670,25 @@ export const App: React.FC = () => {
         initialCode={joinPrefill.code}
         initialError={joinPrefill.error}
         onScan={handleScan}
+      />
+
+      <RecoveryKeyDialog
+        isOpen={recoveryKey !== null}
+        onClose={() => setRecoveryKey(null)}
+        reason={recoveryKey?.reason ?? "signup"}
+        recoveryKey={recoveryKey?.key}
+      />
+
+      <RecoveryKeyDialog
+        isOpen={isNewRecoveryKeyOpen}
+        onClose={() => setIsNewRecoveryKeyOpen(false)}
+        reason="replace"
+      />
+
+      <ChangePasswordDialog
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
+        username={account.username}
       />
 
       {scanning && (

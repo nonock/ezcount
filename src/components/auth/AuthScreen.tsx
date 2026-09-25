@@ -7,15 +7,21 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/services/api";
-import type { AccountInfo, PasswordStrength } from "@/types";
+import type { AccountInfo } from "@/types";
 import { errorMessage } from "@/utils/errors";
 import { serverName } from "@/utils/formatters";
-import { LockIcon } from "lucide-react";
+import { KeyRoundIcon } from "lucide-react";
 import type React from "react";
-import { useEffect, useState } from "react";
-import { PasswordStrengthMeter } from "./PasswordStrengthMeter";
+import { useState } from "react";
+import { PasswordStrengthMeter, usePasswordStrength } from "./PasswordStrengthMeter";
 
-type Mode = "login" | "signup";
+type Mode = "login" | "signup" | "recover";
+
+/** A recovery key to show once the user is in, and why it's new. */
+export interface NewRecoveryKey {
+  key: string;
+  reason: "signup" | "recovered";
+}
 
 // A relay the user picked instead of the default; unset when they use the default.
 const SERVER_KEY = "ezcount_sync_server";
@@ -41,8 +47,14 @@ function rememberServer(server: string) {
   }
 }
 
+const TITLES: Record<Mode, [string, string]> = {
+  login: ["Welcome back", "Log in to get your groups on this device."],
+  signup: ["Create your account", "One account for your phone, your computer and every group."],
+  recover: ["Reset your password", "Use the recovery key you saved when you created your account."],
+};
+
 interface AuthScreenProps {
-  onAuthenticated: (account: AccountInfo) => void;
+  onAuthenticated: (account: AccountInfo, recoveryKey?: NewRecoveryKey) => void;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
@@ -50,34 +62,28 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [recoveryKey, setRecoveryKey] = useState("");
   const [serverUrl, setServerUrl] = useState(rememberedServer);
   // Most people use the default relay, so the field stays out of the way until asked for.
   const [editingServer, setEditingServer] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const signingUp = mode === "signup";
+  // Signing up and recovering both choose a new password, rated as the user types.
+  const newPassword = mode !== "login";
+  const strength = usePasswordStrength(password, username, newPassword);
+  const [title, description] = TITLES[mode];
 
-  // Rated as the user types, by the same check sign-up enforces.
-  const [strength, setStrength] = useState<PasswordStrength | null>(null);
-  useEffect(() => {
-    if (!signingUp || !password) {
-      setStrength(null);
-      return;
-    }
-    let current = true;
-    api
-      .passwordStrength(password, username)
-      .then((s) => current && setStrength(s))
-      .catch((err) => console.error("Could not rate the password:", err));
-    return () => {
-      current = false;
-    };
-  }, [signingUp, password, username]);
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setError(null);
+    setPassword("");
+    setConfirmPassword("");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (signingUp && password !== confirmPassword) {
+    if (newPassword && password !== confirmPassword) {
       setError("The passwords don't match.");
       return;
     }
@@ -85,11 +91,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
     setError(null);
     try {
       const server = serverUrl.trim();
-      const account = signingUp
-        ? await api.signUp(server, username, password)
-        : await api.logIn(server, username, password);
+      if (mode === "login") {
+        const account = await api.logIn(server, username, password);
+        rememberServer(server);
+        onAuthenticated(account);
+        return;
+      }
+      const signedIn =
+        mode === "signup"
+          ? await api.signUp(server, username, password)
+          : await api.recoverAccount(server, username, recoveryKey, password);
       rememberServer(server);
-      onAuthenticated(account);
+      onAuthenticated(
+        signedIn.account,
+        signedIn.recovery_key
+          ? { key: signedIn.recovery_key, reason: mode === "signup" ? "signup" : "recovered" }
+          : undefined
+      );
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -108,27 +126,19 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
         <Card>
           <CardHeader>
             <CardTitle>
-              <h1>{signingUp ? "Create your account" : "Welcome back"}</h1>
+              <h1>{title}</h1>
             </CardTitle>
-            <CardDescription>
-              {signingUp
-                ? "One account for your phone, your computer and every group."
-                : "Log in to get your groups on this device."}
-            </CardDescription>
+            <CardDescription>{description}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <Tabs
-              value={mode}
-              onValueChange={(value) => {
-                setMode(value as Mode);
-                setError(null);
-              }}
-            >
-              <TabsList className="w-full">
-                <TabsTrigger value="login">Log in</TabsTrigger>
-                <TabsTrigger value="signup">Sign up</TabsTrigger>
-              </TabsList>
-            </Tabs>
+            {mode !== "recover" && (
+              <Tabs value={mode} onValueChange={(value) => switchMode(value as Mode)}>
+                <TabsList className="w-full">
+                  <TabsTrigger value="login">Log in</TabsTrigger>
+                  <TabsTrigger value="signup">Sign up</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            )}
 
             <form onSubmit={handleSubmit}>
               <FieldGroup>
@@ -145,25 +155,57 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
                     spellCheck={false}
                   />
                 </Field>
+                {mode === "recover" && (
+                  <Field>
+                    <FieldLabel htmlFor="input-recovery-key">Recovery key</FieldLabel>
+                    <Input
+                      id="input-recovery-key"
+                      required
+                      value={recoveryKey}
+                      onChange={(e) => setRecoveryKey(e.target.value)}
+                      placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+                      autoComplete="off"
+                      autoCapitalize="characters"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      className="font-mono text-sm"
+                    />
+                  </Field>
+                )}
                 <Field>
-                  <FieldLabel htmlFor="input-password">Password</FieldLabel>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <FieldLabel htmlFor="input-password">
+                      {mode === "recover" ? "New password" : "Password"}
+                    </FieldLabel>
+                    {mode === "login" && (
+                      <button
+                        type="button"
+                        className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                        onClick={() => switchMode("recover")}
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
                   <Input
                     id="input-password"
                     type="password"
                     required
-                    minLength={signingUp ? 8 : undefined}
+                    minLength={newPassword ? 8 : undefined}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    autoComplete={signingUp ? "new-password" : "current-password"}
-                    aria-describedby={signingUp && strength ? "password-strength" : undefined}
+                    autoComplete={newPassword ? "new-password" : "current-password"}
+                    aria-describedby={newPassword && strength ? "password-strength" : undefined}
                   />
-                  {signingUp && strength && (
+                  {newPassword && strength && (
                     <PasswordStrengthMeter strength={strength} id="password-strength" />
                   )}
                 </Field>
-                {signingUp && (
+                {newPassword && (
                   <Field>
-                    <FieldLabel htmlFor="input-confirm-password">Confirm password</FieldLabel>
+                    <FieldLabel htmlFor="input-confirm-password">
+                      {mode === "recover" ? "Confirm new password" : "Confirm password"}
+                    </FieldLabel>
                     <Input
                       id="input-confirm-password"
                       type="password"
@@ -204,12 +246,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
                   </Field>
                 )}
 
-                {signingUp && (
+                {mode === "signup" && (
                   <Alert>
-                    <LockIcon />
+                    <KeyRoundIcon />
                     <AlertDescription>
-                      Your password encrypts your data, so it can't be reset. Keep it in a password
-                      manager.
+                      Nobody can reset your password, not even the server. You'll get a recovery key
+                      next: it's the way back in if you forget it.
                     </AlertDescription>
                   </Alert>
                 )}
@@ -218,12 +260,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
 
                 <Button
                   type="submit"
-                  disabled={submitting || (signingUp && !strength?.acceptable)}
+                  disabled={submitting || (newPassword && !strength?.acceptable)}
                   className="w-full"
                 >
                   {submitting && <Spinner data-icon="inline-start" />}
-                  {signingUp ? "Create Account" : "Log In"}
+                  {mode === "login"
+                    ? "Log In"
+                    : mode === "signup"
+                      ? "Create Account"
+                      : "Reset Password"}
                 </Button>
+
+                {mode === "recover" && (
+                  <Button type="button" variant="ghost" onClick={() => switchMode("login")}>
+                    Back to log in
+                  </Button>
+                )}
 
                 {!editingServer && (
                   <p className="text-center text-sm text-muted-foreground">

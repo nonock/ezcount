@@ -59,7 +59,7 @@ bunx playwright test e2e/group-journey.spec.ts -g "<test title>"
 
 **Sync** (`sync.rs`, `sync-server/`): the relay is dumb. It stores opaque, ordered, encrypted updates per document and serves them by sequence number. Clients push ops the server lacks and pull after their last imported seq; Loro merges. `spawn_background_sync` pushes after each edit (via `sync_wakeup`) and polls every 20 s; `reconcile` adds/removes local groups to match the account doc. Rust emits `sync-updated` / `account-updated` events that `App.tsx` listens for to refresh. If a relay's random DB id changes, clients re-upload everything.
 
-**Crypto** (`crypto.rs`): invite code = server URL + group id + secret. HKDF-SHA256 derives an auth token (only thing the relay sees, stored hashed) and an XChaCha20-Poly1305 key bound to the group id. Passwords go through Argon2id into a login token and a key wrapping the random account key.
+**Crypto** (`crypto.rs`): invite code = server URL + group id + secret. HKDF-SHA256 derives an auth token (only thing the relay sees, stored hashed) and an XChaCha20-Poly1305 key bound to the group id. Passwords go through Argon2id into a login token and a key wrapping the random account key; recovery keys (HKDF, no stretching) give a second token and a second wrapped copy (`CredentialKeys`). Each recovery key works once: the relay's `/v1/accounts/credentials` requires replacing it when it's the proof.
 
 **Tests:**
 - Rust unit tests live in `#[cfg(test)]` modules; `sync.rs` tests spin up a real `ezcount_sync_server` relay in-process for end-to-end sync.

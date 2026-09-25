@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
 
 use crate::account;
-use crate::crypto::{GroupKeys, PasswordKeys};
+use crate::crypto::{new_recovery_key, CredentialKeys, GroupKeys};
 use crate::doc;
 use crate::models::{Group, PasswordStrength};
 use crate::storage::{import_remote_update, Session, SyncMeta};
@@ -223,11 +223,13 @@ fn check_password(password: &str, username: &str) -> Res<()> {
 }
 
 /// Argon2 takes a noticeable fraction of a second, so it runs on a blocking thread.
-async fn password_keys(username: &str, password: &str) -> Res<PasswordKeys> {
+async fn password_keys(username: &str, password: &str) -> Res<CredentialKeys> {
     let (username, password) = (username.to_string(), password.to_string());
-    tauri::async_runtime::spawn_blocking(move || PasswordKeys::derive(&username, &password))
-        .await
-        .map_err(|e| format!("Could not derive keys from the password: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        CredentialKeys::from_password(&username, &password)
+    })
+    .await
+    .map_err(|e| format!("Could not derive keys from the password: {e}"))?
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +265,15 @@ struct SignUpRequest<'a> {
     wrapped_key: String,
     account_id: &'a str,
     doc_token: &'a str,
+    recovery_token: &'a str,
+    recovery_wrapped_key: String,
+}
+
+#[derive(Deserialize, Default)]
+struct SignUpResponse {
+    /// Relays before recovery keys answer with an empty body, and ignore the key.
+    #[serde(default)]
+    recovery: bool,
 }
 
 #[derive(Serialize)]
@@ -275,6 +286,30 @@ struct LogInRequest<'a> {
 struct LogInResponse {
     account_id: String,
     wrapped_key: String,
+}
+
+#[derive(Serialize)]
+struct RecoverRequest<'a> {
+    username: &'a str,
+    recovery_token: &'a str,
+}
+
+/// See `POST /v1/accounts/credentials` in the relay: one proof, one or two replacements.
+#[derive(Serialize, Default)]
+struct CredentialsRequest<'a> {
+    username: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    login_token: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recovery_token: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_login_token: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_wrapped_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_recovery_token: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_recovery_wrapped_key: Option<String>,
 }
 
 fn updates_url(server_url: &str, group_id: &str) -> String {
@@ -544,7 +579,7 @@ pub async fn sign_up(
     server_url: &str,
     username: &str,
     password: &str,
-) -> Res<()> {
+) -> Res<Option<String>> {
     let server_url = normalize_server_url(server_url)?;
     let username = normalize_username(username)?;
     check_password(password, &username)?;
@@ -554,24 +589,36 @@ pub async fn sign_up(
     let account_id = uuid::Uuid::new_v4().to_string();
     let account_key = new_secret()?;
     let doc_keys = GroupKeys::derive(&account_key)?;
+    let recovery_key = new_recovery_key()?;
+    let recovery = CredentialKeys::from_recovery_key(&recovery_key)?;
 
     let response = state
         .http
         .post(format!("{server_url}/v1/accounts"))
         .json(&SignUpRequest {
             username: &username,
-            login_token: &keys.login_token,
+            login_token: &keys.token,
             wrapped_key: STANDARD.encode(keys.wrap_account_key(&account_id, &account_key)?),
             account_id: &account_id,
             doc_token: &doc_keys.auth_token,
+            recovery_token: &recovery.token,
+            recovery_wrapped_key: STANDARD
+                .encode(recovery.wrap_account_key(&account_id, &account_key)?),
         })
         .send()
         .await
         .map_err(request_err)?;
-    match response.status().as_u16() {
+    let created: SignUpResponse = match response.status().as_u16() {
         409 => return Err(format!("The username \"{username}\" is already taken")),
         404 => return Err(NO_ACCOUNTS.to_string()),
-        _ => check_status(response).await?,
+        _ => {
+            let body = check_status(response)
+                .await?
+                .text()
+                .await
+                .unwrap_or_default();
+            serde_json::from_str(&body).unwrap_or_default()
+        }
     };
 
     let session = Session {
@@ -587,7 +634,167 @@ pub async fn sign_up(
     adopt_local_groups(state)?;
     // Upload the new account right away; the background loop retries if this fails.
     let _ = sync_account(state).await;
-    Ok(())
+    // Only a relay that stored it makes the recovery key worth showing.
+    Ok(created.recovery.then_some(recovery_key))
+}
+
+/// Sends a `POST /v1/accounts/credentials`. `wrong_proof` is the message for a rejected one.
+async fn update_credentials(
+    state: &AppState,
+    server_url: &str,
+    request: &CredentialsRequest<'_>,
+    wrong_proof: &str,
+) -> Res<()> {
+    let response = state
+        .http
+        .post(format!("{server_url}/v1/accounts/credentials"))
+        .json(request)
+        .send()
+        .await
+        .map_err(request_err)?;
+    match response.status().as_u16() {
+        401 => Err(wrong_proof.to_string()),
+        404 => Err(OLD_RELAY.to_string()),
+        429 => Err(TOO_MANY_ATTEMPTS.to_string()),
+        _ => check_status(response).await.map(|_| ()),
+    }
+}
+
+const OLD_RELAY: &str =
+    "This server can't change passwords or recovery keys yet. Update the ezcount relay.";
+const TOO_MANY_ATTEMPTS: &str = "Too many failed attempts. Wait a few minutes and try again.";
+
+/// The logged-in account's username, relay, id and key.
+fn account_credentials(state: &AppState) -> Res<(String, String, String, String)> {
+    let store = state.store();
+    let session = store
+        .session()
+        .ok_or_else(|| "You are not logged in".to_string())?;
+    let key = store
+        .sync_meta(&session.account_id)
+        .map(|meta| meta.secret.clone())
+        .ok_or_else(|| "This device has no key for your account".to_string())?;
+    Ok((
+        session.username.clone(),
+        session.server_url.clone(),
+        session.account_id.clone(),
+        key,
+    ))
+}
+
+/// Changes the password. Other devices stay logged in: the account key doesn't change, only
+/// the copy of it the password unlocks.
+pub async fn change_password(state: &AppState, current: &str, new: &str) -> Res<()> {
+    let (username, server_url, account_id, account_key) = account_credentials(state)?;
+    check_password(new, &username)?;
+    let old = password_keys(&username, current).await?;
+    let keys = password_keys(&username, new).await?;
+    let request = CredentialsRequest {
+        username: &username,
+        login_token: Some(&old.token),
+        new_login_token: Some(&keys.token),
+        new_wrapped_key: Some(STANDARD.encode(keys.wrap_account_key(&account_id, &account_key)?)),
+        ..Default::default()
+    };
+    update_credentials(
+        state,
+        &server_url,
+        &request,
+        "Your current password is wrong",
+    )
+    .await
+}
+
+/// Replaces the recovery key, or gives an account created before recovery keys its first one.
+/// The old key stops working. Returns the new one, to show once.
+pub async fn replace_recovery_key(state: &AppState, password: &str) -> Res<String> {
+    let (username, server_url, account_id, account_key) = account_credentials(state)?;
+    let keys = password_keys(&username, password).await?;
+    let recovery_key = new_recovery_key()?;
+    let recovery = CredentialKeys::from_recovery_key(&recovery_key)?;
+    let request = CredentialsRequest {
+        username: &username,
+        login_token: Some(&keys.token),
+        new_recovery_token: Some(&recovery.token),
+        new_recovery_wrapped_key: Some(
+            STANDARD.encode(recovery.wrap_account_key(&account_id, &account_key)?),
+        ),
+        ..Default::default()
+    };
+    update_credentials(state, &server_url, &request, "Wrong password").await?;
+    Ok(recovery_key)
+}
+
+/// Sets a new password with the recovery key, for a forgotten password, and logs this device
+/// in. A recovery key works once: returns its replacement, to show once.
+pub async fn recover_account(
+    state: &AppState,
+    server_url: &str,
+    username: &str,
+    recovery_key: &str,
+    new_password: &str,
+) -> Res<String> {
+    let wrong = "Wrong username or recovery key";
+    let server_url = normalize_server_url(server_url)?;
+    let username = normalize_username(username).map_err(|_| wrong.to_string())?;
+    let recovery = CredentialKeys::from_recovery_key(recovery_key)?;
+    check_password(new_password, &username)?;
+    ensure_logged_out(state)?;
+
+    let response = state
+        .http
+        .post(format!("{server_url}/v1/accounts/recover"))
+        .json(&RecoverRequest {
+            username: &username,
+            recovery_token: &recovery.token,
+        })
+        .send()
+        .await
+        .map_err(request_err)?;
+    let found: LogInResponse = match response.status().as_u16() {
+        401 => return Err(wrong.to_string()),
+        404 => return Err(OLD_RELAY.to_string()),
+        429 => return Err(TOO_MANY_ATTEMPTS.to_string()),
+        _ => check_status(response)
+            .await?
+            .json()
+            .await
+            .map_err(|e| format!("The sync server sent an unexpected response: {e}"))?,
+    };
+    let wrapped = STANDARD
+        .decode(&found.wrapped_key)
+        .map_err(|_| "The sync server sent corrupt account data".to_string())?;
+    let account_key = recovery.unwrap_account_key(&found.account_id, &wrapped)?;
+
+    let keys = password_keys(&username, new_password).await?;
+    let next_key = new_recovery_key()?;
+    let next = CredentialKeys::from_recovery_key(&next_key)?;
+    let request = CredentialsRequest {
+        username: &username,
+        recovery_token: Some(&recovery.token),
+        new_login_token: Some(&keys.token),
+        new_wrapped_key: Some(
+            STANDARD.encode(keys.wrap_account_key(&found.account_id, &account_key)?),
+        ),
+        new_recovery_token: Some(&next.token),
+        new_recovery_wrapped_key: Some(
+            STANDARD.encode(next.wrap_account_key(&found.account_id, &account_key)?),
+        ),
+        ..Default::default()
+    };
+    update_credentials(state, &server_url, &request, wrong).await?;
+
+    // The new password is set; if this download fails, logging in with it finishes the job.
+    let (doc, meta) = download(&state.http, &server_url, &account_key, &found.account_id).await?;
+    let session = Session {
+        server_url,
+        username,
+        account_id: found.account_id,
+    };
+    state.store().set_session(session, doc, meta)?;
+    adopt_local_groups(state)?;
+    state.sync_wakeup.notify_one();
+    Ok(next_key)
 }
 
 /// Logs this device into an existing account. Its groups download in the background.
@@ -603,7 +810,7 @@ pub async fn log_in(state: &AppState, server_url: &str, username: &str, password
         .post(format!("{server_url}/v1/accounts/login"))
         .json(&LogInRequest {
             username: &username,
-            login_token: &keys.login_token,
+            login_token: &keys.token,
         })
         .send()
         .await
@@ -611,9 +818,7 @@ pub async fn log_in(state: &AppState, server_url: &str, username: &str, password
     let found: LogInResponse = match response.status().as_u16() {
         401 => return Err("Wrong username or password".to_string()),
         404 => return Err(NO_ACCOUNTS.to_string()),
-        429 => {
-            return Err("Too many failed attempts. Wait a few minutes and try again.".to_string())
-        }
+        429 => return Err(TOO_MANY_ATTEMPTS.to_string()),
         _ => check_status(response)
             .await?
             .json()
@@ -1344,6 +1549,138 @@ mod end_to_end {
         assert!(err.contains("rejected"), "{err}");
 
         let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    const NEW_PASSWORD: &str = "juniper walrus lantern";
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_forgotten_password_is_reset_with_the_recovery_key() {
+        let (url, relay_dir) = start_relay().await;
+        let laptop = Device::new();
+        let key = sign_up(&laptop.state, &url, "alice", PASSWORD)
+            .await
+            .unwrap()
+            .expect("the relay stores recovery keys");
+        let trip = laptop.create("Trip", &["Alice", "Bob"]).id;
+        laptop.sync().await;
+
+        let phone = Device::new();
+        let err = recover_account(
+            &phone.state,
+            &url,
+            "alice",
+            &new_recovery_key().unwrap(),
+            NEW_PASSWORD,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err, "Wrong username or recovery key");
+        let err = recover_account(&phone.state, &url, "alice", &key, "password123")
+            .await
+            .unwrap_err();
+        assert!(err.contains("too easy to guess"), "{err}");
+
+        // Typed as people do: lowercase, spaces instead of dashes.
+        let typed = key.to_lowercase().replace('-', " ");
+        let next = recover_account(&phone.state, &url, "alice", &typed, NEW_PASSWORD)
+            .await
+            .unwrap();
+        assert_ne!(next, key, "a recovery key works once");
+        reconcile(&phone.state).await.unwrap();
+        assert_eq!(phone.group_ids(), vec![trip.clone()]);
+
+        let other = Device::new();
+        let err = log_in(&other.state, &url, "alice", PASSWORD)
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Wrong username or password");
+        let err = recover_account(&other.state, &url, "alice", &key, NEW_PASSWORD)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err, "Wrong username or recovery key",
+            "the used key is gone"
+        );
+        log_in(&other.state, &url, "alice", NEW_PASSWORD)
+            .await
+            .unwrap();
+        // The laptop never needed the password again.
+        laptop.sync().await;
+
+        let _ = std::fs::remove_dir_all(&relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn changing_the_password_keeps_other_devices_in() {
+        let (url, relay_dir) = start_relay().await;
+        let laptop = Device::signed_up(&url, "alice").await;
+        let trip = laptop.create("Trip", &["Alice", "Bob"]);
+        laptop.sync().await;
+        let phone = Device::logged_in(&url, "alice").await;
+
+        let err = change_password(&laptop.state, "not my password", NEW_PASSWORD)
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Your current password is wrong");
+        let err = change_password(&laptop.state, PASSWORD, "password123")
+            .await
+            .unwrap_err();
+        assert!(err.contains("too easy to guess"), "{err}");
+        change_password(&laptop.state, PASSWORD, NEW_PASSWORD)
+            .await
+            .unwrap();
+
+        let other = Device::new();
+        assert!(log_in(&other.state, &url, "alice", PASSWORD).await.is_err());
+        log_in(&other.state, &url, "alice", NEW_PASSWORD)
+            .await
+            .unwrap();
+
+        // The phone still syncs, without the new password.
+        phone.sync().await;
+        let (a, b) = (
+            trip.participants[0].id.clone(),
+            trip.participants[1].id.clone(),
+        );
+        phone.edit(&trip.id, |d| {
+            doc::add_expense(d, "Taxi", 1200, a.clone(), vec![split(&a), split(&b)], None)
+        });
+        phone.sync().await;
+        laptop.sync().await;
+        assert_eq!(laptop.group(&trip.id).expenses.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_new_recovery_key_replaces_the_old_one() {
+        let (url, relay_dir) = start_relay().await;
+        let laptop = Device::signed_up(&url, "alice").await;
+        // As for an account from before recovery keys: the relay has none for it.
+        let db = rusqlite::Connection::open(relay_dir.join("relay.sqlite3")).unwrap();
+        db.execute(
+            "UPDATE accounts SET recovery_hash = NULL, recovery_wrapped_key = NULL",
+            [],
+        )
+        .unwrap();
+
+        let err = replace_recovery_key(&laptop.state, "not my password")
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Wrong password");
+        let first = replace_recovery_key(&laptop.state, PASSWORD).await.unwrap();
+        let second = replace_recovery_key(&laptop.state, PASSWORD).await.unwrap();
+
+        let phone = Device::new();
+        let err = recover_account(&phone.state, &url, "alice", &first, NEW_PASSWORD)
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Wrong username or recovery key", "replaced");
+        recover_account(&phone.state, &url, "alice", &second, NEW_PASSWORD)
+            .await
+            .unwrap();
+
+        let _ = std::fs::remove_dir_all(&relay_dir);
     }
 
     #[tokio::test(flavor = "multi_thread")]

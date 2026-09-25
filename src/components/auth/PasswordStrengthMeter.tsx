@@ -1,6 +1,35 @@
 import { cn } from "@/lib/utils";
+import { api } from "@/services/api";
 import type { PasswordStrength } from "@/types";
 import type React from "react";
+import { useEffect, useState } from "react";
+
+/**
+ * Rates a new password as the user types, with the same check the app enforces. Null while
+ * `enabled` is false or the password is empty.
+ */
+export function usePasswordStrength(
+  password: string,
+  username: string,
+  enabled = true
+): PasswordStrength | null {
+  const [strength, setStrength] = useState<PasswordStrength | null>(null);
+  useEffect(() => {
+    if (!enabled || !password) {
+      setStrength(null);
+      return;
+    }
+    let current = true;
+    api
+      .passwordStrength(password, username)
+      .then((s) => current && setStrength(s))
+      .catch((err) => console.error("Could not rate the password:", err));
+    return () => {
+      current = false;
+    };
+  }, [enabled, password, username]);
+  return strength;
+}
 
 // By zxcvbn score, 0 to 4. Sign-up needs 3.
 const LEVELS = [

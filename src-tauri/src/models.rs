@@ -105,6 +105,14 @@ pub struct NativeFeatures {
     pub scan: bool,
 }
 
+/// After signing up or recovering an account.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct SignedIn {
+    pub account: AccountInfo,
+    // The new recovery key, to show once. None when the relay doesn't support them.
+    pub recovery_key: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct AccountInfo {
     pub username: String,

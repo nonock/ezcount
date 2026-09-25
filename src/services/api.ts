@@ -7,6 +7,7 @@ import type {
   ParticipantBalance,
   PasswordStrength,
   SettlementTransfer,
+  SignedIn,
   SyncInfo,
 } from "../types";
 
@@ -112,8 +113,28 @@ export const api = {
     return unwrap(await commands.getAccount());
   },
 
-  async signUp(serverUrl: string, username: string, password: string): Promise<AccountInfo> {
+  /** Also returns the new account's recovery key, when the relay supports them. */
+  async signUp(serverUrl: string, username: string, password: string): Promise<SignedIn> {
     return unwrap(await commands.signUp(serverUrl, username, password));
+  },
+
+  /** Sets a new password with the recovery key and logs in; returns the next recovery key. */
+  async recoverAccount(
+    serverUrl: string,
+    username: string,
+    recoveryKey: string,
+    newPassword: string
+  ): Promise<SignedIn> {
+    return unwrap(await commands.recoverAccount(serverUrl, username, recoveryKey, newPassword));
+  },
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    unwrap(await commands.changePassword(currentPassword, newPassword));
+  },
+
+  /** Replaces the recovery key; the old one stops working. */
+  async replaceRecoveryKey(password: string): Promise<string> {
+    return unwrap(await commands.replaceRecoveryKey(password));
   },
 
   async logIn(serverUrl: string, username: string, password: string): Promise<AccountInfo> {

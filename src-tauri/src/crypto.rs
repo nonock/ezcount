@@ -12,7 +12,7 @@
 //!
 //! Sealed blob layout: `[format version: 1 byte][nonce: 24 bytes][ciphertext + 16-byte tag]`.
 //!
-//! Accounts add one layer on top (see `PasswordKeys`): a random account key, which is the
+//! Accounts add one layer on top (see `CredentialKeys`): a random account key, which is the
 //! secret of the account document, is stored on the relay encrypted with a key stretched
 //! from the password. The relay can check logins but can never recover the account key.
 
@@ -128,18 +128,96 @@ impl GroupKeys {
     }
 }
 
-/// Keys stretched from an account password.
-pub struct PasswordKeys {
-    /// Proves the password to the relay, which stores only its hash.
-    pub login_token: String,
+/// Recovery keys hold this many random bytes: 160 bits, 32 base32 characters.
+const RECOVERY_KEY_LEN: usize = 20;
+/// Crockford's base32: no I, L, O or U, so a key read back from paper can't be misspelled.
+const RECOVERY_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// A new random recovery key, as the user sees it: `7KQ2-M9XD-…`, eight groups of four.
+pub fn new_recovery_key() -> Res<String> {
+    let mut bytes = [0u8; RECOVERY_KEY_LEN];
+    getrandom::fill(&mut bytes).map_err(|e| format!("Could not generate a key: {e}"))?;
+    let mut bits = 0u64;
+    let mut pending = 0;
+    let mut chars = String::new();
+    for byte in bytes {
+        bits = (bits << 8) | u64::from(byte);
+        pending += 8;
+        while pending >= 5 {
+            pending -= 5;
+            chars.push(RECOVERY_ALPHABET[((bits >> pending) & 31) as usize] as char);
+        }
+    }
+    let groups: Vec<&str> = (0..chars.len())
+        .step_by(4)
+        .map(|i| &chars[i..i + 4])
+        .collect();
+    Ok(groups.join("-"))
+}
+
+/// Reads a recovery key the way people type it: any case, with or without dashes and
+/// spaces, and O, I or L for the digits they look like.
+fn parse_recovery_key(key: &str) -> Res<[u8; RECOVERY_KEY_LEN]> {
+    let invalid = || "This isn't a valid recovery key. Check it for typos.".to_string();
+    let chars: Vec<char> = key
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect();
+    // Exactly the characters for the key's bits: an extra one would only add unused bits.
+    if chars.len() != RECOVERY_KEY_LEN * 8 / 5 {
+        return Err(invalid());
+    }
+    let mut bits = 0u64;
+    let mut pending = 0;
+    let mut bytes = Vec::with_capacity(RECOVERY_KEY_LEN);
+    for c in chars {
+        let c = match c.to_ascii_uppercase() {
+            'O' => '0',
+            'I' | 'L' => '1',
+            c => c,
+        };
+        let value = RECOVERY_ALPHABET
+            .iter()
+            .position(|&a| a as char == c)
+            .ok_or_else(invalid)?;
+        bits = (bits << 5) | value as u64;
+        pending += 5;
+        if pending >= 8 {
+            pending -= 8;
+            bytes.push((bits >> pending) as u8);
+        }
+    }
+    bytes.try_into().map_err(|_| invalid())
+}
+
+/// Keys from an account credential, the password or the recovery key: a token that proves it
+/// to the relay (which stores only the token's hash), and a key that encrypts the account key.
+pub struct CredentialKeys {
+    pub token: String,
     /// Encrypts the account key for storage on the relay. Never leaves the device.
     wrap: XChaCha20Poly1305,
 }
 
-impl PasswordKeys {
+impl CredentialKeys {
+    /// A recovery key is random and long, so a plain HKDF is enough (no stretching).
+    pub fn from_recovery_key(recovery_key: &str) -> Res<Self> {
+        let bytes = parse_recovery_key(recovery_key)?;
+        let hkdf = Hkdf::<Sha256>::new(Some(b"ezcount recovery keys"), &bytes);
+        let mut token = [0u8; 32];
+        let mut wrap = [0u8; 32];
+        hkdf.expand(b"ezcount/v1/recovery-token", &mut token)
+            .and_then(|_| hkdf.expand(b"ezcount/v1/recovery-key-wrap", &mut wrap))
+            .map_err(|_| "Could not derive keys from the recovery key".to_string())?;
+        Ok(Self {
+            token: URL_SAFE_NO_PAD.encode(token),
+            wrap: XChaCha20Poly1305::new_from_slice(&wrap)
+                .map_err(|_| "Could not derive keys from the recovery key".to_string())?,
+        })
+    }
+
     /// Slow on purpose (Argon2id); call it off the async runtime. The salt is derived from the
     /// username, which is unique per relay, so no extra round trip is needed before logging in.
-    pub fn derive(username: &str, password: &str) -> Res<Self> {
+    pub fn from_password(username: &str, password: &str) -> Res<Self> {
         let failed = |e: argon2::Error| format!("Could not derive keys from the password: {e}");
         let salt = Sha256::digest(format!("ezcount/v1/account-salt/{username}"));
         let params = Params::new(ARGON2_MEMORY_KIB, ARGON2_PASSES, 1, Some(32)).map_err(failed)?;
@@ -155,7 +233,7 @@ impl PasswordKeys {
             .and_then(|_| hkdf.expand(b"ezcount/v1/account-key-wrap", &mut wrap))
             .map_err(|_| "Could not derive keys from the password".to_string())?;
         Ok(Self {
-            login_token: URL_SAFE_NO_PAD.encode(login),
+            token: URL_SAFE_NO_PAD.encode(login),
             wrap: XChaCha20Poly1305::new_from_slice(&wrap)
                 .map_err(|_| "Could not derive keys from the password".to_string())?,
         })
@@ -222,32 +300,72 @@ mod tests {
     #[test]
     fn password_keys_wrap_the_account_key() {
         let account_key = new_secret().unwrap();
-        let keys = PasswordKeys::derive("alice", "correct horse").unwrap();
+        let keys = CredentialKeys::from_password("alice", "correct horse").unwrap();
         let blob = keys.wrap_account_key("acc-1", &account_key).unwrap();
         assert!(!blob
             .windows(account_key.len())
             .any(|w| w == account_key.as_bytes()));
 
         // Same username and password on another device: same token, same key.
-        let again = PasswordKeys::derive("alice", "correct horse").unwrap();
-        assert_eq!(again.login_token, keys.login_token);
+        let again = CredentialKeys::from_password("alice", "correct horse").unwrap();
+        assert_eq!(again.token, keys.token);
         assert_eq!(
             again.unwrap_account_key("acc-1", &blob).unwrap(),
             account_key
         );
 
-        let wrong_password = PasswordKeys::derive("alice", "wrong horse").unwrap();
-        assert_ne!(wrong_password.login_token, keys.login_token);
+        let wrong_password = CredentialKeys::from_password("alice", "wrong horse").unwrap();
+        assert_ne!(wrong_password.token, keys.token);
         assert!(wrong_password.unwrap_account_key("acc-1", &blob).is_err());
-        let other_user = PasswordKeys::derive("bob", "correct horse").unwrap();
-        assert_ne!(
-            other_user.login_token, keys.login_token,
-            "salted per username"
-        );
+        let other_user = CredentialKeys::from_password("bob", "correct horse").unwrap();
+        assert_ne!(other_user.token, keys.token, "salted per username");
         assert!(
             keys.unwrap_account_key("acc-2", &blob).is_err(),
             "bound to the account"
         );
+    }
+
+    #[test]
+    fn recovery_keys_are_readable_and_forgiving() {
+        let key = new_recovery_key().unwrap();
+        assert_eq!(key.len(), 39, "{key}");
+        assert!(key.split('-').all(|g| g.len() == 4), "{key}");
+        assert!(!key.contains(['I', 'L', 'O', 'U']), "{key}");
+        assert_ne!(key, new_recovery_key().unwrap());
+
+        let account_key = new_secret().unwrap();
+        let keys = CredentialKeys::from_recovery_key(&key).unwrap();
+        let blob = keys.wrap_account_key("acc-1", &account_key).unwrap();
+        // Typed back in lowercase, without dashes, O and I for 0 and 1: same keys.
+        let typed = key
+            .to_lowercase()
+            .replace('-', " ")
+            .replace('0', "o")
+            .replace('1', "I");
+        let again = CredentialKeys::from_recovery_key(&typed).unwrap();
+        assert_eq!(again.token, keys.token);
+        assert_eq!(
+            again.unwrap_account_key("acc-1", &blob).unwrap(),
+            account_key
+        );
+
+        // Its token and key have nothing to do with a password's.
+        assert_ne!(
+            keys.token,
+            CredentialKeys::from_password("alice", &key).unwrap().token
+        );
+        let other = CredentialKeys::from_recovery_key(&new_recovery_key().unwrap()).unwrap();
+        assert!(other.unwrap_account_key("acc-1", &blob).is_err());
+
+        for bad in [
+            "",
+            "ABCD-EFGH",
+            &format!("{key}-7"),
+            &key.replace(|c| c != '-', "U"),
+        ] {
+            let err = CredentialKeys::from_recovery_key(bad).err().unwrap();
+            assert!(err.contains("isn't a valid recovery key"), "{bad}: {err}");
+        }
     }
 
     #[test]

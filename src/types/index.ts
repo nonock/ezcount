@@ -9,6 +9,7 @@ export type {
   ParticipantBalance,
   PasswordStrength,
   SettlementTransfer,
+  SignedIn,
   SyncInfo,
 } from "../bindings";
 
