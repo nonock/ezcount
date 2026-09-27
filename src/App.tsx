@@ -5,11 +5,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import { errorMessage } from "@/utils/errors";
 import { listen } from "@tauri-apps/api/event";
 import {
   ArrowLeftIcon,
   ArrowLeftRightIcon,
+  PlusIcon,
   ReceiptTextIcon,
   ScaleIcon,
   TriangleAlertIcon,
@@ -18,15 +20,17 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AuthScreen, type NewRecoveryKey } from "./components/auth/AuthScreen";
+import { BottomBar } from "./components/common/BottomBar";
 import { Navbar } from "./components/common/Navbar";
 import { QrScanOverlay } from "./components/common/QrScanOverlay";
 import { GroupDashboard } from "./components/dashboard/GroupDashboard";
 import { AddExpenseModal } from "./components/modals/AddExpenseModal";
-import { AddMemberModal } from "./components/modals/AddMemberModal";
 import { ChangePasswordDialog } from "./components/modals/ChangePasswordDialog";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
+import { EditGroupModal } from "./components/modals/EditGroupModal";
 import { ExpenseHistoryModal } from "./components/modals/ExpenseHistoryModal";
 import { JoinGroupModal } from "./components/modals/JoinGroupModal";
+import { MemberModal } from "./components/modals/MemberModal";
 import { RecordReimbursementModal } from "./components/modals/RecordReimbursementModal";
 import { RecoveryKeyDialog } from "./components/modals/RecoveryKeyDialog";
 import { ShareGroupModal } from "./components/modals/ShareGroupModal";
@@ -36,12 +40,20 @@ import { ExpensesTab } from "./components/workspace/ExpensesTab";
 import { GroupHeader } from "./components/workspace/GroupHeader";
 import { SettleUpTab } from "./components/workspace/SettleUpTab";
 import { api } from "./services/api";
-import { ScanCancelled, cancelScan, onInviteLink, scanQrCode } from "./services/native";
+import {
+  ScanCancelled,
+  cancelScan,
+  closeTopLayer,
+  onInviteLink,
+  scanQrCode,
+  useAndroidBack,
+} from "./services/native";
 import type {
   AccountInfo,
   Expense,
   ExpenseSplit,
   Group,
+  Participant,
   ParticipantBalance,
   SettlementTransfer,
   SyncInfo,
@@ -53,12 +65,30 @@ interface SyncUpdatedEvent {
   changed: boolean;
 }
 
+/** The group open in the current history entry. */
+function historyGroup(): string | null {
+  const state = window.history.state as { groupId?: unknown } | null;
+  return typeof state?.groupId === "string" ? state.groupId : null;
+}
+
+/** On phones, in the bottom bar: icon above label, the active tab tinted rather than raised. */
+const BOTTOM_TAB =
+  "max-sm:h-auto! max-sm:flex-col max-sm:gap-0.5 max-sm:py-1.5 max-sm:text-xs max-sm:data-active:border-transparent! max-sm:data-active:bg-muted! max-sm:data-active:shadow-none! max-sm:[&_svg]:size-5!";
+
+/** On phones: a counter on the icon's corner, like a notification. */
+const BOTTOM_TAB_BADGE =
+  "max-sm:absolute max-sm:top-0.5 max-sm:left-1/2 max-sm:ml-1.5 max-sm:h-4 max-sm:min-w-4 max-sm:px-1 max-sm:text-[0.625rem]";
+
 export const App: React.FC = () => {
   const askConfirm = useConfirm();
   // undefined while loading, null when logged out.
   const [account, setAccount] = useState<AccountInfo | null | undefined>(undefined);
   const [groups, setGroups] = useState<Group[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  // The open group is also a history entry, so Back (Android's back button, a mouse's back
+  // button) returns to the group list instead of leaving the app. A reload keeps it open.
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(historyGroup);
+  // Set while the app itself goes back to the group list.
+  const closingGroup = useRef(false);
   const [currentGroup, setCurrentGroup] = useState<Group | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>("expenses");
   const [balances, setBalances] = useState<ParticipantBalance[]>([]);
@@ -68,6 +98,10 @@ export const App: React.FC = () => {
   // Modal open states
   const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
   const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
+  // Kept after closing, so the dialog doesn't change while it animates out.
+  const [renamingMember, setRenamingMember] = useState<Participant | null>(null);
+  const [isRenameMemberOpen, setIsRenameMemberOpen] = useState(false);
+  const [isEditGroupOpen, setIsEditGroupOpen] = useState(false);
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [historyExpense, setHistoryExpense] = useState<Expense | null>(null);
@@ -111,25 +145,59 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  const refreshActiveGroup = useCallback(async (groupId: string) => {
-    try {
-      const g = await api.getGroup(groupId);
-      setCurrentGroup(g);
-      const [bal, set, sync] = await Promise.all([
-        api.getBalances(groupId),
-        api.getSettlements(groupId),
-        api.getSyncInfo(groupId),
-      ]);
-      setBalances(bal);
-      setSettlements(set);
-      setSyncInfo(sync);
-    } catch (err) {
-      console.error("Failed to load active group:", err);
-      toast.error("Could not open the group", { description: errorMessage(err) });
-      setSelectedGroupId(null);
-      setCurrentGroup(null);
-    }
+  const openGroup = useCallback((groupId: string) => {
+    if (historyGroup()) window.history.replaceState({ groupId }, "");
+    else window.history.pushState({ groupId }, "");
+    setSelectedGroupId(groupId);
   }, []);
+
+  const closeGroup = useCallback(() => {
+    if (historyGroup()) {
+      closingGroup.current = true;
+      window.history.back();
+    }
+    setSelectedGroupId(null);
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const groupId = historyGroup();
+      const open = selectedGroupRef.current;
+      const closing = closingGroup.current;
+      closingGroup.current = false;
+      if (!closing && !groupId && open && closeTopLayer()) {
+        // Back first closed what was open over the group: stay in it.
+        window.history.pushState({ groupId: open }, "");
+        return;
+      }
+      setSelectedGroupId(groupId);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const refreshActiveGroup = useCallback(
+    async (groupId: string) => {
+      try {
+        const g = await api.getGroup(groupId);
+        setCurrentGroup(g);
+        const [bal, set, sync] = await Promise.all([
+          api.getBalances(groupId),
+          api.getSettlements(groupId),
+          api.getSyncInfo(groupId),
+        ]);
+        setBalances(bal);
+        setSettlements(set);
+        setSyncInfo(sync);
+      } catch (err) {
+        console.error("Failed to load active group:", err);
+        toast.error("Could not open the group", { description: errorMessage(err) });
+        closeGroup();
+        setCurrentGroup(null);
+      }
+    },
+    [closeGroup]
+  );
 
   const refreshAccount = useCallback(async () => {
     try {
@@ -213,7 +281,7 @@ export const App: React.FC = () => {
       setGroups(list);
       const selected = selectedGroupRef.current;
       if (selected && !list.some((g) => g.id === selected)) {
-        setSelectedGroupId(null);
+        closeGroup();
         toast.info("This group was removed from your account on another device");
       }
     })
@@ -226,7 +294,7 @@ export const App: React.FC = () => {
       disposed = true;
       unlisten?.();
     };
-  }, [refreshAccount]);
+  }, [refreshAccount, closeGroup]);
 
   const isShared = Boolean(syncInfo?.enabled);
 
@@ -307,7 +375,7 @@ export const App: React.FC = () => {
         return;
       }
     }
-    setSelectedGroupId(null);
+    closeGroup();
     setCurrentGroup(null);
     setGroups([]);
     setIdentitySkipped(new Set());
@@ -315,12 +383,12 @@ export const App: React.FC = () => {
   };
 
   const handleSelectGroup = (groupId: string) => {
-    setSelectedGroupId(groupId);
+    openGroup(groupId);
     setActiveTab("expenses");
   };
 
   const handleNavigateHome = () => {
-    setSelectedGroupId(null);
+    closeGroup();
     setCurrentGroup(null);
     refreshGroups();
   };
@@ -331,7 +399,7 @@ export const App: React.FC = () => {
     // The backend recorded the creator as the first participant.
     await refreshAccount();
     await refreshGroups();
-    setSelectedGroupId(newGroup.id);
+    openGroup(newGroup.id);
   };
 
   const handleLeaveGroup = async () => {
@@ -376,7 +444,7 @@ export const App: React.FC = () => {
   const handleJoinGroup = async (inviteCode: string) => {
     const group = await api.joinGroup(inviteCode);
     await refreshGroups();
-    setSelectedGroupId(group.id);
+    openGroup(group.id);
     setActiveTab("expenses");
     toast.success(`Joined "${group.name}"`);
   };
@@ -410,6 +478,29 @@ export const App: React.FC = () => {
   const handleAddMember = async (name: string) => {
     if (!currentGroup) return;
     const updated = await api.addParticipant(currentGroup.id, name);
+    setCurrentGroup(updated);
+    await refreshActiveGroup(updated.id);
+    await refreshGroups();
+  };
+
+  const handleOpenRenameMember = (participantId: string) => {
+    const participant = currentGroup?.participants.find((p) => p.id === participantId);
+    if (!participant) return;
+    setRenamingMember(participant);
+    setIsRenameMemberOpen(true);
+  };
+
+  const handleRenameMember = async (name: string) => {
+    if (!currentGroup || !renamingMember) return;
+    const updated = await api.renameParticipant(currentGroup.id, renamingMember.id, name);
+    setCurrentGroup(updated);
+    await refreshActiveGroup(updated.id);
+    await refreshGroups();
+  };
+
+  const handleUpdateGroup = async (name: string, currency: string) => {
+    if (!currentGroup) return;
+    const updated = await api.updateGroup(currentGroup.id, name, currency);
     setCurrentGroup(updated);
     await refreshActiveGroup(updated.id);
     await refreshGroups();
@@ -517,6 +608,14 @@ export const App: React.FC = () => {
     setIsReimburseOpen(true);
   };
 
+  useAndroidBack(
+    scanning
+      ? () => cancelScan().catch((err) => console.error("Could not stop scanning:", err))
+      : currentGroup
+        ? handleNavigateHome
+        : null
+  );
+
   if (account === undefined) {
     return <Splash />;
   }
@@ -546,7 +645,13 @@ export const App: React.FC = () => {
         onLogOut={handleLogOut}
       />
 
-      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+      <main
+        className={cn(
+          "mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]",
+          // Room for the bottom bar on phones.
+          "max-sm:pb-[calc(5rem+env(safe-area-inset-bottom))]"
+        )}
+      >
         {storageWarnings.length > 0 && (
           <Alert>
             <TriangleAlertIcon />
@@ -572,15 +677,28 @@ export const App: React.FC = () => {
             <Spinner /> Loading groups…
           </div>
         ) : !currentGroup ? (
-          <GroupDashboard
-            groups={groups}
-            onSelectGroup={handleSelectGroup}
-            onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
-            onOpenJoinGroup={() => openJoin()}
-          />
+          <>
+            <GroupDashboard
+              groups={groups}
+              onSelectGroup={handleSelectGroup}
+              onOpenCreateGroup={() => setIsCreateGroupOpen(true)}
+              onOpenJoinGroup={() => openJoin()}
+            />
+            <BottomBar home onHome={handleNavigateHome} className="sm:hidden">
+              <Button onClick={() => setIsCreateGroupOpen(true)} className="ml-auto">
+                <PlusIcon data-icon="inline-start" />
+                New Group
+              </Button>
+            </BottomBar>
+          </>
         ) : (
           <div className="space-y-4">
-            <Button variant="ghost" size="sm" onClick={handleNavigateHome} className="-ml-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleNavigateHome}
+              className="-ml-2 max-sm:hidden"
+            >
               <ArrowLeftIcon data-icon="inline-start" />
               Back to All Groups
             </Button>
@@ -591,35 +709,39 @@ export const App: React.FC = () => {
               currentUserId={currentUserId}
               onChangeIdentity={() => setIsWhoOpen(true)}
               onOpenAddMember={() => setIsAddMemberOpen(true)}
+              onRenameMember={handleOpenRenameMember}
               onRemoveMember={handleRemoveMember}
+              onOpenEditGroup={() => setIsEditGroupOpen(true)}
               onOpenShare={() => setIsShareOpen(true)}
               onLeaveGroup={handleLeaveGroup}
               syncInfo={syncInfo}
             />
 
             <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabType)}>
-              <TabsList className="w-full sm:w-fit">
-                <TabsTrigger value="expenses">
-                  <ReceiptTextIcon />
-                  Expenses
-                  <Badge variant="secondary" className="tabular-nums">
-                    {currentGroup.expenses.length}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value="balances">
-                  <ScaleIcon />
-                  Balances
-                </TabsTrigger>
-                <TabsTrigger value="settle">
-                  <ArrowLeftRightIcon />
-                  Settle Up
-                  {settlements.length > 0 && (
-                    <Badge variant="secondary" className="tabular-nums">
-                      {settlements.length}
+              <BottomBar onHome={handleNavigateHome}>
+                <TabsList className="w-full sm:w-fit max-sm:h-auto! max-sm:flex-1 max-sm:gap-1 max-sm:bg-transparent max-sm:p-0">
+                  <TabsTrigger value="expenses" className={BOTTOM_TAB}>
+                    <ReceiptTextIcon />
+                    Expenses
+                    <Badge variant="secondary" className={cn("tabular-nums", BOTTOM_TAB_BADGE)}>
+                      {currentGroup.expenses.length}
                     </Badge>
-                  )}
-                </TabsTrigger>
-              </TabsList>
+                  </TabsTrigger>
+                  <TabsTrigger value="balances" className={BOTTOM_TAB}>
+                    <ScaleIcon />
+                    Balances
+                  </TabsTrigger>
+                  <TabsTrigger value="settle" className={BOTTOM_TAB}>
+                    <ArrowLeftRightIcon />
+                    Settle Up
+                    {settlements.length > 0 && (
+                      <Badge variant="secondary" className={cn("tabular-nums", BOTTOM_TAB_BADGE)}>
+                        {settlements.length}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                </TabsList>
+              </BottomBar>
 
               <TabsContent value="expenses" className="pt-4">
                 <ExpensesTab
@@ -719,10 +841,24 @@ export const App: React.FC = () => {
             onAddSelf={handleAddSelf}
           />
 
-          <AddMemberModal
+          <MemberModal
             isOpen={isAddMemberOpen}
             onClose={() => setIsAddMemberOpen(false)}
-            onAddMember={handleAddMember}
+            onSubmit={handleAddMember}
+          />
+
+          <MemberModal
+            isOpen={isRenameMemberOpen}
+            onClose={() => setIsRenameMemberOpen(false)}
+            member={renamingMember}
+            onSubmit={handleRenameMember}
+          />
+
+          <EditGroupModal
+            isOpen={isEditGroupOpen}
+            onClose={() => setIsEditGroupOpen(false)}
+            group={currentGroup}
+            onSave={handleUpdateGroup}
           />
 
           <AddExpenseModal

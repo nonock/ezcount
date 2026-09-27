@@ -1,5 +1,5 @@
 import { Amount } from "@/components/common/Amount";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { HelpPopover } from "@/components/common/HelpPopover";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,6 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import type { Group, ParticipantBalance } from "@/types";
-import { InfoIcon } from "lucide-react";
 import type React from "react";
 import { useMemo } from "react";
 
@@ -28,17 +27,15 @@ export const BalancesTab: React.FC<BalancesTabProps> = ({
   );
 
   return (
-    <div className="space-y-4">
-      <Alert>
-        <InfoIcon />
-        <AlertDescription>
-          <p>
-            Positive amounts in <span className="font-medium text-positive">green</span> mean the
-            participant is owed money back. Negative amounts in{" "}
-            <span className="font-medium text-negative">red</span> mean they need to pay.
-          </p>
-        </AlertDescription>
-      </Alert>
+    <div className="space-y-3">
+      <div className="flex items-center gap-1">
+        <h2 className="font-medium">Who owes what</h2>
+        <HelpPopover title="Balances">
+          Positive amounts in <span className="font-medium text-positive">green</span> mean the
+          participant is owed money back. Negative amounts in{" "}
+          <span className="font-medium text-negative">red</span> mean they need to pay.
+        </HelpPopover>
+      </div>
 
       <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {balances.map((b) => {

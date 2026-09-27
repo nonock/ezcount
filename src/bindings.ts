@@ -40,9 +40,28 @@ async leaveGroup(groupId: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Renames the group and sets its currency. Amounts are not converted.
+ */
+async updateGroup(groupId: string, name: string, currency: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_group", { groupId, name, currency }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async addParticipant(groupId: string, name: string) : Promise<Result<Group, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_participant", { groupId, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async renameParticipant(groupId: string, participantId: string, name: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rename_participant", { groupId, participantId, name }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

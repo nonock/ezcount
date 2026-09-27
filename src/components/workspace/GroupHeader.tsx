@@ -14,6 +14,7 @@ import type { Group, ParticipantBalance, SyncInfo } from "@/types";
 import {
   EllipsisVerticalIcon,
   LogOutIcon,
+  PencilIcon,
   UserPlusIcon,
   UserRoundIcon,
   UsersIcon,
@@ -29,7 +30,9 @@ interface GroupHeaderProps {
   /** Opens the "Who are you?" dialog. */
   onChangeIdentity: () => void;
   onOpenAddMember: () => void;
+  onRenameMember: (participantId: string) => void;
   onRemoveMember: (participantId: string) => void;
+  onOpenEditGroup: () => void;
   onOpenShare: () => void;
   onLeaveGroup: () => void;
   syncInfo: SyncInfo | null;
@@ -41,7 +44,9 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
   currentUserId,
   onChangeIdentity,
   onOpenAddMember,
+  onRenameMember,
   onRemoveMember,
+  onOpenEditGroup,
   onOpenShare,
   onLeaveGroup,
   syncInfo,
@@ -106,6 +111,9 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={onOpenEditGroup}>
+                <PencilIcon /> Edit group
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={onOpenAddMember}>
                 <UserPlusIcon /> Add member
               </DropdownMenuItem>
@@ -125,7 +133,15 @@ export const GroupHeader: React.FC<GroupHeaderProps> = ({
           {activeParticipants.map((p) => (
             <li key={p.id}>
               <Badge variant="outline" className="h-7 gap-1 pr-0.5 pl-2.5 text-sm">
-                {p.name}
+                <button
+                  type="button"
+                  onClick={() => onRenameMember(p.id)}
+                  aria-label={`Rename ${p.name}`}
+                  title="Rename"
+                  className="cursor-pointer rounded-sm hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  {p.name}
+                </button>
                 <Button
                   variant="ghost"
                   size="icon-xs"

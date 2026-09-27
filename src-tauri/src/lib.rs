@@ -125,6 +125,18 @@ async fn leave_group(state: State<'_, AppState>, group_id: String) -> Result<(),
     sync::leave_group(&state, &group_id).await
 }
 
+/// Renames the group and sets its currency. Amounts are not converted.
+#[tauri::command]
+#[specta::specta]
+fn update_group(
+    state: State<AppState>,
+    group_id: String,
+    name: String,
+    currency: String,
+) -> Result<Group, String> {
+    state.mutate(&group_id, |d| doc::update_group(d, &name, &currency))
+}
+
 #[tauri::command]
 #[specta::specta]
 fn add_participant(
@@ -143,6 +155,19 @@ fn remove_participant(
     participant_id: String,
 ) -> Result<Group, String> {
     state.mutate(&group_id, |d| doc::remove_participant(d, &participant_id))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn rename_participant(
+    state: State<AppState>,
+    group_id: String,
+    participant_id: String,
+    name: String,
+) -> Result<Group, String> {
+    state.mutate(&group_id, |d| {
+        doc::rename_participant(d, &participant_id, &name)
+    })
 }
 
 #[tauri::command]
@@ -391,7 +416,9 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         get_group,
         create_group,
         leave_group,
+        update_group,
         add_participant,
+        rename_participant,
         remove_participant,
         add_expense,
         update_expense,

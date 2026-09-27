@@ -249,18 +249,34 @@ fn insert_expense(doc: &LoroDoc, expense: &Expense) -> Res<()> {
     Ok(())
 }
 
-/// Creates the document for a brand-new group.
-pub fn new_group_doc(name: &str, currency: &str, participant_names: &[String]) -> Res<LoroDoc> {
+fn group_name(name: &str) -> Res<&str> {
     let name = name.trim();
     if name.is_empty() {
         return Err("Group name cannot be empty".to_string());
     }
+    Ok(name)
+}
+
+/// A currency code as stored: three letters, upper-cased.
+fn currency_code(currency: &str) -> Res<String> {
+    let code = currency.trim().to_uppercase();
+    if code.len() == 3 && code.chars().all(|c| c.is_ascii_alphabetic()) {
+        Ok(code)
+    } else {
+        Err("The currency must be a three-letter code, such as EUR".to_string())
+    }
+}
+
+/// Creates the document for a brand-new group.
+pub fn new_group_doc(name: &str, currency: &str, participant_names: &[String]) -> Res<LoroDoc> {
+    let name = group_name(name)?;
+    let currency = currency_code(currency)?;
     let doc = LoroDoc::new();
     write_meta(
         &doc,
         &Uuid::new_v4().to_string(),
         name,
-        &currency.trim().to_uppercase(),
+        &currency,
         Utc::now(),
     )?;
     for participant_name in participant_names {
@@ -292,6 +308,82 @@ pub fn doc_from_legacy(group: &Group) -> Res<LoroDoc> {
     }
     doc.commit();
     Ok(doc)
+}
+
+/// Renames the group and sets its currency. Amounts are kept as they are, not converted.
+pub fn update_group(doc: &LoroDoc, name: &str, currency: &str) -> Res<()> {
+    let name = group_name(name)?;
+    let currency = currency_code(currency)?;
+    let group = read_group(doc)?;
+    let meta = doc.get_map(META);
+    // Only changed fields are written, so a concurrent change to the other one survives.
+    if group.name != name {
+        meta.insert("name", name).map_err(doc_err)?;
+    }
+    if group.currency != currency {
+        meta.insert("currency", currency.as_str())
+            .map_err(doc_err)?;
+    }
+    Ok(())
+}
+
+/// The title `record_reimbursement` gives a payment, before any notes.
+fn payment_title(from_name: &str, to_name: &str) -> String {
+    format!("Payment: {from_name} → {to_name}")
+}
+
+/// Renames a participant. Payments keep their names in their title, so the ones still
+/// titled as recorded get the new name too.
+pub fn rename_participant(doc: &LoroDoc, participant_id: &str, name: &str) -> Res<()> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Participant name cannot be empty".to_string());
+    }
+    let participant = child_map(&doc.get_map(PARTICIPANTS), participant_id)
+        .ok_or_else(|| "Participant not found".to_string())?;
+    let group = read_group(doc)?;
+    let old_name = |id: &str| {
+        group
+            .participants
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.name.as_str())
+    };
+    if old_name(participant_id) == Some(name) {
+        return Ok(());
+    }
+    let new_name = |id: &str| {
+        if id == participant_id {
+            Some(name)
+        } else {
+            old_name(id)
+        }
+    };
+
+    let expenses = doc.get_map(EXPENSES);
+    for e in group.expenses.iter().filter(|e| e.is_reimbursement) {
+        let [to] = e.splits.as_slice() else { continue };
+        let (from, to) = (e.paid_by.as_str(), to.participant_id.as_str());
+        if from != participant_id && to != participant_id {
+            continue;
+        }
+        let (Some(old_from), Some(old_to), Some(new_from), Some(new_to)) =
+            (old_name(from), old_name(to), new_name(from), new_name(to))
+        else {
+            continue;
+        };
+        let Some(notes) = e.title.strip_prefix(&payment_title(old_from, old_to)) else {
+            continue;
+        };
+        if !notes.is_empty() && !notes.starts_with(" (") {
+            continue;
+        }
+        if let Some(target) = child_map(&expenses, &e.id) {
+            let title = format!("{}{notes}", payment_title(new_from, new_to));
+            target.insert("title", title).map_err(doc_err)?;
+        }
+    }
+    participant.insert("name", name).map_err(doc_err)
 }
 
 /// Adds a participant and returns their id.
@@ -524,9 +616,9 @@ pub fn record_reimbursement(
 
     let title = match notes {
         Some(n) if !n.trim().is_empty() => {
-            format!("Payment: {} → {} ({})", from_name, to_name, n.trim())
+            format!("{} ({})", payment_title(&from_name, &to_name), n.trim())
         }
-        _ => format!("Payment: {} → {}", from_name, to_name),
+        _ => payment_title(&from_name, &to_name),
     };
 
     let now = Utc::now();
@@ -731,6 +823,108 @@ mod tests {
         assert_eq!(g.expenses.len(), 1);
         assert_eq!(g.participants.len(), 3);
         assert_eq!(g, read_group(&b).unwrap());
+    }
+
+    #[test]
+    fn group_name_and_currency_can_change() {
+        let (doc, g) = sample();
+        let alice = &g.participants[0].id;
+        add_expense(
+            &doc,
+            "Taxi",
+            1000,
+            alice.clone(),
+            vec![split(alice, 1)],
+            None,
+        )
+        .unwrap();
+
+        update_group(&doc, " Lisbon ", "usd").unwrap();
+        let g = read_group(&doc).unwrap();
+        assert_eq!((g.name.as_str(), g.currency.as_str()), ("Lisbon", "USD"));
+        assert_eq!(
+            g.expenses[0].amount_cents, 1000,
+            "amounts are not converted"
+        );
+
+        assert!(update_group(&doc, "  ", "EUR").is_err());
+        for bad in ["", "EURO", "€", "E1R"] {
+            assert!(
+                update_group(&doc, "Lisbon", bad).is_err(),
+                "{bad:?} accepted"
+            );
+        }
+        assert!(new_group_doc("Trip", "euro", &[]).is_err());
+    }
+
+    #[test]
+    fn concurrent_rename_and_currency_change_both_survive() {
+        let (a, _) = sample();
+        a.commit();
+        let b = fork(&a);
+        update_group(&a, "Lisbon", "EUR").unwrap();
+        update_group(&b, "Trip", "CHF").unwrap();
+        a.commit();
+        b.commit();
+        merge(&a, &b);
+
+        let g = read_group(&a).unwrap();
+        assert_eq!((g.name.as_str(), g.currency.as_str()), ("Lisbon", "CHF"));
+        assert_eq!(g, read_group(&b).unwrap());
+    }
+
+    #[test]
+    fn renaming_updates_payment_titles_only() {
+        let (doc, g) = sample();
+        let (alice, bob) = (g.participants[0].id.clone(), g.participants[1].id.clone());
+        record_reimbursement(&doc, alice.clone(), bob.clone(), 500, None).unwrap();
+        record_reimbursement(&doc, bob.clone(), alice.clone(), 300, Some("cash".into())).unwrap();
+        add_expense(
+            &doc,
+            "Alice's birthday",
+            2000,
+            alice.clone(),
+            vec![split(&bob, 1)],
+            None,
+        )
+        .unwrap();
+        // A payment whose title someone rewrote keeps it.
+        record_reimbursement(&doc, alice.clone(), bob.clone(), 100, None).unwrap();
+        let custom = read_group(&doc)
+            .unwrap()
+            .expenses
+            .into_iter()
+            .find(|e| e.amount_cents == 100)
+            .unwrap();
+        update_expense(
+            &doc,
+            &custom.id,
+            "Beers",
+            100,
+            alice.clone(),
+            custom.splits.clone(),
+            None,
+        )
+        .unwrap();
+
+        rename_participant(&doc, &alice, " Alicia ").unwrap();
+
+        let g = read_group(&doc).unwrap();
+        assert_eq!(g.participants[0].name, "Alicia");
+        let mut titles: Vec<_> = g.expenses.iter().map(|e| e.title.as_str()).collect();
+        titles.sort();
+        assert_eq!(
+            titles,
+            [
+                "Alice's birthday",
+                "Beers",
+                "Payment: Alicia → Bob",
+                "Payment: Bob → Alicia (cash)",
+            ]
+        );
+
+        assert!(rename_participant(&doc, &alice, " ").is_err());
+        assert!(rename_participant(&doc, "ghost", "Zoe").is_err());
     }
 
     #[test]

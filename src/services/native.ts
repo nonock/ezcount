@@ -1,4 +1,7 @@
-// Phone and OS integrations: share sheet, QR scanning and invite links opening the app.
+// Phone and OS integrations: share sheet, QR scanning, invite links opening the app and the
+// Back button.
+import { onBackButtonPress } from "@tauri-apps/api/app";
+import type { PluginListener } from "@tauri-apps/api/core";
 import {
   Format,
   cancel,
@@ -7,9 +10,70 @@ import {
   scan,
 } from "@tauri-apps/plugin-barcode-scanner";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { NativeFeatures } from "../types";
 import { api } from "./api";
+
+/** Dialogs, menus, lists and popovers on screen: Radix marks them `data-state="open"`. */
+const OPEN_LAYERS = ["dialog", "alertdialog", "menu", "listbox"]
+  .map((role) => `[role="${role}"][data-state="open"]`)
+  .join(",");
+
+/** Closes the dialog, menu or popover on top, as Escape does. False when none is open. */
+export function closeTopLayer(): boolean {
+  if (!document.querySelector(OPEN_LAYERS)) return false;
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  return true;
+}
+
+const isAndroid = /Android/i.test(navigator.userAgent);
+
+/**
+ * Android's Back button first closes the dialog or menu on top, then calls `onBack` (to leave
+ * the open group, say). With neither to do, Back is left to Android, which closes the app.
+ * Elsewhere Back is the browser history's (see `App`).
+ */
+export function useAndroidBack(onBack: (() => void) | null): void {
+  const onBackRef = useRef(onBack);
+  useEffect(() => {
+    onBackRef.current = onBack;
+  });
+
+  const [layerOpen, setLayerOpen] = useState(false);
+  useEffect(() => {
+    if (!isAndroid) return;
+    const update = () => setLayerOpen(document.querySelector(OPEN_LAYERS) !== null);
+    const observer = new MutationObserver(update);
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["data-state"],
+    });
+    update();
+    return () => observer.disconnect();
+  }, []);
+
+  // Listening replaces Android's handling, so only while there's something to go back from.
+  const handling = layerOpen || onBack !== null;
+  useEffect(() => {
+    if (!isAndroid || !handling) return;
+    let listener: PluginListener | undefined;
+    let disposed = false;
+    onBackButtonPress(() => {
+      if (!closeTopLayer()) onBackRef.current?.();
+    })
+      .then((l) => {
+        if (disposed) l.unregister();
+        else listener = l;
+      })
+      .catch((err) => console.error("Could not handle the Back button:", err));
+    return () => {
+      disposed = true;
+      listener?.unregister();
+    };
+  }, [handling]);
+}
 
 const NONE: NativeFeatures = { share: false, scan: false };
 let features: Promise<NativeFeatures> | null = null;

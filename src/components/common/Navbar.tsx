@@ -18,6 +18,7 @@ import {
   KeyRoundIcon,
   LockKeyholeIcon,
   LogOutIcon,
+  MenuIcon,
   MonitorIcon,
   MoonIcon,
   PlusIcon,
@@ -107,6 +108,61 @@ const AccountMenu: React.FC<AccountMenuProps> = ({
   </DropdownMenu>
 );
 
+/** On phones, everything in one menu: the account, the theme and the account's settings. */
+const PhoneMenu: React.FC<AccountMenuProps> = ({
+  username,
+  serverUrl,
+  onChangePassword,
+  onNewRecoveryKey,
+  onLogOut,
+}) => {
+  const { theme = "system", setTheme } = useTheme();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="Menu">
+          <MenuIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-56">
+        <DropdownMenuLabel>
+          <span className="block text-xs font-normal text-muted-foreground">Logged in as</span>
+          <span className="block truncate">{username}</span>
+          <span className="block truncate font-mono text-xs font-normal text-muted-foreground">
+            {serverName(serverUrl)}
+          </span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          Theme
+        </DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
+          <DropdownMenuRadioItem value="light">
+            <SunIcon /> Light
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="dark">
+            <MoonIcon /> Dark
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="system">
+            <MonitorIcon /> System
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onChangePassword}>
+          <LockKeyholeIcon /> Change password
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onNewRecoveryKey}>
+          <KeyRoundIcon /> New recovery key
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onLogOut}>
+          <LogOutIcon /> Log out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
 export const Navbar: React.FC<NavbarProps> = ({
   currentGroup,
   onNavigateHome,
@@ -120,7 +176,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   return (
     <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur-lg pt-[env(safe-area-inset-top)]">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-3 px-4">
-        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5">
+        {/* On phones the logo is in the bottom bar, and the header names the app. */}
+        <Wordmark className="text-lg sm:hidden" />
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 max-sm:hidden">
           <button
             type="button"
             onClick={onNavigateHome}
@@ -139,7 +197,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
         </nav>
 
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="sm:hidden">
+          <PhoneMenu
+            username={username}
+            serverUrl={serverUrl}
+            onChangePassword={onChangePassword}
+            onNewRecoveryKey={onNewRecoveryKey}
+            onLogOut={onLogOut}
+          />
+        </div>
+        <div className="flex shrink-0 items-center gap-1 max-sm:hidden">
           <ThemeMenu />
           <AccountMenu
             username={username}

@@ -509,6 +509,44 @@ export function installTauriMock() {
           return null;
         }
 
+        case "update_group": {
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          const name = String(args.name).trim();
+          const currency = String(args.currency).trim().toUpperCase();
+          if (!name) throw new Error("Group name cannot be empty");
+          if (!/^[A-Z]{3}$/.test(currency)) {
+            throw new Error("The currency must be a three-letter code, such as EUR");
+          }
+          g.name = name;
+          g.currency = currency;
+          return clone(g);
+        }
+
+        case "rename_participant": {
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          const p = g.participants.find((x) => x.id === args?.participantId);
+          if (!p) throw new Error("Participant not found");
+          const name = String(args.name).trim();
+          if (!name) throw new Error("Participant name cannot be empty");
+          // Payments still titled as recorded get the new name, like in doc.rs.
+          const nameOf = (id: string, renamed: boolean) =>
+            renamed && id === p.id ? name : g.participants.find((x) => x.id === id)?.name;
+          for (const e of g.expenses) {
+            const to = e.splits[0]?.participant_id;
+            if (!e.is_reimbursement || e.splits.length !== 1 || ![e.paid_by, to].includes(p.id)) {
+              continue;
+            }
+            const before = `Payment: ${nameOf(e.paid_by, false)} → ${nameOf(to, false)}`;
+            const notes = e.title.startsWith(before) ? e.title.slice(before.length) : null;
+            if (notes === null || (notes && !notes.startsWith(" ("))) continue;
+            e.title = `Payment: ${nameOf(e.paid_by, true)} → ${nameOf(to, true)}${notes}`;
+          }
+          p.name = name;
+          return clone(g);
+        }
+
         case "add_participant": {
           const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");

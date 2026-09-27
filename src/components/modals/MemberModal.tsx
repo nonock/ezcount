@@ -11,26 +11,30 @@ import {
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import type { Participant } from "@/types";
 import { errorMessage } from "@/utils/errors";
 import type React from "react";
 import { useEffect, useState } from "react";
 
-interface AddMemberModalProps {
+interface MemberModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddMember: (name: string) => Promise<void>;
+  /** The member to rename; adds a new one when absent. */
+  member?: Participant | null;
+  onSubmit: (name: string) => Promise<void>;
 }
 
-export const AddMemberModal: React.FC<AddMemberModalProps> = ({ isOpen, onClose, onAddMember }) => {
+/** Adds a member to the group, or renames one. */
+export const MemberModal: React.FC<MemberModalProps> = ({ isOpen, onClose, member, onSubmit }) => {
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
-    setName("");
+    setName(member?.name ?? "");
     setError(null);
-  }, [isOpen]);
+  }, [isOpen, member]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +44,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({ isOpen, onClose,
     setSubmitting(true);
     setError(null);
     try {
-      await onAddMember(trimmed);
+      await onSubmit(trimmed);
       onClose();
     } catch (err) {
       setError(errorMessage(err));
@@ -53,8 +57,12 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({ isOpen, onClose,
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add Group Member</DialogTitle>
-          <DialogDescription>They can be included in expenses right away.</DialogDescription>
+          <DialogTitle>{member ? `Rename ${member.name}` : "Add Group Member"}</DialogTitle>
+          <DialogDescription>
+            {member
+              ? "Their expenses and payments show the new name too."
+              : "They can be included in expenses right away."}
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <FieldGroup>
@@ -78,7 +86,7 @@ export const AddMemberModal: React.FC<AddMemberModalProps> = ({ isOpen, onClose,
             </DialogClose>
             <Button type="submit" disabled={submitting}>
               {submitting && <Spinner data-icon="inline-start" />}
-              Add to Group
+              {member ? "Rename" : "Add to Group"}
             </Button>
           </DialogFooter>
         </form>

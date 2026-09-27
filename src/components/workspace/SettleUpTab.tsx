@@ -1,5 +1,5 @@
 import { Amount } from "@/components/common/Amount";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { HelpPopover } from "@/components/common/HelpPopover";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +18,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import type { Group, SettlementTransfer } from "@/types";
-import { CheckIcon, CircleCheckBigIcon, PlusIcon, RouteIcon } from "lucide-react";
+import { CheckIcon, CircleCheckBigIcon, PlusIcon } from "lucide-react";
 import type React from "react";
 
 interface SettleUpTabProps {
@@ -35,17 +35,17 @@ export const SettleUpTab: React.FC<SettleUpTabProps> = ({
   onMarkAsPaid,
 }) => {
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <Alert className="sm:flex-1">
-          <RouteIcon />
-          <AlertTitle>Optimal Settlement Plan</AlertTitle>
-          <AlertDescription>
-            The fewest direct payments that settle every debt in the group.
-          </AlertDescription>
-        </Alert>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <h2 className="font-medium">Suggested payments</h2>
+          <HelpPopover title="Optimal settlement plan">
+            The fewest direct payments that settle every debt in the group. Mark one as paid once
+            the money is sent.
+          </HelpPopover>
+        </div>
         {settlements.length > 0 && group.expenses.length > 0 && (
-          <Button onClick={onOpenReimburse} className="self-start">
+          <Button onClick={onOpenReimburse}>
             <PlusIcon data-icon="inline-start" />
             Record Reimbursement
           </Button>

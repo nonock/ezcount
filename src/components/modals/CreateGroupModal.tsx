@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { CURRENCIES } from "@/utils/currencies";
 import { errorMessage } from "@/utils/errors";
 import { PlusIcon, XIcon } from "lucide-react";
 import type React from "react";
@@ -145,11 +146,11 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent position="popper">
-                  <SelectItem value="EUR">EUR (€) — Euro</SelectItem>
-                  <SelectItem value="USD">USD ($) — US Dollar</SelectItem>
-                  <SelectItem value="GBP">GBP (£) — British Pound</SelectItem>
-                  <SelectItem value="CHF">CHF — Swiss Franc</SelectItem>
-                  <SelectItem value="CAD">CAD (CA$) — Canadian Dollar</SelectItem>
+                  {CURRENCIES.map((c) => (
+                    <SelectItem key={c.code} value={c.code}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </Field>

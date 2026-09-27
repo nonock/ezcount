@@ -192,7 +192,7 @@ test.describe("Expense & Settlement Lifecycle", () => {
     // Check Balances tab (Alice paid 250 + 50 = 300, total = 300, share = 150 each -> Bob owes 150)
     await page.getByRole("tab", { name: "Balances" }).click();
     await expect(page.getByText("Gets back")).toBeVisible();
-    await expect(page.getByText("Owes")).toBeVisible();
+    await expect(page.getByText("Owes", { exact: true })).toBeVisible();
     await expect(page.getByText("-150.00 €")).toBeVisible();
 
     // Check Settle Up tab

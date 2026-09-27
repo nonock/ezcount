@@ -34,8 +34,17 @@ export const api = {
     unwrap(await commands.leaveGroup(groupId));
   },
 
+  /** Renames the group and sets its currency; amounts are not converted. */
+  async updateGroup(groupId: string, name: string, currency: string): Promise<Group> {
+    return unwrap(await commands.updateGroup(groupId, name, currency));
+  },
+
   async addParticipant(groupId: string, name: string): Promise<Group> {
     return unwrap(await commands.addParticipant(groupId, name));
+  },
+
+  async renameParticipant(groupId: string, participantId: string, name: string): Promise<Group> {
+    return unwrap(await commands.renameParticipant(groupId, participantId, name));
   },
 
   async addExpense(

@@ -158,7 +158,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
   );
 
   return (
-    <div className="space-y-5">
+    // On phones, room below the list for the floating Add Expense button.
+    <div className="space-y-5 max-sm:pb-16">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 font-semibold">
@@ -176,7 +177,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({
               Reimburse
             </Button>
           )}
-          <Button onClick={onOpenAddExpense}>
+          {/* On phones, floating above the bottom bar, within reach of the thumb. */}
+          <Button
+            onClick={onOpenAddExpense}
+            className="max-sm:fixed max-sm:right-4 max-sm:bottom-[calc(5rem+env(safe-area-inset-bottom))] max-sm:z-30 max-sm:h-12 max-sm:rounded-full max-sm:px-5 max-sm:text-base max-sm:shadow-lg"
+          >
             <PlusIcon data-icon="inline-start" />
             Add Expense
           </Button>
