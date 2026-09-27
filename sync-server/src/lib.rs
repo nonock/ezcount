@@ -306,6 +306,22 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// Runs `work` with the database on a blocking thread. SQLite waits for the disk on every
+/// commit and one connection serves every client, so doing this on the async workers would
+/// let a burst of requests stall the whole relay.
+async fn with_db<T: Send + 'static>(
+    relay: &Arc<Relay>,
+    work: impl FnOnce(&Relay, &mut Connection) -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
+    let relay = Arc::clone(relay);
+    tokio::task::spawn_blocking(move || {
+        let mut db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
+        work(&relay, &mut db)
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?
+}
+
 fn check_group_id(id: &str) -> Result<(), ApiError> {
     let valid = !id.is_empty()
         && id.len() <= 64
@@ -366,56 +382,59 @@ async fn push(
         return Err(ApiError::TooManyRequests);
     }
 
-    let mut db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
-    let tx = db.transaction()?;
-    let existing: Option<(Vec<u8>, i64)> = tx
-        .query_row(
-            "SELECT key_hash, bytes FROM groups WHERE id = ?1",
-            [&group_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()?;
-    let stored = match existing {
-        // The first push registers the document.
-        None => {
-            let creations = format!("create {}", client.0);
-            if !relay
-                .counters
-                .try_add(&creations, 1, limits.new_documents_per_hour, HOUR)
-            {
-                return Err(ApiError::TooManyRequests);
+    let creations = format!("create {}", client.0);
+    with_db(&relay, move |relay, db| {
+        let limits = &relay.limits;
+        let tx = db.transaction()?;
+        let existing: Option<(Vec<u8>, i64)> = tx
+            .query_row(
+                "SELECT key_hash, bytes FROM groups WHERE id = ?1",
+                [&group_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let stored = match existing {
+            // The first push registers the document.
+            None => {
+                if !relay
+                    .counters
+                    .try_add(&creations, 1, limits.new_documents_per_hour, HOUR)
+                {
+                    return Err(ApiError::TooManyRequests);
+                }
+                tx.execute(
+                    "INSERT INTO groups (id, key_hash) VALUES (?1, ?2)",
+                    params![group_id, hash],
+                )?;
+                0
             }
-            tx.execute(
-                "INSERT INTO groups (id, key_hash) VALUES (?1, ?2)",
-                params![group_id, hash],
-            )?;
-            0
+            Some((stored, _)) if stored != hash => return Err(ApiError::Unauthorized),
+            Some((_, bytes)) => bytes.max(0) as u64,
+        };
+        if stored + size > limits.max_document_bytes {
+            return Err(ApiError::TooLarge);
         }
-        Some((stored, _)) if stored != hash => return Err(ApiError::Unauthorized),
-        Some((_, bytes)) => bytes.max(0) as u64,
-    };
-    if stored + size > limits.max_document_bytes {
-        return Err(ApiError::TooLarge);
-    }
-    if relay.stored_bytes.load(Ordering::Relaxed) + size > limits.max_total_bytes {
-        return Err(ApiError::StorageFull);
-    }
-    tx.execute(
-        "INSERT INTO updates (group_id, data) VALUES (?1, ?2)",
-        params![group_id, body.as_ref()],
-    )?;
-    let seq = tx.last_insert_rowid();
-    tx.execute(
-        "UPDATE groups SET bytes = bytes + ?2 WHERE id = ?1",
-        params![group_id, size as i64],
-    )?;
-    tx.commit()?;
-    // Still under the database lock, so the check above and this stay in step.
-    relay.stored_bytes.fetch_add(size, Ordering::Relaxed);
-    Ok(Json(PushResponse {
-        seq,
-        relay_id: relay.relay_id.clone(),
-    }))
+        if relay.stored_bytes.load(Ordering::Relaxed) + size > limits.max_total_bytes {
+            return Err(ApiError::StorageFull);
+        }
+        tx.execute(
+            "INSERT INTO updates (group_id, data) VALUES (?1, ?2)",
+            params![group_id, body.as_ref()],
+        )?;
+        let seq = tx.last_insert_rowid();
+        tx.execute(
+            "UPDATE groups SET bytes = bytes + ?2 WHERE id = ?1",
+            params![group_id, size as i64],
+        )?;
+        tx.commit()?;
+        // Still under the database lock, so the check above and this stay in step.
+        relay.stored_bytes.fetch_add(size, Ordering::Relaxed);
+        Ok(Json(PushResponse {
+            seq,
+            relay_id: relay.relay_id.clone(),
+        }))
+    })
+    .await
 }
 
 #[derive(Deserialize)]
@@ -448,30 +467,32 @@ async fn pull(
     let hash = key_hash(&headers)?;
     let limit = query.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
 
-    let db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
-    match stored_hash(&db, &group_id)? {
-        None => return Err(ApiError::NotFound),
-        Some(stored) if stored != hash => return Err(ApiError::Unauthorized),
-        Some(_) => {}
-    }
-    let mut stmt = db.prepare(
-        "SELECT seq, data FROM updates WHERE group_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
-    )?;
-    let mut updates = stmt
-        .query_map(params![group_id, query.after, limit + 1], |r| {
-            Ok(Update {
-                seq: r.get(0)?,
-                data: STANDARD.encode(r.get::<_, Vec<u8>>(1)?),
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let has_more = updates.len() > limit as usize;
-    updates.truncate(limit as usize);
-    Ok(Json(PullResponse {
-        updates,
-        has_more,
-        relay_id: relay.relay_id.clone(),
-    }))
+    with_db(&relay, move |relay, db| {
+        match stored_hash(db, &group_id)? {
+            None => return Err(ApiError::NotFound),
+            Some(stored) if stored != hash => return Err(ApiError::Unauthorized),
+            Some(_) => {}
+        }
+        let mut stmt = db.prepare(
+            "SELECT seq, data FROM updates WHERE group_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
+        )?;
+        let mut updates = stmt
+            .query_map(params![group_id, query.after, limit + 1], |r| {
+                Ok(Update {
+                    seq: r.get(0)?,
+                    data: STANDARD.encode(r.get::<_, Vec<u8>>(1)?),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let has_more = updates.len() > limit as usize;
+        updates.truncate(limit as usize);
+        Ok(Json(PullResponse {
+            updates,
+            has_more,
+            relay_id: relay.relay_id.clone(),
+        }))
+    })
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -571,41 +592,45 @@ async fn sign_up(
         return Err(ApiError::TooManyRequests);
     }
 
-    let mut db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
-    let tx = db.transaction()?;
-    let taken: bool = tx.query_row(
-        "SELECT EXISTS (SELECT 1 FROM accounts WHERE username = ?1)",
-        [&req.username],
-        |r| r.get(0),
-    )?;
-    if taken {
-        return Err(ApiError::Conflict("username taken"));
-    }
-    if stored_hash(&tx, &req.account_id)?.is_some() {
-        return Err(ApiError::Conflict("account id taken"));
-    }
-    tx.execute(
-        "INSERT INTO accounts
-             (username, account_id, login_hash, wrapped_key, recovery_hash, recovery_wrapped_key)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            req.username,
-            req.account_id,
-            login_hash,
-            wrapped_key,
-            recovery_hash,
-            recovery_wrapped_key
-        ],
-    )?;
-    tx.execute(
-        "INSERT INTO groups (id, key_hash) VALUES (?1, ?2)",
-        params![req.account_id, doc_hash],
-    )?;
-    tx.commit()?;
+    let recovery_stored = recovery.is_some();
+    with_db(&relay, move |_, db| {
+        let tx = db.transaction()?;
+        let taken: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM accounts WHERE username = ?1)",
+            [&req.username],
+            |r| r.get(0),
+        )?;
+        if taken {
+            return Err(ApiError::Conflict("username taken"));
+        }
+        if stored_hash(&tx, &req.account_id)?.is_some() {
+            return Err(ApiError::Conflict("account id taken"));
+        }
+        tx.execute(
+            "INSERT INTO accounts
+                 (username, account_id, login_hash, wrapped_key, recovery_hash, recovery_wrapped_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                req.username,
+                req.account_id,
+                login_hash,
+                wrapped_key,
+                recovery_hash,
+                recovery_wrapped_key
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO groups (id, key_hash) VALUES (?1, ?2)",
+            params![req.account_id, doc_hash],
+        )?;
+        tx.commit()?;
+        Ok(())
+    })
+    .await?;
     Ok((
         StatusCode::CREATED,
         Json(SignUpResponse {
-            recovery: recovery.is_some(),
+            recovery: recovery_stored,
         }),
     ))
 }
@@ -665,21 +690,23 @@ async fn log_in(
     relay.check_throttle(&req.username, &client)?;
     let login_hash = token_hash(&req.login_token)?;
 
-    let found = {
-        let db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
-        db.query_row(
-            "SELECT account_id, login_hash, wrapped_key FROM accounts WHERE username = ?1",
-            [&req.username],
-            |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, Vec<u8>>(1)?,
-                    r.get::<_, Vec<u8>>(2)?,
-                ))
-            },
-        )
-        .optional()?
-    };
+    let username = req.username.clone();
+    let found = with_db(&relay, move |_, db| {
+        Ok(db
+            .query_row(
+                "SELECT account_id, login_hash, wrapped_key FROM accounts WHERE username = ?1",
+                [&username],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Vec<u8>>(1)?,
+                        r.get::<_, Vec<u8>>(2)?,
+                    ))
+                },
+            )
+            .optional()?)
+    })
+    .await?;
     match found {
         Some((account_id, stored, wrapped_key)) if stored == login_hash => {
             relay.record_login(&req.username, &client, true);
@@ -712,22 +739,24 @@ async fn recover(
     relay.check_throttle(&req.username, &client)?;
     let recovery_hash = token_hash(&req.recovery_token)?;
 
-    let found = {
-        let db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
-        db.query_row(
-            "SELECT account_id, recovery_hash, recovery_wrapped_key FROM accounts
-             WHERE username = ?1",
-            [&req.username],
-            |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, Option<Vec<u8>>>(1)?,
-                    r.get::<_, Option<Vec<u8>>>(2)?,
-                ))
-            },
-        )
-        .optional()?
-    };
+    let username = req.username.clone();
+    let found = with_db(&relay, move |_, db| {
+        Ok(db
+            .query_row(
+                "SELECT account_id, recovery_hash, recovery_wrapped_key FROM accounts
+                 WHERE username = ?1",
+                [&username],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<Vec<u8>>>(1)?,
+                        r.get::<_, Option<Vec<u8>>>(2)?,
+                    ))
+                },
+            )
+            .optional()?)
+    })
+    .await?;
     match found {
         Some((account_id, Some(stored), Some(wrapped_key))) if stored == recovery_hash => {
             relay.record_login(&req.username, &client, true);
@@ -791,14 +820,14 @@ async fn update_credentials(
     }
     relay.check_throttle(&req.username, &client)?;
 
-    let proven = {
-        let mut db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
+    let username = req.username.clone();
+    let proven = with_db(&relay, move |_, db| {
         let tx = db.transaction()?;
         // `proof_column` is one of two literals above, never user input.
         let stored: Option<Vec<u8>> = tx
             .query_row(
                 &format!("SELECT {proof_column} FROM accounts WHERE username = ?1"),
-                [&req.username],
+                [&username],
                 |r| r.get(0),
             )
             .optional()?
@@ -808,20 +837,21 @@ async fn update_credentials(
             if let Some((hash, wrapped)) = new_login {
                 tx.execute(
                     "UPDATE accounts SET login_hash = ?2, wrapped_key = ?3 WHERE username = ?1",
-                    params![req.username, hash, wrapped],
+                    params![username, hash, wrapped],
                 )?;
             }
             if let Some((hash, wrapped)) = new_recovery {
                 tx.execute(
                     "UPDATE accounts SET recovery_hash = ?2, recovery_wrapped_key = ?3
                      WHERE username = ?1",
-                    params![req.username, hash, wrapped],
+                    params![username, hash, wrapped],
                 )?;
             }
             tx.commit()?;
         }
-        proven
-    };
+        Ok(proven)
+    })
+    .await?;
     relay.record_login(&req.username, &client, proven);
     if proven {
         Ok(StatusCode::NO_CONTENT)

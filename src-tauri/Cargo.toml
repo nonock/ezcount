@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Local-first expense sharing for groups"
 authors = ["nonock"]
 edition = "2021"
+# The newest `rust-version` among the dependencies.
+rust-version = "1.87"
 default-run = "ezcount"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -33,7 +35,7 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 base64 = "0.23.1"
 getrandom = "0.4"
-tokio = { version = "1.53.1", features = ["time", "sync", "macros"] }
+tokio = { version = "1.53.1", features = ["time", "sync", "macros", "rt-multi-thread"] }
 url = "2"
 chacha20poly1305 = "0.11.0"
 hkdf = "0.13.0"
@@ -49,6 +51,11 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "macros"] }
 
 [lints.rust]
 linker_messages = "allow"
+
+# Every `unsafe` block explains why it is sound (CI runs clippy with -D warnings).
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+missing_safety_doc = "warn"
 
 # Smaller, faster release binaries (matters most for the Android APK). Panics still unwind:
 # `AppState::store` relies on recovering a poisoned lock.

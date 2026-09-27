@@ -560,13 +560,17 @@ impl Store {
         self.update_doc(&id, change)
     }
 
+    /// Whether the synced document `id` has edits the server doesn't hold yet.
+    pub fn has_unpushed(&self, id: &str) -> bool {
+        match (self.sync.get(id), self.docs.get(id)) {
+            (Some(meta), Some(doc)) => !meta.server_vv.includes_vv(&doc.oplog_vv()),
+            _ => false,
+        }
+    }
+
     /// Whether any synced document (group or account) has edits the server doesn't hold yet.
     pub fn has_unpushed_changes(&self) -> bool {
-        self.sync.iter().any(|(id, meta)| {
-            self.docs
-                .get(id)
-                .is_some_and(|doc| !meta.server_vv.includes_vv(&doc.oplog_vv()))
-        })
+        self.sync.keys().any(|id| self.has_unpushed(id))
     }
 
     /// Logs out: removes the account and every group from this device.

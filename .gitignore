@@ -42,3 +42,6 @@ playwright/.cache/
 
 # Relay deployment settings
 deploy/.env
+
+# Security review output (rust-review)
+.rust-review-results/

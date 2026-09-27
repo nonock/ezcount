@@ -451,7 +451,23 @@ async fn pull_page(
     })
 }
 
-/// Downloads a whole document. Returns it with the matching sync state.
+/// Most pages read from the relay in one go. The loops below follow the relay's `has_more`,
+/// and a broken or hostile relay could otherwise keep one running forever, holding
+/// `sync_lock`. A longer backlog carries on at the next sync, from the saved cursor.
+const MAX_PAGES_PER_SYNC: usize = 50;
+
+/// Runs blocking storage work (SQLite commits wait for the disk) without stalling the
+/// other tasks on this async worker thread.
+fn blocking<T>(work: impl FnOnce() -> T) -> T {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current().map(|h| h.runtime_flavor()) {
+        Ok(RuntimeFlavor::MultiThread) => tokio::task::block_in_place(work),
+        _ => work(),
+    }
+}
+
+/// Downloads a document, or its first `MAX_PAGES_PER_SYNC` pages: syncing it once stored
+/// fetches the rest. Returns it with the matching sync state.
 async fn download(
     http: &reqwest::Client,
     server_url: &str,
@@ -461,14 +477,15 @@ async fn download(
     let keys = GroupKeys::derive(secret)?;
     let doc = LoroDoc::new();
     let mut meta = SyncMeta::new(server_url.to_string(), secret.clone());
-    loop {
+    for _ in 0..MAX_PAGES_PER_SYNC {
         let page = pull_page(http, server_url, &keys, id, meta.cursor).await?;
         meta.relay_id = page.relay_id;
+        let done = !page.has_more || page.updates.is_empty();
         for (seq, bytes) in page.updates {
             import_remote_update(&doc, &bytes, &mut meta.server_vv)?;
             meta.cursor = seq;
         }
-        if !page.has_more {
+        if done {
             break;
         }
     }
@@ -510,7 +527,7 @@ async fn sync_group_inner(state: &AppState, group_id: &str) -> Res<bool> {
                 .check_relay(group_id, page.relay_id.as_deref())?;
             // After a restart the page's sequence numbers mean nothing; read again below.
             if !restarted && !page.updates.is_empty() {
-                changed |= state.store().import_remote(group_id, &page.updates)?;
+                changed |= blocking(|| state.store().import_remote(group_id, &page.updates))?;
             }
         }
         // Normal for a group never uploaded yet: the first upload registers it.
@@ -540,22 +557,25 @@ async fn sync_group_inner(state: &AppState, group_id: &str) -> Res<bool> {
 
     if let Some((bytes, pushed)) = outgoing {
         push(&state.http, &meta.server_url, &keys, group_id, &bytes).await?;
-        state.store().mark_pushed(group_id, &pushed)?;
+        blocking(|| state.store().mark_pushed(group_id, &pushed))?;
     }
 
-    loop {
+    for _ in 0..MAX_PAGES_PER_SYNC {
         let after = state
             .store()
             .sync_meta(group_id)
             .map(|m| m.cursor)
             .ok_or_else(not_shared)?;
         let page = pull_page(&state.http, &meta.server_url, &keys, group_id, after).await?;
-        state
-            .store()
-            .check_relay(group_id, page.relay_id.as_deref())?;
-        if !page.updates.is_empty() {
-            changed |= state.store().import_remote(group_id, &page.updates)?;
+        blocking(|| {
+            state
+                .store()
+                .check_relay(group_id, page.relay_id.as_deref())
+        })?;
+        if page.updates.is_empty() {
+            break;
         }
+        changed |= blocking(|| state.store().import_remote(group_id, &page.updates))?;
         if !page.has_more {
             break;
         }
@@ -588,9 +608,16 @@ pub async fn reconcile(state: &AppState) -> Res<bool> {
         .iter()
         .filter(|id| !listed.iter().any(|g| &g.group_id == *id))
     {
-        // Left on another device. Upload what this device still had first, for the others.
-        let _ = sync_group(state, id).await;
-        state.store().delete(id)?;
+        // Left on another device. Upload what this device still had first, for the others,
+        // and keep the group until that worked: deleting it earlier would lose those edits.
+        let uploaded = sync_group(state, id).await;
+        let mut store = state.store();
+        if store.has_unpushed(id) {
+            let reason = uploaded.err().unwrap_or_default();
+            eprintln!("[sync] keeping left group {id} until its changes are uploaded: {reason}");
+            continue;
+        }
+        store.delete(id)?;
         changed = true;
     }
 
@@ -2244,6 +2271,133 @@ mod end_to_end {
 
         let missing = invite_code(&url, "no-such-group", &new_secret().unwrap());
         assert!(join_group(&b.state, &missing).await.is_err());
+
+        let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    /// A relay that never stops paging: every request gets the same real update under a new
+    /// sequence number, with `has_more`. Returns its URL and how many requests it answered.
+    fn start_endless_relay(
+        group_id: &str,
+        secret: &Secret,
+        update: &[u8],
+    ) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read, Write};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let keys = GroupKeys::derive(secret).unwrap();
+        let sealed = STANDARD.encode(keys.seal(group_id, update).unwrap());
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = std::sync::Arc::new(AtomicUsize::new(0));
+        let answered = requests.clone();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                // Read the whole request, body included, before answering.
+                let mut request = Vec::new();
+                let mut chunk = [0; 4096];
+                while let Ok(n @ 1..) = stream.read(&mut chunk) {
+                    request.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&request).to_lowercase();
+                    if let Some(end) = text.find("\r\n\r\n") {
+                        let body_len = text
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .and_then(|v| v.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        if request.len() >= end + 4 + body_len {
+                            break;
+                        }
+                    }
+                }
+                let seq = answered.fetch_add(1, Ordering::SeqCst) + 1;
+                let body = format!(
+                    r#"{{"updates":[{{"seq":{seq},"data":"{sealed}"}}],"has_more":true,"relay_id":"endless"}}"#
+                );
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        (url, requests)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_relay_that_never_stops_paging_cannot_hold_up_sync() {
+        let device = Device::new();
+        let doc = doc::new_group_doc("Trip", "EUR", &["Alice".into()]).unwrap();
+        let update = doc.export(ExportMode::Snapshot).unwrap();
+        let secret = new_secret().unwrap();
+        let group = device.state.store().insert(doc, None).unwrap();
+        let (url, requests) = start_endless_relay(&group.id, &secret, &update);
+        let answered = || requests.load(std::sync::atomic::Ordering::SeqCst);
+
+        let (copy, meta) = download(&device.state.http, &url, &secret, &group.id)
+            .await
+            .unwrap();
+        assert_eq!(answered(), MAX_PAGES_PER_SYNC);
+        assert_eq!(meta.cursor, MAX_PAGES_PER_SYNC as i64);
+        assert_eq!(doc::read_group(&copy).unwrap(), group);
+
+        device
+            .state
+            .store()
+            .set_sync(&group.id, SyncMeta::new(url, secret))
+            .unwrap();
+        let before = answered();
+        sync_group(&device.state, &group.id).await.unwrap();
+        let used = answered() - before;
+        // A first check and possibly an upload, then at most one budget of pages.
+        assert!(used <= MAX_PAGES_PER_SYNC + 2, "{used} requests");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_group_left_elsewhere_stays_until_its_edits_are_uploaded() {
+        let (url, relay_dir) = start_relay().await;
+        let phone = Device::signed_up(&url, "alice").await;
+        let trip = phone.create("Trip", &["Alice"]);
+        let alice = trip.participants[0].id.clone();
+        let invite = phone.invite(&trip.id);
+        phone.sync().await;
+        let laptop = Device::logged_in(&url, "alice").await;
+
+        // The phone can't reach the relay for this group when the laptop leaves it.
+        let mut meta = phone.state.store().sync_meta(&trip.id).unwrap().clone();
+        let relay_url = std::mem::replace(&mut meta.server_url, "http://127.0.0.1:9".into());
+        phone
+            .state
+            .store()
+            .set_sync(&trip.id, meta.clone())
+            .unwrap();
+        phone.edit(&trip.id, |d| {
+            doc::add_expense(d, "Taxi", 3000, alice.clone(), vec![split(&alice)], None)
+        });
+        leave_group(&laptop.state, &trip.id).await.unwrap();
+        laptop.sync().await;
+
+        sync_account(&phone.state).await.unwrap();
+        reconcile(&phone.state).await.unwrap();
+        assert!(
+            phone.state.store().contains(&trip.id),
+            "the unuploaded edit is kept"
+        );
+
+        // Back online: the edit goes up first, then the group goes.
+        meta.server_url = relay_url;
+        phone.state.store().set_sync(&trip.id, meta).unwrap();
+        reconcile(&phone.state).await.unwrap();
+        assert!(!phone.state.store().contains(&trip.id));
+
+        let bob = Device::signed_up(&url, "bob").await;
+        let joined = join_group(&bob.state, &invite).await.unwrap();
+        assert_eq!(
+            joined.expenses.len(),
+            1,
+            "the edit reached the other members"
+        );
 
         let _ = std::fs::remove_dir_all(relay_dir);
     }

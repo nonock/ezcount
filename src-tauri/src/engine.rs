@@ -1,11 +1,17 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::models::{Group, ParticipantBalance, SettlementTransfer};
+use crate::models::{Group, Participant, ParticipantBalance, SettlementTransfer};
+
+/// Totals are summed in `i128`, which no realistic number of expenses can overflow, and
+/// saturate into `i64` (symmetrically, so negating one is always safe).
+fn to_cents(total: i128) -> i64 {
+    total.clamp(-i128::from(i64::MAX), i128::from(i64::MAX)) as i64
+}
 
 /// Calculates the detailed balance (paid, owed, net) for each participant in a group.
 pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
-    let mut paid_map: HashMap<String, i64> = HashMap::new();
-    let mut owed_map: HashMap<String, i64> = HashMap::new();
+    let mut paid_map: HashMap<String, i128> = HashMap::new();
+    let mut owed_map: HashMap<String, i128> = HashMap::new();
 
     // Ensure all participants exist in the maps
     for p in &group.participants {
@@ -14,26 +20,28 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
     }
 
     for expense in &group.expenses {
+        let amount = i128::from(expense.amount_cents);
         // Payer is credited the full expense amount
-        *paid_map.entry(expense.paid_by.clone()).or_default() += expense.amount_cents;
+        *paid_map.entry(expense.paid_by.clone()).or_default() += amount;
 
-        let total_shares: i64 = expense.splits.iter().map(|s| s.shares as i64).sum();
+        let total_shares: i128 = expense.splits.iter().map(|s| i128::from(s.shares)).sum();
         if total_shares > 0 {
             // Integer division with exact remainder distribution using Largest Remainder Method
-            let mut allocated: Vec<(i64, i64, usize)> = expense
+            let mut allocated: Vec<(i128, i128, usize)> = expense
                 .splits
                 .iter()
                 .enumerate()
                 .map(|(idx, s)| {
-                    let shares = s.shares as i64;
-                    let base = (expense.amount_cents * shares) / total_shares;
-                    let rem = (expense.amount_cents * shares) % total_shares;
+                    let shares = i128::from(s.shares);
+                    let base = (amount * shares) / total_shares;
+                    let rem = (amount * shares) % total_shares;
                     (base, rem, idx)
                 })
                 .collect();
 
-            let total_allocated: i64 = allocated.iter().map(|(base, _, _)| *base).sum();
-            let remainder_cents = (expense.amount_cents - total_allocated) as usize;
+            let total_allocated: i128 = allocated.iter().map(|(base, _, _)| *base).sum();
+            // Below the number of splits for a positive amount; `read_group` drops the others.
+            let remainder_cents = usize::try_from(amount - total_allocated).unwrap_or(0);
 
             // Sort indices by remainder descending to give leftover cents to highest fractional remainders
             let mut order: Vec<usize> = (0..allocated.len()).collect();
@@ -63,9 +71,14 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
         .filter(|id| seen.insert(*id))
         .collect();
 
+    let participants: HashMap<&str, &Participant> = group
+        .participants
+        .iter()
+        .map(|p| (p.id.as_str(), p))
+        .collect();
     ids.into_iter()
         .filter_map(|id| {
-            let participant = group.participants.iter().find(|p| p.id == id);
+            let participant = participants.get(id);
             let paid = paid_map.get(id).copied().unwrap_or(0);
             let owed = owed_map.get(id).copied().unwrap_or(0);
             let removed = participant.is_none_or(|p| p.removed);
@@ -77,9 +90,9 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
                 participant_id: id.to_string(),
                 participant_name: participant
                     .map_or_else(|| "Unknown participant".to_string(), |p| p.name.clone()),
-                paid_cents: paid,
-                owed_cents: owed,
-                net_cents: paid - owed,
+                paid_cents: to_cents(paid),
+                owed_cents: to_cents(owed),
+                net_cents: to_cents(paid - owed),
                 removed,
             })
         })
@@ -477,5 +490,29 @@ mod tests {
             .iter()
             .all(|s| s.to_name == "Unknown participant"));
         assert_eq!(settlements.iter().map(|s| s.amount_cents).sum::<i64>(), 600);
+    }
+
+    #[test]
+    fn test_extreme_amounts_and_shares_do_not_overflow() {
+        let mut group = setup_test_group();
+        let mut huge = expense("e1", i64::MAX, "p1", &["p1", "p2"]);
+        huge.splits[1].shares = u32::MAX;
+        group.expenses.push(huge);
+        group.expenses.push(expense("e2", i64::MAX, "p1", &["p3"]));
+
+        let balances = calculate_balances(&group);
+        let find = |id: &str| balances.iter().find(|b| b.participant_id == id).unwrap();
+        assert_eq!(
+            find("p1").paid_cents,
+            i64::MAX,
+            "saturates instead of wrapping"
+        );
+        assert_eq!(find("p3").net_cents, -i64::MAX);
+        assert_eq!(
+            i128::from(find("p1").owed_cents) + i128::from(find("p2").owed_cents),
+            i128::from(i64::MAX),
+            "the split still adds up exactly"
+        );
+        assert!(!calculate_settlements(&group).is_empty());
     }
 }

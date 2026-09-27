@@ -27,6 +27,14 @@ const PARTICIPANTS: &str = "participants";
 const EXPENSES: &str = "expenses";
 const HISTORY: &str = "history";
 
+/// Largest amount of one expense: ten trillion units, enough for any currency, and small
+/// enough that JavaScript numbers hold it exactly.
+pub const MAX_AMOUNT_CENTS: i64 = 1_000_000_000_000_000;
+
+/// Deepest nesting read from a document. The schemas need 6 levels; anything deeper comes
+/// from a crafted update, and following it without a bound could overflow the stack.
+const MAX_DEPTH: usize = 16;
+
 type Res<T> = Result<T, String>;
 
 fn doc_err(e: impl std::fmt::Display) -> String {
@@ -120,47 +128,122 @@ struct DocExpense {
     history: Vec<ExpenseHistoryEntry>,
 }
 
-/// Entries of a root map, skipping (and logging) any that don't match the schema.
-/// A single malformed entry must not make the whole group unreadable.
-fn entries<T: DeserializeOwned>(root: &serde_json::Value, key: &str) -> Vec<(String, T)> {
-    let Some(map) = root.get(key).and_then(|v| v.as_object()) else {
-        return Vec::new();
-    };
-    map.iter()
-        .filter_map(|(id, value)| match serde_json::from_value(value.clone()) {
-            Ok(parsed) => Some((id.clone(), parsed)),
-            Err(e) => {
-                eprintln!("[doc] skipping malformed {key} entry {id}: {e}");
-                None
-            }
-        })
-        .collect()
+// Documents are read value by value with a depth bound rather than through
+// `LoroDoc::get_deep_value`, which follows containers nested to any depth: a group member
+// could otherwise crash every other member's app with one deeply nested update.
+
+/// A document value as JSON, or `None` if it nests deeper than `MAX_DEPTH` or holds
+/// something the schemas never use (binary data, other container types).
+fn value_json(value: ValueOrContainer, depth: usize) -> Option<serde_json::Value> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match value {
+        ValueOrContainer::Value(v) => plain_json(&v, depth),
+        ValueOrContainer::Container(Container::Map(map)) => map_json(&map, depth),
+        ValueOrContainer::Container(Container::List(list)) => {
+            let mut items = Some(Vec::with_capacity(list.len()));
+            list.for_each(|v| {
+                items = items.take().and_then(|mut items| {
+                    items.push(value_json(v, depth + 1)?);
+                    Some(items)
+                });
+            });
+            items.map(serde_json::Value::Array)
+        }
+        ValueOrContainer::Container(_) => None,
+    }
+}
+
+fn map_json(map: &LoroMap, depth: usize) -> Option<serde_json::Value> {
+    let mut fields = Some(serde_json::Map::new());
+    map.for_each(|key, v| {
+        fields = fields.take().and_then(|mut fields| {
+            fields.insert(key.to_string(), value_json(v, depth + 1)?);
+            Some(fields)
+        });
+    });
+    fields.map(serde_json::Value::Object)
+}
+
+fn plain_json(value: &LoroValue, depth: usize) -> Option<serde_json::Value> {
+    use serde_json::Value as Json;
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    Some(match value {
+        LoroValue::Null => Json::Null,
+        LoroValue::Bool(b) => Json::Bool(*b),
+        LoroValue::I64(n) => Json::from(*n),
+        LoroValue::Double(n) => Json::from(*n),
+        LoroValue::String(s) => Json::String(s.to_string()),
+        LoroValue::List(items) => Json::Array(
+            items
+                .iter()
+                .map(|v| plain_json(v, depth + 1))
+                .collect::<Option<_>>()?,
+        ),
+        LoroValue::Map(fields) => Json::Object(
+            fields
+                .iter()
+                .map(|(k, v)| Some((k.clone(), plain_json(v, depth + 1)?)))
+                .collect::<Option<_>>()?,
+        ),
+        LoroValue::Binary(_) | LoroValue::Container(_) => return None,
+    })
+}
+
+/// Entries of a root map, by id, skipping (and logging) any that don't match the schema.
+/// A single malformed entry must not make the whole document unreadable.
+pub(crate) fn entries<T: DeserializeOwned>(map: &LoroMap, what: &str) -> Vec<(String, T)> {
+    let mut out = Vec::new();
+    map.for_each(|id, value| {
+        let parsed = value_json(value, 1)
+            .ok_or_else(|| "unexpected shape or nesting".to_string())
+            .and_then(|json| serde_json::from_value(json).map_err(|e| e.to_string()));
+        match parsed {
+            Ok(parsed) => out.push((id.to_string(), parsed)),
+            Err(e) => eprintln!("[doc] skipping malformed {what} entry {id}: {e}"),
+        }
+    });
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
 }
 
 /// Materializes the document into the `Group` shape the frontend and engine use.
 pub fn read_group(doc: &LoroDoc) -> Res<Group> {
-    let root = serde_json::to_value(doc.get_deep_value()).map_err(doc_err)?;
-    let meta: DocMeta = serde_json::from_value(root.get(META).cloned().unwrap_or_default())
+    let meta: DocMeta = map_json(&doc.get_map(META), 0)
+        .ok_or_else(|| "unexpected shape or nesting".to_string())
+        .and_then(|json| serde_json::from_value(json).map_err(|e| e.to_string()))
         .map_err(|e| format!("Group document has no valid metadata: {e}"))?;
 
-    let mut participants: Vec<(i64, Participant)> = entries::<DocParticipant>(&root, PARTICIPANTS)
-        .into_iter()
-        .map(|(id, p)| {
-            (
-                p.position,
-                Participant {
-                    id,
-                    name: p.name,
-                    removed: p.removed,
-                },
-            )
-        })
-        .collect();
+    let mut participants: Vec<(i64, Participant)> =
+        entries::<DocParticipant>(&doc.get_map(PARTICIPANTS), PARTICIPANTS)
+            .into_iter()
+            .map(|(id, p)| {
+                (
+                    p.position,
+                    Participant {
+                        id,
+                        name: p.name,
+                        removed: p.removed,
+                    },
+                )
+            })
+            .collect();
     // Concurrent additions can share a position; the id keeps the order stable everywhere.
     participants.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
 
-    let mut expenses: Vec<Expense> = entries::<DocExpense>(&root, EXPENSES)
+    let mut expenses: Vec<Expense> = entries::<DocExpense>(&doc.get_map(EXPENSES), EXPENSES)
         .into_iter()
+        // Synced edits skip `validate_expense`, and the balance engine relies on these.
+        .filter(|(id, e)| match check_amounts(e.amount_cents, &e.splits) {
+            Ok(()) => true,
+            Err(err) => {
+                eprintln!("[doc] skipping expense {id}: {err}");
+                false
+            }
+        })
         .map(|(id, e)| Expense {
             id,
             group_id: meta.id.clone(),
@@ -404,6 +487,27 @@ pub fn remove_participant(doc: &LoroDoc, participant_id: &str) -> Res<()> {
     p.insert("removed", true).map_err(doc_err)
 }
 
+fn check_amount(amount_cents: i64) -> Res<()> {
+    if amount_cents <= 0 {
+        return Err("Amount must be greater than zero".to_string());
+    }
+    if amount_cents > MAX_AMOUNT_CENTS {
+        return Err("Amount is too large".to_string());
+    }
+    Ok(())
+}
+
+fn check_amounts(amount_cents: i64, splits: &[ExpenseSplit]) -> Res<()> {
+    check_amount(amount_cents)?;
+    if splits.is_empty() {
+        return Err("Expense must be split among at least one participant".to_string());
+    }
+    if splits.iter().any(|s| s.shares == 0) {
+        return Err("Shares must be at least 1".to_string());
+    }
+    Ok(())
+}
+
 /// `grandfathered` lists IDs that may be used even if removed: the people already on an
 /// expense being edited, so editing an old expense doesn't force dropping them.
 fn validate_expense(
@@ -413,15 +517,7 @@ fn validate_expense(
     splits: &[ExpenseSplit],
     grandfathered: &HashSet<&str>,
 ) -> Res<()> {
-    if amount_cents <= 0 {
-        return Err("Amount must be greater than zero".to_string());
-    }
-    if splits.is_empty() {
-        return Err("Expense must be split among at least one participant".to_string());
-    }
-    if splits.iter().any(|s| s.shares == 0) {
-        return Err("Shares must be at least 1".to_string());
-    }
+    check_amounts(amount_cents, splits)?;
     let mut seen = HashSet::new();
     if !splits
         .iter()
@@ -599,6 +695,7 @@ pub fn record_reimbursement(
     if amount_cents <= 0 {
         return Err("Reimbursement amount must be greater than zero".to_string());
     }
+    check_amount(amount_cents)?;
     if from_id == to_id {
         return Err("Sender and recipient cannot be the same person".to_string());
     }
@@ -944,5 +1041,72 @@ mod tests {
 
         let migrated = read_group(&doc_from_legacy(&original).unwrap()).unwrap();
         assert_eq!(migrated, original);
+    }
+
+    /// What a group member could sync in: writes that never went through the checks above.
+    #[test]
+    fn crafted_synced_data_is_skipped_not_fatal() {
+        let (doc, g) = sample();
+        let alice = &g.participants[0].id;
+        add_expense(
+            &doc,
+            "Real",
+            1000,
+            alice.clone(),
+            vec![split(alice, 1)],
+            None,
+        )
+        .unwrap();
+
+        let now = Utc::now();
+        let unchecked = |title: &str, amount_cents: i64, splits: Vec<ExpenseSplit>| {
+            let expense = Expense {
+                id: Uuid::new_v4().to_string(),
+                group_id: g.id.clone(),
+                title: title.to_string(),
+                amount_cents,
+                paid_by: alice.clone(),
+                splits,
+                created_at: now,
+                updated_at: now,
+                history: Vec::new(),
+                is_reimbursement: false,
+            };
+            insert_expense(&doc, &expense).unwrap();
+        };
+        unchecked("Too big", i64::MAX, vec![split(alice, 1)]);
+        unchecked("Negative", -500, vec![split(alice, 1)]);
+        unchecked("Nobody", 500, vec![]);
+        unchecked("Zero shares", 500, vec![split(alice, 0)]);
+
+        // Containers nested far deeper than any schema, and a deeply nested plain value.
+        let participants = doc.get_map(PARTICIPANTS);
+        let mut deep = participants
+            .insert_container("deep", LoroMap::new())
+            .unwrap();
+        for _ in 0..5_000 {
+            deep = deep.insert_container("name", LoroMap::new()).unwrap();
+        }
+        let mut nested = LoroValue::from("x");
+        for _ in 0..100 {
+            nested = LoroValue::List(vec![nested].into());
+        }
+        participants.insert("nested", nested).unwrap();
+
+        let group = read_group(&doc).unwrap();
+        assert_eq!(group.participants.len(), 2, "only Alice and Bob");
+        let titles: Vec<_> = group.expenses.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(titles, ["Real"]);
+
+        let err = add_expense(
+            &doc,
+            "Huge",
+            MAX_AMOUNT_CENTS + 1,
+            alice.clone(),
+            vec![split(alice, 1)],
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("too large"), "{err}");
     }
 }

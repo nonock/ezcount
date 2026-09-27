@@ -9,6 +9,7 @@
 //! conflicts with joining or leaving a group on another device.
 
 use crate::crypto::Secret;
+use crate::doc::entries;
 use chrono::{SecondsFormat, Utc};
 use loro::{LoroDoc, LoroValue};
 use serde::Deserialize;
@@ -32,31 +33,14 @@ pub struct AccountGroup {
     pub secret: Secret,
 }
 
-fn root(doc: &LoroDoc) -> Res<serde_json::Value> {
-    serde_json::to_value(doc.get_deep_value()).map_err(doc_err)
-}
-
 /// The account's groups. Malformed entries are skipped, never fatal.
 pub fn groups(doc: &LoroDoc) -> Res<Vec<AccountGroup>> {
-    let root = root(doc)?;
-    let Some(map) = root.get(GROUPS).and_then(|v| v.as_object()) else {
-        return Ok(Vec::new());
-    };
-    Ok(map
-        .iter()
-        .filter_map(
-            |(id, value)| match serde_json::from_value::<AccountGroup>(value.clone()) {
-                Ok(group) => Some(AccountGroup {
-                    group_id: id.clone(),
-                    ..group
-                }),
-                Err(e) => {
-                    eprintln!("[account] skipping malformed group entry {id}: {e}");
-                    None
-                }
-            },
-        )
-        .collect())
+    Ok(
+        entries::<AccountGroup>(&doc.get_map(GROUPS), "account group")
+            .into_iter()
+            .map(|(group_id, group)| AccountGroup { group_id, ..group })
+            .collect(),
+    )
 }
 
 pub fn add_group(doc: &LoroDoc, group_id: &str, server_url: &str, secret: &Secret) -> Res<()> {
@@ -84,16 +68,9 @@ pub fn remove_group(doc: &LoroDoc, group_id: &str) -> Res<()> {
 
 /// Group id -> participant id, for the groups where this person said who they are.
 pub fn identities(doc: &LoroDoc) -> Res<HashMap<String, String>> {
-    let root = root(doc)?;
-    Ok(root
-        .get(IDENTITIES)
-        .and_then(|v| v.as_object())
-        .map(|map| {
-            map.iter()
-                .filter_map(|(gid, pid)| Some((gid.clone(), pid.as_str()?.to_string())))
-                .collect()
-        })
-        .unwrap_or_default())
+    Ok(entries::<String>(&doc.get_map(IDENTITIES), "identity")
+        .into_iter()
+        .collect())
 }
 
 pub fn set_identity(doc: &LoroDoc, group_id: &str, participant_id: &str) -> Res<()> {
