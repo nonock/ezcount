@@ -1,4 +1,4 @@
-import { type Result, commands } from "../bindings";
+import { commands, type Result } from "../bindings";
 import type {
   AccountInfo,
   ExpenseSplit,

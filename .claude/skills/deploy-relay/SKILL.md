@@ -68,6 +68,6 @@ or panics after the latest "listening" line.
   confirm with the user before touching volumes.
 - `fly.toml`'s `[env]` holds the Android App Links settings (package and signing-key
   fingerprint). Update the fingerprint when the app gets a real signing key.
-- The address is baked into the app (`DEFAULT_SERVER` in `src/components/auth/AuthScreen.tsx`,
+- The address is baked into the app (`DEFAULT_SERVER` in `src/components/auth/AuthScreen.svelte`,
   the App Links host in `src-tauri/tauri.conf.json`), and every group remembers its relay URL.
   Changing the app name or domain strands existing accounts and groups.

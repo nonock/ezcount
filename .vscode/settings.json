@@ -2,7 +2,7 @@
   "editor.defaultFormatter": "biomejs.biome",
   "editor.formatOnSave": true,
   "editor.codeActionsOnSave": {
-    "quickfix.biome": "explicit",
+    "source.fixAll.biome": "explicit",
     "source.organizeImports.biome": "explicit"
   },
   "files.eol": "\n",
@@ -14,7 +14,7 @@
   "files.associations": {
     "*.css": "tailwindcss"
   },
-  "tailwindCSS.classFunctions": ["cn", "cva"],
+  "tailwindCSS.classFunctions": ["cn", "tv"],
   "search.exclude": {
     "src/bindings.ts": true,
     "**/target": true,

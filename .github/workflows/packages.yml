@@ -22,6 +22,8 @@ on:
       - ".github/workflows/ci.yml"
       - "lefthook.yml"
       - "biome.json"
+      - ".prettierrc.json"
+      - ".prettierignore"
       - "playwright.config.ts"
   workflow_dispatch:
   workflow_call:

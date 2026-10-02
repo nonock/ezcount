@@ -33,6 +33,7 @@ jobs:
         run: bun run check:tauri
       - run: bun install --frozen-lockfile
       - run: bunx biome ci .
+      - run: bunx prettier --check "src/**/*.svelte"
       - run: bun run typecheck
       - run: bun run build
 

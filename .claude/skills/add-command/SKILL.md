@@ -1,6 +1,6 @@
 ---
 name: add-command
-description: Checklist for adding or changing a Tauri command (Rust function called from the React frontend) in ezcount, end to end - Rust, specta types, bindings, api.ts, the Playwright mock and tests. Use for any new backend feature the UI calls, or when a command's arguments or result change.
+description: Checklist for adding or changing a Tauri command (Rust function called from the Svelte frontend) in ezcount, end to end - Rust, specta types, bindings, api.ts, the Playwright mock and tests. Use for any new backend feature the UI calls, or when a command's arguments or result change.
 ---
 
 # Add or change a Tauri command

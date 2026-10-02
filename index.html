@@ -1,46 +1,78 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>ezcount — Split Expenses Simply</title>
-    <meta name="description" content="Tricount-like expense sharing and debt simplification app with zero-loss integer cents arithmetic." />
-    <link rel="icon" type="image/x-icon" href="/src-tauri/icons/icon.ico" />
+    <meta
+      name="description"
+      content="Tricount-like expense sharing and debt simplification app with zero-loss integer cents arithmetic."
+    >
+    <link rel="icon" type="image/x-icon" href="/src-tauri/icons/icon.ico">
     <script>
-      // Apply the saved theme (next-themes' "theme" key) before the first paint, so the
-      // splash and the app never flash the wrong background.
-      (function () {
-        try {
-          var t = localStorage.getItem("theme");
-          var dark = t === "dark" || ((!t || t === "system") && matchMedia("(prefers-color-scheme: dark)").matches);
-          var root = document.documentElement;
-          root.classList.add(dark ? "dark" : "light");
-          root.style.colorScheme = dark ? "dark" : "light";
-        } catch (e) {}
-      })();
+    // Apply the saved theme (mode-watcher, "theme" key) before the first paint, so the
+    // splash and the app never flash the wrong background.
+    (() => {
+      try {
+        const t = localStorage.getItem("theme");
+        const dark =
+          t === "dark" ||
+          ((!t || t === "system") && matchMedia("(prefers-color-scheme: dark)").matches);
+        const root = document.documentElement;
+        root.classList.add(dark ? "dark" : "light");
+        root.style.colorScheme = dark ? "dark" : "light";
+      } catch {
+        // No saved theme: the app's default (light) shows until it starts.
+      }
+    })();
     </script>
     <style>
-      /* Splash, shown until React has an account state. Also rendered by src/components/common/Splash.tsx. */
-      html { background: #ffffff; }
-      html.dark { background: #0a0a0a; }
-      .ez-splash {
-        position: fixed;
-        inset: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 16px;
-        font-family: "Geist Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+    /* Splash, shown until the app knows the account. Also rendered by src/components/common/Splash.svelte. */
+    html {
+      background: #ffffff;
+    }
+    html.dark {
+      background: #0a0a0a;
+    }
+    .ez-splash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      font-family: "Geist Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    .ez-splash-name {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      color: #0a0a0a;
+    }
+    .ez-splash-name span {
+      color: #4f39f6;
+    }
+    html.dark .ez-splash-name {
+      color: #fafafa;
+    }
+    html.dark .ez-splash-name span {
+      color: #9b8cff;
+    }
+    /* Only a slow start gets motion: the green share pulses after 0.8 s. */
+    .ez-splash-part {
+      animation: ez-splash-pulse 1.2s ease-in-out 0.8s infinite;
+    }
+    @keyframes ez-splash-pulse {
+      50% {
+        opacity: 0.35;
       }
-      .ez-splash-name { font-size: 22px; font-weight: 600; letter-spacing: -0.03em; color: #0a0a0a; }
-      .ez-splash-name span { color: #4f39f6; }
-      html.dark .ez-splash-name { color: #fafafa; }
-      html.dark .ez-splash-name span { color: #9b8cff; }
-      /* Only a slow start gets motion: the green share pulses after 0.8 s. */
-      .ez-splash-part { animation: ez-splash-pulse 1.2s ease-in-out 0.8s infinite; }
-      @keyframes ez-splash-pulse { 50% { opacity: 0.35; } }
-      @media (prefers-reduced-motion: reduce) { .ez-splash-part { animation: none; } }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .ez-splash-part {
+        animation: none;
+      }
+    }
     </style>
   </head>
   <body>
@@ -50,12 +82,20 @@
           <rect width="100" height="100" rx="22" fill="#4f39f6" />
           <rect x="20" y="31" width="17" height="13" rx="6.5" fill="#ffffff" />
           <rect x="42" y="31" width="13" height="13" rx="6.5" fill="#ffffff" />
-          <rect class="ez-splash-part" x="60" y="31" width="20" height="13" rx="6.5" fill="#7ee2a8" />
+          <rect
+            class="ez-splash-part"
+            x="60"
+            y="31"
+            width="20"
+            height="13"
+            rx="6.5"
+            fill="#7ee2a8"
+          />
           <rect x="20" y="56" width="60" height="13" rx="6.5" fill="#ffffff" />
         </svg>
         <span class="ez-splash-name"><span>ez</span>count</span>
       </output>
     </div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

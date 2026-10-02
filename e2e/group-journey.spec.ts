@@ -1,4 +1,4 @@
-import { type Page, expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { installTauriMock } from "./fixtures/tauri-mock";
 
 async function chooseOption(page: Page, trigger: string, option: string) {
@@ -16,11 +16,12 @@ async function chooseIdentity(page: Page, name: string) {
 /** Picks a day in the expense date picker, moving back a month if it isn't shown. */
 async function pickExpenseDate(page: Page, date: Date) {
   await page.locator("#input-expense-date").click();
-  // The calendar tags each day with the browser's own date format.
-  const key = await page.evaluate((t) => new Date(t).toLocaleDateString(), date.getTime());
-  const day = page.locator(`[data-day="${key}"]`);
+  // The calendar tags each day with its ISO date.
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const key = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const day = page.locator(`[data-value="${key}"]`);
   if ((await day.count()) === 0) {
-    await page.getByRole("button", { name: /previous month/i }).click();
+    await page.getByRole("button", { name: "Previous" }).click();
   }
   await day.first().click();
 }

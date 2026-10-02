@@ -61,13 +61,18 @@ pre-commit:
               piped: true
               jobs:
                 - name: biome
-                  glob: "**/*.{js,ts,cjs,mjs,jsx,tsx,json,jsonc,css}"
+                  glob: "**/*.{js,ts,cjs,mjs,json,jsonc,css,html,svelte}"
                   run: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+                  stage_fixed: true
+                - name: prettier
+                  # Formats the Svelte components, which Biome only lints.
+                  glob: "src/**/*.svelte"
+                  run: bunx prettier --write {staged_files}
                   stage_fixed: true
                 - name: typecheck
                   # Rust changes can change the generated bindings the frontend is checked against.
                   glob:
-                    - "{src,e2e}/**/*.{ts,tsx}"
+                    - "{src,e2e}/**/*.{ts,svelte}"
                     - "*.ts"
                     - "tsconfig*.json"
                     - "package.json"

@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-ezcount splits group expenses (Tricount-style) on Windows, Linux and Android: Tauri 2 app with a Rust core (`src-tauri/`), a React 19 + Tailwind v4 + shadcn/ui frontend (`src/`), and a separate sync relay crate (`sync-server/`). Package manager and script runner is **Bun**. README.md covers deployment, the Android toolchain and the security model in detail.
+ezcount splits group expenses (Tricount-style) on Windows, Linux and Android: Tauri 2 app with a Rust core (`src-tauri/`), a Svelte 5 + Tailwind v4 + shadcn-svelte frontend (`src/`), and a separate sync relay crate (`sync-server/`). Package manager and script runner is **Bun**. README.md covers deployment, the Android toolchain and the security model in detail.
 
 Project skills (`.claude/skills/`): `add-command` (a Tauri command end to end, with its traps), `phone-test` (build, install and drive the app on the USB-connected Android phone), `deploy-relay` (manual Fly.io deploy and checks).
 
@@ -38,7 +38,7 @@ bunx playwright test e2e/group-journey.spec.ts -g "<test title>"
 - **Commit subjects must be Conventional Commits** (`feat(ui): …`, `fix: …`; checked by `scripts/check-commit-msg.ts`).
 - **`src/bindings.ts` is generated** by tauri-specta (`src-tauri/src/bin/export_bindings.rs`). Never edit it by hand; regenerate after changing any `#[tauri::command]` or a type in `models.rs`. The pre-commit hook does this automatically and CI fails if it is stale.
 - **Tauri Rust crates and npm packages must share major.minor** (`tauri = "2.11"` / `~2.11`). `bun run check:tauri` compares the lock files; see README "Upgrading Tauri" to bump.
-- Biome (2-space, 100 cols) ignores `src/bindings.ts` and `src/components/ui/**` (shadcn-generated; add components with `bunx shadcn@latest add <name>`).
+- Biome (2-space, 100 cols) lints everything and formats TS/CSS/JSON; Prettier (`prettier-plugin-svelte`) formats `.svelte` files, because Biome's Svelte formatter breaks templates (it once rewrote `{@const x = …}` into invalid code). Both skip `src/bindings.ts` and `src/components/ui/**` (shadcn-svelte-generated; add components with `bunx shadcn-svelte@latest add <name>`, with `--overwrite` when it asks about existing files). `bunfig.toml` refuses packages published less than 7 days ago, so pin to an older version when the CLI writes a newer one into package.json.
 - pre-push runs Rust tests and Playwright. Skip hooks once with `LEFTHOOK=0`.
 
 ## Releases and relay hosting
@@ -54,13 +54,15 @@ bunx playwright test e2e/group-journey.spec.ts -g "<test title>"
 
 **Data model: every group is a Loro CRDT document** (`src-tauri/src/doc.rs`, schema in its module doc). The `LoroDoc` is the source of truth; `models::Group` is a read-only projection produced by `doc::read_group`. Every field is its own LWW register; `splits` is stored as one plain value so an allocation is replaced atomically. Plain values are built by hand, not via serde. Money is `i64` cents; splits are integer `shares`. Members are soft-deleted (`removed`) and keep their history and balances.
 
-**Command flow:** React component → `src/services/api.ts` (unwraps specta `Result` into thrown errors) → `commands.*` in `bindings.ts` → `#[tauri::command]` in `src-tauri/src/lib.rs` → `AppState::mutate`, which applies a closure to the group's `LoroDoc` via `Store::update`, persists, and wakes background sync if the group is shared. Commands return the updated `Group`. `engine.rs` computes balances and settlement transfers from a `Group`.
+**Command flow:** Svelte component (or an action in `src/lib/actions.ts`) → `src/services/api.ts` (unwraps specta `Result` into thrown errors) → `commands.*` in `bindings.ts` → `#[tauri::command]` in `src-tauri/src/lib.rs` → `AppState::mutate`, which applies a closure to the group's `LoroDoc` via `Store::update`, persists, and wakes background sync if the group is shared. Commands return the updated `Group`. `engine.rs` computes balances and settlement transfers from a `Group`.
+
+**Frontend** (`src/`): `App.svelte` wires startup, backend events and the layout. App state lives in rune modules under `src/lib/state/` (`session`, `groups` for the list and the open group, `navigation` for the open group as a history entry so Back leaves it, `dialogs`, `confirm`), and actions that ask for confirmation or cross screens are in `src/lib/actions.ts`; components read and write that state directly rather than through props. bits-ui differs from Radix in ways that matter: it keeps inactive tab panels in the DOM (so `GroupPage` renders only the open tab), it doesn't hide the page behind a modal (so `App` sets `aria-hidden` on `#root` while one is open; dialogs and the toaster live outside it), and select triggers are buttons, not comboboxes.
 
 **Storage** (`storage.rs`): SQLite holding one Loro snapshot per group plus sync metadata and the session. Every write commits to SQLite before in-memory state changes. Unreadable data is surfaced as warnings (`get_storage_warnings`) and left on disk, never dropped. A legacy `ezcount_data.json` is migrated once.
 
 **Accounts** (`account.rs`): the account is another encrypted Loro doc (group list with invite secrets, plus per-group "which participant am I" identities), stored and synced exactly like a group under the account id but never listed as a group.
 
-**Sync** (`sync.rs`, `sync-server/`): the relay is dumb. It stores opaque, ordered, encrypted updates per document and serves them by sequence number. Clients push ops the server lacks and pull after their last imported seq; Loro merges. `spawn_background_sync` pushes after each edit (via `sync_wakeup`) and polls every 20 s; `reconcile` adds/removes local groups to match the account doc. Rust emits `sync-updated` / `account-updated` events that `App.tsx` listens for to refresh. If a relay's random DB id changes, clients re-upload everything.
+**Sync** (`sync.rs`, `sync-server/`): the relay is dumb. It stores opaque, ordered, encrypted updates per document and serves them by sequence number. Clients push ops the server lacks and pull after their last imported seq; Loro merges. `spawn_background_sync` pushes after each edit (via `sync_wakeup`) and polls every 20 s; `reconcile` adds/removes local groups to match the account doc. Rust emits `sync-updated` / `account-updated` events that `App.svelte` listens for to refresh. If a relay's random DB id changes, clients re-upload everything.
 
 **Crypto** (`crypto.rs`): invite code = server URL + group id + secret. HKDF-SHA256 derives an auth token (only thing the relay sees, stored hashed) and an XChaCha20-Poly1305 key bound to the group id. Passwords go through Argon2id into a login token and a key wrapping the random account key; recovery keys (HKDF, no stretching) give a second token and a second wrapped copy (`CredentialKeys`). Each recovery key works once: the relay's `/v1/accounts/credentials` requires replacing it when it's the proof.
 

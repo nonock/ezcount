@@ -1,0 +1,2 @@
+# Prettier only formats the Svelte components; Biome formats everything else.
+src/components/ui/

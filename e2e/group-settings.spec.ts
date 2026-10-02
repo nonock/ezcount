@@ -61,7 +61,7 @@ test("renaming the group and changing its currency", async ({ page }) => {
   await page.getByRole("menuitem", { name: "Edit group" }).click();
   const dialog = page.getByRole("dialog", { name: "Edit Group" });
   await dialog.getByLabel("Group name").fill("Porto Trip");
-  await dialog.getByRole("combobox", { name: "Currency" }).click();
+  await dialog.getByLabel("Currency", { exact: true }).click();
   await page.getByRole("option", { name: /USD/ }).click();
   await dialog.getByRole("button", { name: "Save" }).click();
 

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { MOCK_PASSWORD, installTauriMock } from "./fixtures/tauri-mock";
+import { installTauriMock, MOCK_PASSWORD } from "./fixtures/tauri-mock";
 
 const now = new Date().toISOString();
 
@@ -86,7 +86,8 @@ test.describe("Confirmations", () => {
     const confirmDialog = page.getByRole("alertdialog");
     await expect(confirmDialog).toContainText('Delete "Dinner"?');
     await confirmDialog.getByRole("button", { name: "Cancel" }).click();
-    await expect(page.getByRole("heading", { name: "Dinner" })).toBeVisible();
+    await expect(confirmDialog).not.toBeVisible();
+    await expect(page.getByRole("heading", { name: "Dinner", exact: true })).toBeVisible();
 
     await openDelete();
     await confirmDialog.getByRole("button", { name: "Delete" }).click();
