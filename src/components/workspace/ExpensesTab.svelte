@@ -18,6 +18,7 @@
   import { deleteExpense } from "@/lib/actions";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
+  import { memberTone } from "@/lib/tones";
   import type { Expense, Group } from "@/types";
   import {
     formatDate,
@@ -107,7 +108,7 @@
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
       <h2 class="flex items-center gap-2 font-semibold">
-        Transaction History <Badge variant="secondary">{group.expenses.length}</Badge>
+        Transaction History <Badge variant="soft">{group.expenses.length}</Badge>
       </h2>
       <p class="text-sm text-muted-foreground">
         Total recorded volume: <Amount cents={totalCents} currency={group.currency} />
@@ -174,7 +175,11 @@
             <Item.Root variant="outline" class="items-start sm:items-center">
               <Item.Media>
                 <Avatar.Root>
-                  <Avatar.Fallback class={isReimbursement ? "text-positive" : ""}>
+                  <Avatar.Fallback
+                    class={isReimbursement
+                      ? "bg-positive/15 text-positive"
+                      : memberTone(group, e.paid_by)}
+                  >
                     {#if isReimbursement}
                       <HandCoinsIcon class="size-4" aria-hidden="true" />
                     {:else}
@@ -220,7 +225,7 @@
                   <ul class="flex flex-wrap gap-1 pt-1" aria-label="Split between">
                     {#each e.splits as s (s.participant_id)}
                       <li>
-                        <Badge variant="secondary">
+                        <Badge variant="secondary" class={memberTone(group, s.participant_id)}>
                           {nameOf(s.participant_id)}{s.shares > 1 ? ` ×${s.shares}` : ""}
                         </Badge>
                       </li>

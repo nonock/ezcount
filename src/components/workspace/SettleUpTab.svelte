@@ -10,6 +10,7 @@
   import * as Item from "@/components/ui/item";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
+  import { memberTone } from "@/lib/tones";
   import type { Group } from "@/types";
 
   let { group }: { group: Group } = $props();
@@ -49,7 +50,9 @@
           <Item.Root variant="outline">
             <Item.Media>
               <Avatar.Root>
-                <Avatar.Fallback>{s.from_name.charAt(0).toUpperCase()}</Avatar.Fallback>
+                <Avatar.Fallback class={memberTone(group, s.from_id)}
+                  >{s.from_name.charAt(0).toUpperCase()}</Avatar.Fallback
+                >
               </Avatar.Root>
             </Item.Media>
             <Item.Content>

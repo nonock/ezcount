@@ -122,7 +122,7 @@
   --color-foreground: var(--foreground);
   --color-background: var(--background);
   /* daisyUI's three radii: fields (buttons, inputs, menu items), boxes (cards, dialogs, menus)
-     and selectors (badges, checkboxes). */
+     and selectors (checkboxes). Badges (rounded-4xl) are pills. */
   --radius-sm: calc(var(--radius-field) * 0.5);
   --radius-md: var(--radius-field);
   --radius-lg: var(--radius-field);
@@ -134,10 +134,11 @@
 
 /* daisyUI 5's default "light" and "dark" themes, mapped onto shadcn's tokens: the page is
    base-200, cards and dialogs base-100. Text colors (muted text, money, errors, dark primary)
-   are darkened or lightened from daisyUI's where needed to keep WCAG AA contrast. */
+   are darkened or lightened from daisyUI's where needed to keep WCAG AA contrast. The radii
+   are daisyUI 4's rounder ones (daisyUI 5 uses 0.25rem fields and 0.5rem boxes). */
 :root {
-  --radius-field: 0.25rem;
-  --radius-box: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
   --radius-selector: 0.5rem;
   --radius: var(--radius-field);
   --background: oklch(98% 0 0);
@@ -213,6 +214,46 @@
   --sidebar-accent-foreground: oklch(97.807% 0.029 256.847);
   --sidebar-border: oklch(97.807% 0.029 256.847 / 10%);
   --sidebar-ring: oklch(58% 0.233 277.117);
+}
+
+/* Member colors (memberTone in src/lib/tones.ts): daisyUI's primary, secondary, accent, info and
+   warning hues, given to members by their position in the group. --tone fills (at 15%) and
+   --tone-text is a shade of it readable on that fill. */
+.tone-0 {
+  --tone: oklch(45% 0.24 277);
+  --tone-text: oklch(45% 0.24 277);
+}
+.tone-1 {
+  --tone: oklch(65% 0.241 354.3);
+  --tone-text: oklch(50% 0.2 354);
+}
+.tone-2 {
+  --tone: oklch(77% 0.152 181.9);
+  --tone-text: oklch(48% 0.09 182);
+}
+.tone-3 {
+  --tone: oklch(74% 0.16 232.7);
+  --tone-text: oklch(48% 0.12 240);
+}
+.tone-4 {
+  --tone: oklch(82% 0.189 84.4);
+  --tone-text: oklch(50% 0.11 60);
+}
+.dark .tone-0 {
+  --tone: oklch(58% 0.233 277);
+  --tone-text: oklch(80% 0.11 277);
+}
+.dark .tone-1 {
+  --tone-text: oklch(80% 0.12 354);
+}
+.dark .tone-2 {
+  --tone-text: oklch(82% 0.12 182);
+}
+.dark .tone-3 {
+  --tone-text: oklch(82% 0.1 233);
+}
+.dark .tone-4 {
+  --tone-text: oklch(86% 0.13 84);
 }
 
 /* While scanning a QR code, the camera preview is behind the (then transparent) web view:

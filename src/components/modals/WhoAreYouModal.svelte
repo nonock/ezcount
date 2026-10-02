@@ -12,6 +12,7 @@
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { session } from "@/lib/state/session.svelte";
+  import { memberTone } from "@/lib/tones";
   import type { Group } from "@/types";
   import { errorMessage } from "@/utils/errors";
 
@@ -90,7 +91,9 @@
               onclick={() => run(p.id, () => chooseIdentity(p.id))}
             >
               <Avatar.Root size="sm" aria-hidden="true">
-                <Avatar.Fallback>{p.name.slice(0, 1).toUpperCase()}</Avatar.Fallback>
+                <Avatar.Fallback class={memberTone(group, p.id)}
+                  >{p.name.slice(0, 1).toUpperCase()}</Avatar.Fallback
+                >
               </Avatar.Root>
               <span class="truncate">{p.name}</span>
               {#if busyId === p.id}

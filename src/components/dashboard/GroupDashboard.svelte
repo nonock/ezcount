@@ -78,7 +78,7 @@
                   </button>
                 </h2>
               </Card.Title>
-              <Badge variant="secondary" class="w-fit">{group.currency}</Badge>
+              <Badge variant="soft" class="w-fit">{group.currency}</Badge>
             </Card.Header>
             <Card.Content class="flex items-end justify-between gap-2">
               <div>

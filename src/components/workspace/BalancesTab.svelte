@@ -8,6 +8,7 @@
   import { Progress } from "@/components/ui/progress";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
+  import { memberTone } from "@/lib/tones";
   import { cn } from "@/lib/utils";
   import type { Group } from "@/types";
 
@@ -39,7 +40,9 @@
             <div class="flex items-center justify-between gap-3">
               <div class="flex min-w-0 items-center gap-2.5">
                 <Avatar.Root>
-                  <Avatar.Fallback>{b.participant_name.charAt(0).toUpperCase()}</Avatar.Fallback>
+                  <Avatar.Fallback class={memberTone(group, b.participant_id)}
+                    >{b.participant_name.charAt(0).toUpperCase()}</Avatar.Fallback
+                  >
                 </Avatar.Root>
                 <div class="min-w-0">
                   <h3 class="flex items-center gap-1.5 truncate font-medium">

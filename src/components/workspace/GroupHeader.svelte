@@ -15,6 +15,7 @@
   import { leaveGroup, removeMember } from "@/lib/actions";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
+  import { memberTone } from "@/lib/tones";
   import { cn } from "@/lib/utils";
   import type { Group } from "@/types";
 
@@ -44,7 +45,7 @@
   <Card.Header>
     <div class="flex min-w-0 items-center gap-2">
       <h1 class="truncate text-lg font-semibold tracking-tight">{group.name}</h1>
-      <Badge variant="secondary">{group.currency}</Badge>
+      <Badge variant="soft">{group.currency}</Badge>
     </div>
     <Card.Description>
       {activeParticipants.length}
@@ -101,7 +102,13 @@
     <ul class="flex flex-wrap gap-1.5" aria-label="Members">
       {#each activeParticipants as p (p.id)}
         <li>
-          <Badge variant="outline" class="h-7 gap-1 pr-0.5 pl-2.5 text-sm">
+          <Badge
+            variant="outline"
+            class={cn(
+              "h-7 gap-1 border-transparent pr-0.5 pl-2.5 text-sm",
+              memberTone(group, p.id)
+            )}
+          >
             <button
               type="button"
               onclick={() => renameMember(p.id)}
