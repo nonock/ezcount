@@ -84,7 +84,7 @@
 {/snippet}
 
 <header
-  class="sticky top-0 z-30 border-b bg-background/80 pt-[env(safe-area-inset-top)] backdrop-blur-lg"
+  class="sticky top-0 z-30 border-b bg-card/80 shadow-sm pt-[env(safe-area-inset-top)] backdrop-blur-lg"
 >
   <div class="mx-auto flex h-14 max-w-5xl items-center justify-between gap-3 px-4">
     <!-- On phones the logo is in the bottom bar, and the header names the app. -->

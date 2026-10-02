@@ -47,9 +47,9 @@
       <Button
         {...props}
         {id}
-        variant="outline"
+        variant="ghost"
         aria-labelledby={`${labelId} ${id}`}
-        class="w-full justify-start font-normal dark:bg-input/30"
+        class="w-full justify-start border-input bg-card px-3 font-normal hover:bg-card has-data-[icon=inline-start]:pl-3 aria-expanded:bg-card"
       >
         <CalendarIcon data-icon="inline-start" class="text-muted-foreground" />
         {date

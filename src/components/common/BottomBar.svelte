@@ -22,7 +22,7 @@
 <nav
   aria-label="App"
   class={cn(
-    "max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-30 max-sm:flex max-sm:items-center max-sm:gap-2 max-sm:border-t max-sm:bg-background/95 max-sm:px-2 max-sm:pt-1.5 max-sm:pb-[max(0.375rem,env(safe-area-inset-bottom))] max-sm:backdrop-blur-lg",
+    "max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:z-30 max-sm:flex max-sm:items-center max-sm:gap-2 max-sm:border-t max-sm:bg-card/95 max-sm:px-2 max-sm:pt-1.5 max-sm:pb-[max(0.375rem,env(safe-area-inset-bottom))] max-sm:backdrop-blur-lg",
     className
   )}
 >

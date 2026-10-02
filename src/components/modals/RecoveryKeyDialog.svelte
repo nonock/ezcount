@@ -109,7 +109,7 @@
     {#if showingKey}
       <div class="space-y-3">
         <output
-          class="block rounded-lg border bg-muted/50 px-3 py-4 text-center font-mono text-base font-semibold tracking-wide break-all select-all"
+          class="block rounded-xl border bg-muted/50 px-3 py-4 text-center font-mono text-base font-semibold tracking-wide break-all select-all"
           aria-label="Recovery key"
         >
           {key}

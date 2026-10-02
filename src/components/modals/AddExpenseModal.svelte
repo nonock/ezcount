@@ -262,7 +262,7 @@
             {/if}
           </Field.Description>
 
-          <ul class="divide-y rounded-lg border">
+          <ul class="divide-y rounded-xl border">
             {#each participants as p (p.id)}
               {@const state = splitsState[p.id] || { included: false, shares: 1 }}
               {@const owed =

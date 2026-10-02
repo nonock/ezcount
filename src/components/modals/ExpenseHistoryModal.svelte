@@ -37,7 +37,7 @@
         </Dialog.Description>
       </Dialog.Header>
 
-      <section aria-label="Current version" class="space-y-2 rounded-lg border p-3">
+      <section aria-label="Current version" class="space-y-2 rounded-xl border p-3">
         <div class="flex items-start justify-between gap-2">
           <div>
             <Badge variant="secondary" class="mb-1.5">Current version</Badge>
@@ -64,7 +64,7 @@
         </h3>
 
         {#if historyEntries.length === 0}
-          <p class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+          <p class="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
             This expense has not been modified since creation.
           </p>
         {:else}
@@ -75,7 +75,7 @@
                   aria-hidden="true"
                   class="absolute top-1.5 -left-[25px] size-2.5 rounded-full bg-primary ring-4 ring-background"
                 ></span>
-                <div class="space-y-2 rounded-lg border p-3 text-sm">
+                <div class="space-y-2 rounded-xl border p-3 text-sm">
                   <div class="flex items-center justify-between gap-2">
                     <span class="font-medium">{formatDateTime(entry.edited_at)}</span>
                     <Badge variant="outline">Revision #{historyEntries.length - idx}</Badge>

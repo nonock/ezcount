@@ -12,7 +12,7 @@
   const LEVELS = [
     { label: "Too weak", color: "bg-negative" },
     { label: "Too weak", color: "bg-negative" },
-    { label: "Weak", color: "bg-amber-500" },
+    { label: "Weak", color: "bg-warning" },
     { label: "Good", color: "bg-positive" },
     { label: "Strong", color: "bg-positive" },
   ];
@@ -21,7 +21,7 @@
   // Strong enough but under the minimum length: only length is missing.
   const label = $derived(!strength.acceptable && strength.score >= 3 ? "Too short" : level.label);
   const color = $derived(
-    strength.acceptable ? level.color : strength.score >= 3 ? "bg-amber-500" : level.color
+    strength.acceptable ? level.color : strength.score >= 3 ? "bg-warning" : level.color
   );
   const hint = $derived(
     strength.acceptable ? null : (strength.warning ?? strength.suggestions[0] ?? null)
