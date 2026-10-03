@@ -60,6 +60,7 @@ jobs:
         with:
           key: ${{ matrix.task }}
           workspaces: |
+            core -> target
             src-tauri -> target
             sync-server -> target
       - uses: oven-sh/setup-bun@v2
@@ -71,11 +72,13 @@ jobs:
       - name: Format
         if: matrix.task == 'lint'
         run: |
+          cargo fmt --manifest-path core/Cargo.toml --check
           cargo fmt --manifest-path src-tauri/Cargo.toml --check
           cargo fmt --manifest-path sync-server/Cargo.toml --check
       - name: Clippy
         if: matrix.task == 'lint'
         run: |
+          cargo clippy --locked --manifest-path core/Cargo.toml --all-targets -- -D warnings
           cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
           cargo clippy --locked --manifest-path sync-server/Cargo.toml --all-targets -- -D warnings
       - name: Test
@@ -84,7 +87,7 @@ jobs:
           # No debug info: faster linking and a smaller cache. Failures still report locations.
           CARGO_PROFILE_DEV_DEBUG: 0
         run: |
-          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          cargo test --locked --manifest-path core/Cargo.toml
           cargo test --locked --manifest-path sync-server/Cargo.toml
       - name: Bindings are up to date
         if: matrix.task == 'test'

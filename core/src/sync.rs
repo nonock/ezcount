@@ -18,7 +18,6 @@ use base64::Engine;
 use loro::{ExportMode, LoroDoc};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
 
 use crate::account;
@@ -30,22 +29,7 @@ use crate::AppState;
 
 type Res<T> = Result<T, String>;
 
-/// How often shared groups are synced in the background, besides right after local edits.
-const POLL_INTERVAL: Duration = Duration::from_secs(20);
-/// Short pause after a wake-up so a burst of edits goes out as one push.
-const DEBOUNCE: Duration = Duration::from_millis(500);
 const MIN_PASSWORD_LEN: usize = 8;
-
-/// Frontend event emitted after each background sync attempt of a group.
-pub const SYNC_EVENT: &str = "sync-updated";
-/// Frontend event emitted when the account's groups or identities changed on another device.
-pub const ACCOUNT_EVENT: &str = "account-updated";
-
-#[derive(Clone, Serialize)]
-struct SyncEvent {
-    group_id: String,
-    changed: bool,
-}
 
 pub fn http_client() -> Res<reqwest::Client> {
     let builder = reqwest::Client::builder()
@@ -261,11 +245,9 @@ fn check_password(password: &str, username: &str) -> Res<()> {
 /// Argon2 takes a noticeable fraction of a second, so it runs on a blocking thread.
 async fn password_keys(username: &str, password: &str) -> Res<CredentialKeys> {
     let (username, password) = (username.to_string(), password.to_string());
-    tauri::async_runtime::spawn_blocking(move || {
-        CredentialKeys::from_password(&username, &password)
-    })
-    .await
-    .map_err(|e| format!("Could not derive keys from the password: {e}"))?
+    tokio::task::spawn_blocking(move || CredentialKeys::from_password(&username, &password))
+        .await
+        .map_err(|e| format!("Could not derive keys from the password: {e}"))?
 }
 
 // ---------------------------------------------------------------------------
@@ -1104,40 +1086,39 @@ pub fn add_self(state: &AppState, group_id: &str, name: &str) -> Res<Group> {
 }
 
 // ---------------------------------------------------------------------------
-// Background loop
+// Background sync
 // ---------------------------------------------------------------------------
 
-/// Syncs the account and every shared group in the background: right after local edits and
-/// on a timer.
-pub fn spawn_background_sync(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        loop {
-            let state = app.state::<AppState>();
-            tokio::select! {
-                _ = state.sync_wakeup.notified() => {}
-                _ = tokio::time::sleep(POLL_INTERVAL) => {}
-            }
-            tokio::time::sleep(DEBOUNCE).await;
+/// What a `sync_all` pass found, reported as it goes so the interface can refresh early.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyncEvent {
+    /// The account's groups or identities changed on another device.
+    Account,
+    /// One shared group was synced; `changed` if it received changes.
+    Group { group_id: String, changed: bool },
+}
 
-            let account_changed = matches!(sync_account(&state).await, Ok(true));
-            let groups_changed = match reconcile(&state).await {
-                Ok(changed) => changed,
-                Err(e) => {
-                    eprintln!("[sync] could not update groups from the account: {e}");
-                    false
-                }
-            };
-            if account_changed || groups_changed {
-                let _ = app.emit(ACCOUNT_EVENT, ());
-            }
-
-            let ids = state.store().synced_ids();
-            for group_id in ids {
-                let changed = matches!(sync_group(&state, &group_id).await, Ok(true));
-                let _ = app.emit(SYNC_EVENT, SyncEvent { group_id, changed });
-            }
+/// One background pass: the account, then every shared group. The app runs it right after
+/// local edits (`AppState::sync_wakeup`) and on a timer. Failures are kept in each group's
+/// sync state for the interface, and the next pass retries.
+pub async fn sync_all(state: &AppState, mut report: impl FnMut(SyncEvent)) {
+    let account_changed = matches!(sync_account(state).await, Ok(true));
+    let groups_changed = match reconcile(state).await {
+        Ok(changed) => changed,
+        Err(e) => {
+            eprintln!("[sync] could not update groups from the account: {e}");
+            false
         }
-    });
+    };
+    if account_changed || groups_changed {
+        report(SyncEvent::Account);
+    }
+
+    let ids = state.store().synced_ids();
+    for group_id in ids {
+        let changed = matches!(sync_group(state, &group_id).await, Ok(true));
+        report(SyncEvent::Group { group_id, changed });
+    }
 }
 
 #[cfg(test)]

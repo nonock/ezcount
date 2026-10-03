@@ -1,98 +1,21 @@
-mod account;
-mod crypto;
-mod doc;
-mod engine;
-pub mod models;
+//! The desktop and Android app: `ezcount-core` (in `../core`) exposed as Tauri commands, plus
+//! the background sync loop and the native bits (window icons, deep links, share sheet).
+
+mod background;
 #[cfg(target_os = "android")]
 mod share;
-pub mod storage;
-pub mod sync;
 
 use chrono::{DateTime, Utc};
-use loro::LoroDoc;
-use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
-use tauri::{Manager, State};
-
-use crate::models::{
+use ezcount_core::models::{
     AccountInfo, ExpenseSplit, Group, NativeFeatures, ParticipantBalance, PasswordStrength,
     SettlementTransfer, SignedIn, SyncInfo,
 };
-use crate::storage::Store;
-
-pub struct AppState {
-    store: Mutex<Store>,
-    pub http: reqwest::Client,
-    /// Serializes sync runs.
-    pub sync_lock: tokio::sync::Mutex<()>,
-    /// Wakes the background sync loop after a local edit.
-    pub sync_wakeup: tokio::sync::Notify,
-    /// Problems found while loading data, shown to the user once.
-    pub warnings: Vec<String>,
-}
-
-impl AppState {
-    pub fn new(store: Store, warnings: Vec<String>) -> Result<Self, String> {
-        Ok(Self {
-            store: Mutex::new(store),
-            http: sync::http_client()?,
-            sync_lock: tokio::sync::Mutex::new(()),
-            sync_wakeup: tokio::sync::Notify::new(),
-            warnings,
-        })
-    }
-
-    pub fn store(&self) -> MutexGuard<'_, Store> {
-        // Every write is committed to SQLite before memory is touched, so the data is still
-        // consistent after a panic in another command.
-        self.store.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// Applies a change to a group, saves it and schedules a sync if the group is shared.
-    fn mutate(
-        &self,
-        group_id: &str,
-        change: impl FnOnce(&LoroDoc) -> Result<(), String>,
-    ) -> Result<Group, String> {
-        let mut store = self.store();
-        let group = store.update(group_id, change)?;
-        if store.sync_meta(group_id).is_some() {
-            self.sync_wakeup.notify_one();
-        }
-        Ok(group)
-    }
-
-    fn account_info(&self) -> Result<Option<AccountInfo>, String> {
-        let store = self.store();
-        let Some(session) = store.session() else {
-            return Ok(None);
-        };
-        Ok(Some(AccountInfo {
-            username: session.username.clone(),
-            server_url: session.server_url.clone(),
-            identities: account::identities(store.account_doc()?)?,
-        }))
-    }
-
-    fn require_account_info(&self) -> Result<AccountInfo, String> {
-        self.account_info()?
-            .ok_or_else(|| "You are not logged in".to_string())
-    }
-
-    fn sync_info(&self, group_id: &str) -> Result<SyncInfo, String> {
-        let store = self.store();
-        store.doc(group_id)?;
-        let meta = store.sync_meta(group_id);
-        Ok(SyncInfo {
-            group_id: group_id.to_string(),
-            enabled: meta.is_some(),
-            server_url: meta.map(|m| m.server_url.clone()),
-            invite_code: meta.map(|m| sync::invite_code(&m.server_url, group_id, &m.secret)),
-            last_synced_at: meta.and_then(|m| m.last_synced_at),
-            last_error: meta.and_then(|m| m.last_error.clone()),
-        })
-    }
-}
+use ezcount_core::storage::Store;
+use ezcount_core::{doc, engine, sync, AppState};
+use std::path::PathBuf;
+#[cfg(windows)]
+use std::sync::Mutex;
+use tauri::{Manager, State};
 
 #[tauri::command]
 #[specta::specta]
@@ -587,7 +510,7 @@ pub fn run() {
             eprintln!("[storage] {warning}");
         }
         app.manage(AppState::new(store, warnings)?);
-        sync::spawn_background_sync(app.handle().clone());
+        background::spawn_sync(app.handle().clone());
         Ok(())
     })
     .invoke_handler(builder.invoke_handler())

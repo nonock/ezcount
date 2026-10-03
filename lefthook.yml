@@ -18,6 +18,8 @@ pre-commit:
       glob:
         - "src-tauri/src/**/*.rs"
         - "src-tauri/Cargo.toml"
+        # The command types (`models.rs`) live in the core crate.
+        - "core/src/**/*.rs"
         - "src/bindings.ts"
       run: cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export_bindings && git add src/bindings.ts
 
@@ -27,19 +29,31 @@ pre-commit:
         jobs:
           - name: app-rust
             group:
-              # Format before linting so clippy reports the final line numbers.
+              # Format before linting so clippy reports the final line numbers. The core crate
+              # is in the same group because the app compiles it too.
               piped: true
               jobs:
+                - name: core-fmt
+                  glob: "core/**/*.rs"
+                  run: cargo fmt --manifest-path core/Cargo.toml
+                  stage_fixed: true
                 - name: app-fmt
                   glob: "src-tauri/**/*.rs"
                   run: cargo fmt --manifest-path src-tauri/Cargo.toml
                   stage_fixed: true
+                - name: core-clippy
+                  # The core's tests link the relay crate, so relay changes can break them too.
+                  glob:
+                    - "core/**/*.rs"
+                    - "core/Cargo.{toml,lock}"
+                    - "sync-server/src/**/*.rs"
+                  run: cargo clippy --quiet --manifest-path core/Cargo.toml --all-targets -- -D warnings
                 - name: app-clippy
-                  # The app's tests link the relay crate, so relay changes can break them too.
                   glob:
                     - "src-tauri/**/*.rs"
                     - "src-tauri/Cargo.{toml,lock}"
-                    - "sync-server/src/**/*.rs"
+                    - "core/**/*.rs"
+                    - "core/Cargo.toml"
                   run: cargo clippy --quiet --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
           - name: relay-rust
@@ -77,6 +91,7 @@ pre-commit:
                     - "tsconfig*.json"
                     - "package.json"
                     - "src-tauri/src/**/*.rs"
+                    - "core/src/**/*.rs"
                   run: bun run typecheck
 
           - name: tauri-versions
@@ -99,12 +114,12 @@ commit-msg:
 pre-push:
   parallel: true
   jobs:
-    - name: app-tests
+    - name: core-tests
       glob:
-        - "src-tauri/**/*.{rs,toml}"
-        - "src-tauri/Cargo.lock"
+        - "core/**/*.{rs,toml}"
+        - "core/Cargo.lock"
         - "sync-server/src/**/*.rs"
-      run: cargo test --quiet --manifest-path src-tauri/Cargo.toml
+      run: cargo test --quiet --manifest-path core/Cargo.toml
 
     - name: relay-tests
       glob:

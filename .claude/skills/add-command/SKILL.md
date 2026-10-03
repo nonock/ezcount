@@ -10,14 +10,15 @@ Playwright tests, so go through all of them.
 
 ## 1. Rust logic
 
-Put the real work in the module it belongs to (`sync.rs` for accounts and sync, `doc.rs` for
-group data, `storage.rs` for persistence), as a plain function returning `Res<T>` (=
-`Result<T, String>`). Error strings are shown to users as is: write them as full sentences
-("Your current password is wrong"), never debug output.
+Put the real work in the core crate (`core/src/`), in the module it belongs to (`sync.rs` for
+accounts and sync, `doc.rs` for group data, `storage.rs` for persistence), as a plain function
+returning `Res<T>` (= `Result<T, String>`). The core crate must not depend on Tauri. Error
+strings are shown to users as is: write them as full sentences ("Your current password is
+wrong"), never debug output.
 
 Test it there: unit tests in the module's `#[cfg(test)] mod tests`, or in `sync.rs`'s
 `end_to_end` module when it talks to the relay (it starts a real relay in-process; see the
-`Device` helper and `start_relay`).
+`Device` helper and `start_relay`). Run them with `cargo test --manifest-path core/Cargo.toml`.
 
 ## 2. The command (`src-tauri/src/lib.rs`)
 
@@ -36,10 +37,10 @@ async fn do_thing(state: State<'_, AppState>, some_arg: String) -> Result<Thing,
   compile fine and fail at runtime.
 - Arguments are camelCased on the TS side (`some_arg` → `someArg`).
 
-## 3. Types (`src-tauri/src/models.rs`)
+## 3. Types (`core/src/models.rs`)
 
 New structs need `#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]` and
-must be imported in `lib.rs`'s `use crate::models::{…}`.
+must be imported in `src-tauri/src/lib.rs`'s `use ezcount_core::models::{…}`.
 
 **Comment fields with `//`, not `///`.** specta copies `///` field docs into `bindings.ts`
 with trailing spaces, and the pre-commit whitespace check (`git diff --check`) then rejects

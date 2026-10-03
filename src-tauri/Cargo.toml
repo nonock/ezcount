@@ -21,33 +21,17 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
+ezcount-core = { path = "../core" }
 tauri = { version = "2.11", features = [] }
 tauri-plugin-opener = "2.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 specta = { version = "=2.0.0-rc.20", features = ["derive", "chrono"] }
 specta-typescript = "=0.0.7"
 tauri-specta = { version = "=2.0.0-rc.20", features = ["typescript"] }
-loro = "1"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-base64 = "0.23.1"
-getrandom = "0.4"
-tokio = { version = "1.53.1", features = ["time", "sync", "macros", "rt-multi-thread"] }
-url = "2"
-chacha20poly1305 = "0.11.0"
-hkdf = "0.13.0"
-sha2 = "0.11.0"
-argon2 = { version = "0.6.0", default-features = false, features = ["alloc"] }
+tokio = { version = "1.53.1", features = ["time", "sync", "macros"] }
 tauri-plugin-deep-link = "2.4"
-zxcvbn = "3.1"
-
-[dev-dependencies]
-ezcount-sync-server = { path = "../sync-server" }
-tauri = { version = "2.11", features = ["test"] }
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "macros"] }
 
 [lints.rust]
 linker_messages = "allow"

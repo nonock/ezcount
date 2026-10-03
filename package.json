@@ -17,9 +17,9 @@
     "format": "biome format --write . && prettier --write \"src/**/*.svelte\"",
     "lint": "biome lint .",
     "check": "biome check --write . && prettier --write \"src/**/*.svelte\"",
-    "fmt:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml && cargo fmt --manifest-path sync-server/Cargo.toml",
-    "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path sync-server/Cargo.toml --all-targets -- -D warnings",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml && cargo test --manifest-path sync-server/Cargo.toml",
+    "fmt:rust": "cargo fmt --manifest-path core/Cargo.toml && cargo fmt --manifest-path src-tauri/Cargo.toml && cargo fmt --manifest-path sync-server/Cargo.toml",
+    "lint:rust": "cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path sync-server/Cargo.toml --all-targets -- -D warnings",
+    "test:rust": "cargo test --manifest-path core/Cargo.toml && cargo test --manifest-path sync-server/Cargo.toml",
     "test:e2e": "playwright test",
     "verify": "bun run check:tauri && biome check . && prettier --check \"src/**/*.svelte\" && bun run typecheck && bun run lint:rust && bun run test:rust && bun run test:e2e",
     "prepare": "lefthook install"

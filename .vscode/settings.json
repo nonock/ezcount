@@ -9,7 +9,11 @@
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },
-  "rust-analyzer.linkedProjects": ["src-tauri/Cargo.toml", "sync-server/Cargo.toml"],
+  "rust-analyzer.linkedProjects": [
+    "core/Cargo.toml",
+    "src-tauri/Cargo.toml",
+    "sync-server/Cargo.toml"
+  ],
   "rust-analyzer.check.command": "clippy",
   "files.associations": {
     "*.css": "tailwindcss"
