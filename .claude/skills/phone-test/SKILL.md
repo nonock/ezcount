@@ -5,7 +5,7 @@ description: Build the ezcount Android app and try it on the Android phone conne
 
 # Test on the connected Android phone
 
-Needs the Android toolchain from the README's "Android toolchain" section, a phone with USB
+Needs the Android toolchain from docs/development.md's "Android toolchain" section, a phone with USB
 debugging on, and Windows Developer Mode. Run the commands below in PowerShell from the repo
 root.
 
@@ -36,7 +36,7 @@ bun run android:apk
 & $adb install -r src-tauri\gen\android\app\build\outputs\apk\universal\release\app-universal-release.apk
 ```
 
-- Local builds are signed with the public test key; CI builds with the private release key (README, "Signing key"). `install -r` keeps the app's data only when the installed app has the same key: otherwise `adb install` fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, and switching means `adb uninstall com.ezvany.ezcount` (ask the user first: it deletes the app's local data; logging in brings the account back). To build with the release key, set `$env:EZCOUNT_RELEASE_KEYSTORE` to the `.p12` file and `$env:EZCOUNT_RELEASE_KEYSTORE_PASSWORD` from its password file (never print the password).
+- Local builds are signed with the public test key; CI builds with the private release key (docs/development.md, "Signing key"). `install -r` keeps the app's data only when the installed app has the same key: otherwise `adb install` fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, and switching means `adb uninstall com.ezvany.ezcount` (ask the user first: it deletes the app's local data; logging in brings the account back). To build with the release key, set `$env:EZCOUNT_RELEASE_KEYSTORE` to the `.p12` file and `$env:EZCOUNT_RELEASE_KEYSTORE_PASSWORD` from its password file (never print the password).
 - App Links (step 4) only verify for release-key builds; test-key builds open invite links through the relay's `/join` page.
 - The build uses the official relay by default. For another relay, the login screen's
   **Change** link picks one (see step 5 for a local relay).

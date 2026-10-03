@@ -46,7 +46,7 @@ for (const [crate, pkg] of pairs) {
 if (failed) {
   console.error(
     "\nTauri's Rust crates and npm packages must share major.minor versions. Upgrade both sides" +
-      ' together (see "Upgrading Tauri" in the README).'
+      ' together (see "Upgrading Tauri" in docs/development.md).'
   );
   process.exit(1);
 }

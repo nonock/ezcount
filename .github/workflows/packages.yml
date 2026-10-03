@@ -69,14 +69,14 @@ jobs:
       # The runner image ships the Android SDK and NDK; Tauri looks for the NDK in NDK_HOME.
       - run: echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
       # These APKs go to other people's phones, so they must carry the private release key:
-      # the committed test key is public (see README, "Signing key"). No key, no build.
+      # the committed test key is public (see docs/development.md, "Signing key"). No key, no build.
       - name: Release signing key
         env:
           KEYSTORE: ${{ secrets.ANDROID_RELEASE_KEYSTORE }}
           PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE" ] || [ -z "$PASSWORD" ]; then
-            echo "::error::Set the ANDROID_RELEASE_KEYSTORE and ANDROID_RELEASE_KEYSTORE_PASSWORD secrets (README, \"Signing key\")."
+            echo "::error::Set the ANDROID_RELEASE_KEYSTORE and ANDROID_RELEASE_KEYSTORE_PASSWORD secrets (docs/development.md, \"Signing key\")."
             exit 1
           fi
           echo "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/release.p12"

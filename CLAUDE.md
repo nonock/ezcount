@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-ezcount splits group expenses (Tricount-style) on Windows, Linux, Android and the web: a Rust core crate without UI (`core/`) wrapped in a Tauri 2 app (`src-tauri/`) and, for the browser, a WebAssembly crate (`web/`), a Svelte 5 + Tailwind v4 + shadcn-svelte frontend (`src/`), and a separate sync relay crate (`sync-server/`). Package manager and script runner is **Bun**. README.md covers deployment, the Android toolchain and the security model in detail.
+ezcount splits group expenses (Tricount-style) on Windows, Linux, Android and the web: a Rust core crate without UI (`core/`) wrapped in a Tauri 2 app (`src-tauri/`) and, for the browser, a WebAssembly crate (`web/`), a Svelte 5 + Tailwind v4 + shadcn-svelte frontend (`src/`), and a separate sync relay crate (`sync-server/`). Package manager and script runner is **Bun**. `docs/` has the detail: `development.md` (toolchains, signing key, releases), `relay.md` (running and hosting the relay) and `security.md` (invites, encryption, accounts). `CHANGELOG.md` lists what changed for users: add a line under "Unreleased" with each user-visible change.
 
 Project skills (`.claude/skills/`): `add-command` (a Tauri command end to end, with its traps), `phone-test` (build, install and drive the app on the USB-connected Android phone), `deploy-relay` (manual Fly.io deploy and checks).
 
@@ -41,15 +41,15 @@ bunx playwright test e2e/group-journey.spec.ts -g "<test title>"
 
 - **Commit subjects must be Conventional Commits** (`feat(ui): …`, `fix: …`; checked by `scripts/check-commit-msg.ts`).
 - **`src/bindings.ts` is generated** by tauri-specta (`src-tauri/src/bin/export_bindings.rs`). Never edit it by hand; regenerate after changing any `#[tauri::command]` or a type in `core/src/models.rs`. The pre-commit hook does this automatically and CI fails if it is stale.
-- **Tauri Rust crates and npm packages must share major.minor** (`tauri = "2.11"` / `~2.11`). `bun run check:tauri` compares the lock files; see README "Upgrading Tauri" to bump.
+- **Tauri Rust crates and npm packages must share major.minor** (`tauri = "2.11"` / `~2.11`). `bun run check:tauri` compares the lock files; see docs/development.md "Upgrading Tauri" to bump.
 - Biome (2-space, 100 cols) lints everything and formats TS/CSS/JSON; Prettier (`prettier-plugin-svelte`) formats `.svelte` files, because Biome's Svelte formatter breaks templates (it once rewrote `{@const x = …}` into invalid code). Both skip `src/bindings.ts` and `src/components/ui/**` (shadcn-svelte-generated; add components with `bunx shadcn-svelte@latest add <name>`, with `--overwrite` when it asks about existing files). `bunfig.toml` refuses packages published less than 7 days ago, so pin to an older version when the CLI writes a newer one into package.json.
 - pre-push runs Rust tests and Playwright. Skip hooks once with `LEFTHOOK=0`.
 
 ## Releases and relay hosting
 
-- `bun run release <x.y.z>` (`scripts/release.ts`, must be on a clean `main`) sets the version in `package.json`, `tauri.conf.json` and both `Cargo.toml`s, commits `chore(release): vX.Y.Z` and tags it; `git push --follow-tags` publishes. No pre-release suffixes (Android derives its versionCode from the version).
-- The tag runs `.github/workflows/release.yml`: version check (`release.ts --check`), then `packages.yml` (called as a reusable workflow, with LTO on for tags) and the Fly.io relay deploy in parallel, then the GitHub release. `packages.yml` skips `chore(release)` pushes to `main`, since the tag builds them.
-- Android APKs: CI signs with the private release key from GitHub secrets (`ANDROID_RELEASE_KEYSTORE`, `…_PASSWORD`) and fails without it; local builds use the public test key `gen/android/app/debug.keystore` unless `EZCOUNT_RELEASE_KEYSTORE`/`…_PASSWORD` are set. Test-key APKs must never go to other people. See README "Signing key".
+- `bun run release <x.y.z>` (`scripts/release.ts`, must be on a clean `main`) sets the version in `package.json`, `tauri.conf.json` and both `Cargo.toml`s, turns the changelog's "Unreleased" into that version's section (and refuses when it's empty), commits `chore(release): vX.Y.Z` and tags it; `git push --follow-tags` publishes. No pre-release suffixes (Android derives its versionCode from the version).
+- The tag runs `.github/workflows/release.yml`: version check (`release.ts --check`), then `packages.yml` (called as a reusable workflow, with LTO on for tags) and the Fly.io relay deploy in parallel, then the GitHub release, with that changelog section as its notes. `packages.yml` skips `chore(release)` pushes to `main`, since the tag builds them.
+- Android APKs: CI signs with the private release key from GitHub secrets (`ANDROID_RELEASE_KEYSTORE`, `…_PASSWORD`) and fails without it; local builds use the public test key `gen/android/app/debug.keystore` unless `EZCOUNT_RELEASE_KEYSTORE`/`…_PASSWORD` are set. Test-key APKs must never go to other people. See docs/development.md "Signing key".
 - The relay runs on Fly.io (`sync-server/fly.toml`, app `ezcount-relay`, Paris) from the Dockerfile's root `fly` stage (Fly volumes are root-owned; the default image stays non-root). Always deploy with `--ha=false`: the data is one SQLite file on one machine's volume.
 - **The relay API must stay backward compatible**: phones update at different times, so only add endpoints/fields, never change or remove them.
 - Groups remember their relay URL, so changing the relay address strands existing accounts and groups.

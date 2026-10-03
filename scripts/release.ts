@@ -1,8 +1,9 @@
 // Prepares a release: sets the version everywhere, commits and tags. Pushing the tag starts
 // .github/workflows/release.yml (packages, relay deploy, GitHub release).
 //
-//   bun run release 0.2.0          bump, commit "chore(release): v0.2.0", tag v0.2.0
+//   bun run release 0.2.0          bump, date the changelog, commit "chore(release): v0.2.0", tag v0.2.0
 //   bun run release --check v0.2.0 CI: fail unless every file says 0.2.0
+//   bun run release --notes v0.2.0 CI: print that version's section of CHANGELOG.md
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -19,7 +20,31 @@ const files: [path: string, pattern: RegExp][] = [
 ];
 const read = (path: string) => readFileSync(new URL(path, root), "utf8");
 
+const CHANGELOG = "CHANGELOG.md";
+const UNRELEASED = "## Unreleased";
+/** The text under a changelog heading, up to the next version's. */
+function changelogSection(heading: string): string | undefined {
+  const lines = read(CHANGELOG).replaceAll("\r\n", "\n").split("\n");
+  const start = lines.findIndex((line) => line === heading || line.startsWith(`${heading} `));
+  if (start < 0) return undefined;
+  const length = lines.slice(start + 1).findIndex((line) => line.startsWith("## "));
+  return lines
+    .slice(start + 1, length < 0 ? undefined : start + 1 + length)
+    .join("\n")
+    .trim();
+}
+
 const [first, second] = process.argv.slice(2);
+
+if (first === "--notes") {
+  const notes = changelogSection(`## ${second?.replace(/^v/, "")}`);
+  if (!notes) {
+    console.error(`${CHANGELOG} has nothing for ${second}.`);
+    process.exit(1);
+  }
+  console.log(notes);
+  process.exit(0);
+}
 
 if (first === "--check") {
   const expected = second?.replace(/^v/, "");
@@ -54,6 +79,16 @@ const branch = run("git", "branch", "--show-current").trim();
 if (branch !== "main") fail(`Releases are made from main, not ${branch}.`);
 const tag = `v${version}`;
 if (run("git", "tag", "--list", tag).trim()) fail(`${tag} already exists.`);
+if (!changelogSection(UNRELEASED)) {
+  fail(`Say what changed under "${UNRELEASED}" in ${CHANGELOG} first.`);
+}
+
+// What was unreleased becomes this version's section, under a new empty one.
+const today = new Date().toISOString().slice(0, 10);
+writeFileSync(
+  new URL(CHANGELOG, root),
+  read(CHANGELOG).replace(UNRELEASED, `${UNRELEASED}\n\n## ${version} - ${today}`)
+);
 
 for (const [path, pattern] of files) {
   writeFileSync(new URL(path, root), read(path).replace(pattern, `$1${version}$3`));
@@ -77,6 +112,7 @@ run(
   "git",
   "add",
   ...files.map(([path]) => path),
+  CHANGELOG,
   "src-tauri/Cargo.lock",
   "sync-server/Cargo.lock",
   "core/Cargo.lock"

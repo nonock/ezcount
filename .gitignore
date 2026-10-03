@@ -45,3 +45,10 @@ deploy/.env
 
 # Security review output (rust-review)
 .rust-review-results/
+
+# Skills installed with `npx skills add` stay on this machine; only the project's own are versioned
+.claude/skills/*
+!.claude/skills/add-command/
+!.claude/skills/deploy-relay/
+!.claude/skills/phone-test/
+skills-lock.json

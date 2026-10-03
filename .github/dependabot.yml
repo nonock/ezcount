@@ -3,7 +3,7 @@
 #
 # Tauri: the Rust crates and the npm packages must stay on the same major.minor, and the
 # crates must move together, so each side gets its own group and only patch updates here.
-# Minor upgrades are done by hand on both sides at once (README, "Upgrading Tauri").
+# Minor upgrades are done by hand on both sides at once (docs/development.md, "Upgrading Tauri").
 version: 2
 
 updates:
