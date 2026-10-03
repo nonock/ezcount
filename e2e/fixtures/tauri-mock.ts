@@ -4,6 +4,13 @@
 export interface MockExpenseSplit {
   participant_id: string;
   shares: number;
+  fixed_cents?: number | null;
+}
+
+export interface MockOriginalAmount {
+  currency: string;
+  amount_cents: number;
+  rate: string;
 }
 
 export interface MockExpenseHistoryEntry {
@@ -12,6 +19,7 @@ export interface MockExpenseHistoryEntry {
   previous_amount_cents: number;
   previous_paid_by: string;
   previous_splits: MockExpenseSplit[];
+  previous_original?: MockOriginalAmount | null;
   summary: string;
 }
 
@@ -20,6 +28,7 @@ export interface MockExpense {
   group_id: string;
   title: string;
   amount_cents: number;
+  original?: MockOriginalAmount | null;
   paid_by: string;
   splits: MockExpenseSplit[];
   created_at: string;
@@ -53,6 +62,7 @@ export const MOCK_SERVER = "http://localhost:8787";
  * - `__NATIVE__`: `{ share, scan }` features, none by default; shared texts land in
  *   `window.__shared`
  * - `__SCANNED__`: what the camera "scans"
+ * - `__RATES__`: exchange rates the relay suggests, as `{ "USD/EUR": "0.9234" }`
  * - `__STORAGE_WARNINGS__`
  */
 export function installTauriMock() {
@@ -155,6 +165,59 @@ export function installTauriMock() {
     return name;
   }
 
+  // `amount` in proportion to `weights`, like engine.rs's `split_weighted`.
+  function splitWeighted(amount: number, weights: number[]) {
+    const total = weights.reduce((sum, w) => sum + w, 0);
+    if (total <= 0) return weights.map(() => 0);
+    const allocated = weights.map((w) => ({
+      base: Math.floor((amount * w) / total),
+      rem: (amount * w) % total,
+    }));
+    const remainder = amount - allocated.reduce((sum, a) => sum + a.base, 0);
+    const order = [...allocated.keys()].sort((a, b) => allocated[b].rem - allocated[a].rem);
+    for (let i = 0; i < remainder; i++) {
+      allocated[order[i]].base += 1;
+    }
+    return allocated.map((a) => a.base);
+  }
+
+  // What each person owes of an expense, like engine.rs's `owed`: fixed amounts first, the
+  // parts share the rest, all in the currency the expense was paid in.
+  function splitAmount(exp: MockExpense) {
+    const splits = exp.splits || [];
+    const shares = splits.map((s) => s.shares);
+    let owed: number[];
+    if (splits.every((s) => s.fixed_cents == null)) {
+      owed = splitWeighted(exp.amount_cents, shares);
+    } else {
+      const paid = exp.original?.amount_cents ?? exp.amount_cents;
+      const fixed = splits.reduce((sum, s) => sum + (s.fixed_cents ?? 0), 0);
+      const rest = splitWeighted(Math.max(paid - fixed, 0), shares);
+      const there = splits.map((s, i) => s.fixed_cents ?? rest[i]);
+      owed = exp.original ? splitWeighted(exp.amount_cents, there) : there;
+    }
+    return splits.map((s, i) => ({ pid: s.participant_id, base: owed[i] }));
+  }
+
+  // The checks of doc.rs's `check_amounts` that the form can run into.
+  function checkSplits(
+    amountCents: number,
+    original: MockOriginalAmount | null,
+    splits: MockExpenseSplit[]
+  ) {
+    const money = (cents: number) => (cents / 100).toFixed(2);
+    const paid = original?.amount_cents ?? amountCents;
+    const fixed = splits.reduce((sum, s) => sum + (s.fixed_cents ?? 0), 0);
+    if (fixed > paid) {
+      throw new Error(
+        `The fixed amounts add up to ${money(fixed)}, more than the expense's ${money(paid)}`
+      );
+    }
+    if (splits.every((s) => s.fixed_cents != null) && fixed !== paid) {
+      throw new Error(`The amounts add up to ${money(fixed)}, not the expense's ${money(paid)}`);
+    }
+  }
+
   function computeBalances(group: MockGroup) {
     const map = new Map<string, { paid: number; owed: number }>();
     for (const p of group.participants) {
@@ -165,27 +228,9 @@ export function installTauriMock() {
       const payer = map.get(exp.paid_by);
       if (payer) payer.paid += exp.amount_cents;
 
-      if (exp.splits && exp.splits.length > 0) {
-        const totalShares = exp.splits.reduce((sum, s) => sum + s.shares, 0);
-        if (totalShares > 0) {
-          const allocated = exp.splits.map((s, idx) => {
-            const base = Math.floor((exp.amount_cents * s.shares) / totalShares);
-            const rem = (exp.amount_cents * s.shares) % totalShares;
-            return { base, rem, idx, pid: s.participant_id };
-          });
-
-          const totalAllocated = allocated.reduce((sum, a) => sum + a.base, 0);
-          const remainder = exp.amount_cents - totalAllocated;
-          const order = [...allocated.keys()].sort((a, b) => allocated[b].rem - allocated[a].rem);
-          for (let i = 0; i < remainder; i++) {
-            allocated[order[i]].base += 1;
-          }
-
-          for (const item of allocated) {
-            const debtor = map.get(item.pid);
-            if (debtor) debtor.owed += item.base;
-          }
-        }
+      for (const item of splitAmount(exp)) {
+        const debtor = map.get(item.pid);
+        if (debtor) debtor.owed += item.base;
       }
     }
 
@@ -499,6 +544,104 @@ export function installTauriMock() {
           return clone(newGroup);
         }
 
+        // The format of csv_file.rs, without its leniency: commas, no quoted cells, no
+        // Split column, and the amounts owed become the shares.
+        case "import_group_csv": {
+          requireAccount();
+          const [header, ...lines] = String(args.csv)
+            .replace(/^\ufeff/, "")
+            .trim()
+            .split(/\r?\n/);
+          const columns = header.split(",");
+          if (
+            columns.slice(0, 10).join(",") !==
+            "Date,Title,Amount,Currency,Paid by,Type,Original amount,Original currency,Exchange rate,Split"
+          ) {
+            throw new Error(
+              "This is not an ezcount CSV file: its first line should be Date, Title, Amount, Currency, Paid by, Type, Original amount, Original currency, Exchange rate, Split, then one column per person"
+            );
+          }
+          const id = `group-${Date.now()}`;
+          const participants = columns.slice(10).map((name, i) => ({ id: `p-${i + 1}`, name }));
+          const toCents = (text: string) => Math.round(Number(text) * 100);
+          const now = new Date().toISOString();
+          const imported: MockGroup = {
+            id,
+            name: args.name,
+            currency: lines[0]?.split(",")[3] || "EUR",
+            participants,
+            expenses: lines.map((line, i) => {
+              const cells = line.split(",");
+              const payer = participants.find((p) => p.name === cells[4]);
+              if (!payer) throw new Error(`Line ${i + 2}: ${cells[4]} paid, but has no column`);
+              return {
+                id: `exp-${i + 1}`,
+                group_id: id,
+                title: cells[1],
+                amount_cents: toCents(cells[2]),
+                original: cells[7]
+                  ? { currency: cells[7], amount_cents: toCents(cells[6]), rate: cells[8] }
+                  : null,
+                paid_by: payer.id,
+                splits: participants
+                  .map((p, column) => ({
+                    participant_id: p.id,
+                    shares: toCents(cells[10 + column] || "0"),
+                  }))
+                  .filter((split) => split.shares > 0),
+                created_at: new Date(cells[0]).toISOString(),
+                updated_at: now,
+                history: [],
+                is_reimbursement: cells[5] === "payment",
+              };
+            }),
+            created_at: now,
+          };
+          getGroups().unshift(imported);
+          return clone(imported);
+        }
+
+        case "export_group_csv": {
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          const money = (cents: number) => (cents / 100).toFixed(2);
+          const nameOf = (id: string) => g.participants.find((p) => p.id === id)?.name ?? "";
+          const lines = g.expenses.map((e) => {
+            const owed = splitAmount(e);
+            return [
+              e.created_at,
+              e.title,
+              money(e.amount_cents),
+              g.currency,
+              nameOf(e.paid_by),
+              e.is_reimbursement ? "payment" : "expense",
+              e.original ? money(e.original.amount_cents) : "",
+              e.original?.currency ?? "",
+              e.original?.rate ?? "",
+              e.is_reimbursement
+                ? ""
+                : g.participants
+                    .map((p) => {
+                      const s = e.splits.find((x) => x.participant_id === p.id);
+                      return !s ? "-" : s.fixed_cents != null ? money(s.fixed_cents) : s.shares;
+                    })
+                    .join(" "),
+              ...g.participants.map((p) => {
+                const part = owed.find((o) => o.pid === p.id);
+                return part ? money(part.base) : "";
+              }),
+            ].join(",");
+          });
+          const header = [
+            "Date,Title,Amount,Currency,Paid by,Type,Original amount,Original currency,Exchange rate,Split",
+            ...g.participants.map((p) => p.name),
+          ].join(",");
+          return `${[header, ...lines].join("\n")}\n`;
+        }
+
+        case "suggest_exchange_rate":
+          return w.__RATES__?.[`${args.from}/${args.to}`] ?? null;
+
         case "leave_group": {
           if (!args || typeof args.groupId !== "string") {
             throw new Error("missing required argument `group_id`");
@@ -557,6 +700,7 @@ export function installTauriMock() {
         case "add_expense": {
           const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
+          checkSplits(args.amountCents, args.original, args.splits);
           const now = new Date().toISOString();
           const createdAt = args?.createdAt || now;
           const exp: MockExpense = {
@@ -564,6 +708,7 @@ export function installTauriMock() {
             group_id: args.groupId,
             title: args.title,
             amount_cents: args.amountCents,
+            original: args.original ?? null,
             paid_by: args.paidBy,
             splits: args.splits,
             created_at: createdAt,
@@ -581,6 +726,7 @@ export function installTauriMock() {
           const exp = g.expenses.find((x) => x.id === args?.expenseId);
           if (!exp) throw new Error("Expense not found");
 
+          checkSplits(args.amountCents, args.original, args.splits);
           const prevTitle = exp.title;
           const prevAmount = exp.amount_cents;
           const prevPayer = exp.paid_by;
@@ -593,11 +739,13 @@ export function installTauriMock() {
             previous_amount_cents: prevAmount,
             previous_paid_by: prevPayer,
             previous_splits: prevSplits,
+            previous_original: exp.original ?? null,
             summary: `Amount changed to ${args.amountCents / 100} • Title updated to ${args.title}`,
           });
 
           exp.title = args.title;
           exp.amount_cents = args.amountCents;
+          exp.original = args.original ?? null;
           exp.paid_by = args.paidBy;
           exp.splits = args.splits;
           if (args?.createdAt) {

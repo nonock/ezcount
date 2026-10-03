@@ -3,8 +3,8 @@
   import { Badge } from "@/components/ui/badge";
   import * as Dialog from "@/components/ui/dialog";
   import { dialogs } from "@/lib/state/dialogs.svelte";
-  import type { Group } from "@/types";
-  import { formatDateTime } from "@/utils/formatters";
+  import type { ExpenseSplit, Group, OriginalAmount } from "@/types";
+  import { formatDateTime, formatMoney } from "@/utils/formatters";
 
   let { group }: { group: Group } = $props();
 
@@ -15,6 +15,13 @@
   });
 
   const nameOf = (id: string) => group.participants.find((p) => p.id === id)?.name || "Unknown";
+  /** "2 parts", or the amount someone owes whatever the others do. */
+  function splitLabel(split: ExpenseSplit, original: OriginalAmount | null | undefined) {
+    if (split.fixed_cents != null) {
+      return formatMoney(split.fixed_cents, original?.currency ?? group.currency);
+    }
+    return `${split.shares} ${split.shares === 1 ? "part" : "parts"}`;
+  }
   const historyEntries = $derived(expense?.history ? [...expense.history].reverse() : []);
 </script>
 
@@ -44,14 +51,21 @@
             <p class="font-medium">{expense.title}</p>
             <p class="text-sm text-muted-foreground">Paid by {nameOf(expense.paid_by)}</p>
           </div>
-          <Amount cents={expense.amount_cents} currency={group.currency} class="font-semibold" />
+          <div class="text-right">
+            <Amount cents={expense.amount_cents} currency={group.currency} class="font-semibold" />
+            {#if expense.original}
+              <span class="block text-xs text-muted-foreground tabular-nums">
+                {formatMoney(expense.original.amount_cents, expense.original.currency)} at {expense
+                  .original.rate}
+              </span>
+            {/if}
+          </div>
         </div>
         <div class="flex flex-wrap gap-1">
           {#each expense.splits as s (s.participant_id)}
             <Badge variant="outline">
               {nameOf(s.participant_id)}
-              ({s.shares}
-              {s.shares === 1 ? "part" : "parts"})
+              ({splitLabel(s, expense.original)})
             </Badge>
           {/each}
         </div>
@@ -90,13 +104,22 @@
                     <dt class="text-muted-foreground">Amount</dt>
                     <dd class="text-right">
                       <Amount cents={entry.previous_amount_cents} currency={group.currency} />
+                      {#if entry.previous_original}
+                        ({formatMoney(
+                          entry.previous_original.amount_cents,
+                          entry.previous_original.currency
+                        )} at {entry.previous_original.rate})
+                      {/if}
                     </dd>
                     <dt class="text-muted-foreground">Payer</dt>
                     <dd class="text-right">{nameOf(entry.previous_paid_by)}</dd>
                     <dt class="text-muted-foreground">Split</dt>
                     <dd class="text-right">
                       {entry.previous_splits
-                        .map((s) => `${nameOf(s.participant_id)} (${s.shares}p)`)
+                        .map(
+                          (s) =>
+                            `${nameOf(s.participant_id)} (${splitLabel(s, entry.previous_original)})`
+                        )
                         .join(", ")}
                     </dd>
                   </dl>

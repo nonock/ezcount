@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DownloadIcon from "@lucide/svelte/icons/download";
   import EllipsisVerticalIcon from "@lucide/svelte/icons/ellipsis-vertical";
   import LogOutIcon from "@lucide/svelte/icons/log-out";
   import PencilIcon from "@lucide/svelte/icons/pencil";
@@ -12,7 +13,7 @@
   import * as Card from "@/components/ui/card";
   import * as DropdownMenu from "@/components/ui/dropdown-menu";
   import { Separator } from "@/components/ui/separator";
-  import { leaveGroup, removeMember } from "@/lib/actions";
+  import { exportGroup, leaveGroup, removeMember } from "@/lib/actions";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { memberTone } from "@/lib/tones";
@@ -88,6 +89,10 @@
           <DropdownMenu.Item onSelect={() => (dialogs.who = true)}>
             <UserRoundIcon />
             Change who you are
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={exportGroup}>
+            <DownloadIcon />
+            Export as CSV
           </DropdownMenu.Item>
           <DropdownMenu.Item variant="destructive" onSelect={leaveGroup}>
             <LogOutIcon />

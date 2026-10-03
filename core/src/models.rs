@@ -15,7 +15,21 @@ pub struct Participant {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct ExpenseSplit {
     pub participant_id: String,
+    // Parts of what is left of the expense once the fixed amounts are taken. 0 with
+    // `fixed_cents`.
     pub shares: u32,
+    // Owes exactly this instead of parts, in the currency the expense was paid in.
+    #[serde(default)]
+    pub fixed_cents: Option<i64>,
+}
+
+/// What an expense paid in another currency than the group's cost there.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct OriginalAmount {
+    pub currency: String,
+    pub amount_cents: i64,
+    // Units of the group's currency for one of this currency, as typed: "0.9234".
+    pub rate: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -25,6 +39,8 @@ pub struct ExpenseHistoryEntry {
     pub previous_amount_cents: i64,
     pub previous_paid_by: String,
     pub previous_splits: Vec<ExpenseSplit>,
+    #[serde(default)]
+    pub previous_original: Option<OriginalAmount>,
     pub summary: String,
 }
 
@@ -33,7 +49,10 @@ pub struct Expense {
     pub id: String,
     pub group_id: String,
     pub title: String,
+    // In the group's currency, also when `original` is set.
     pub amount_cents: i64,
+    #[serde(default)]
+    pub original: Option<OriginalAmount>,
     pub paid_by: String, // Participant ID
     pub splits: Vec<ExpenseSplit>,
     pub created_at: DateTime<Utc>,

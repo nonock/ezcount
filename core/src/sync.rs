@@ -22,6 +22,7 @@ use url::Url;
 
 use crate::account;
 use crate::crypto::{new_recovery_key, CredentialKeys, GroupKeys, Secret};
+use crate::csv_file;
 use crate::doc;
 use crate::models::{Group, PasswordStrength};
 use crate::storage::{import_remote_update, Session, SyncMeta};
@@ -1010,15 +1011,34 @@ pub fn create_group(
     currency: &str,
     participants: &[String],
 ) -> Res<Group> {
-    let session = require_session(state)?;
+    require_session(state)?;
     let doc = doc::new_group_doc(name, currency, participants)?;
-    let group = doc::read_group(&doc)?;
-    let me = group
+    let me = doc::read_group(&doc)?
         .participants
         .first()
         .ok_or_else(|| "Add yourself to the group".to_string())?
         .id
         .clone();
+    add_new_group(state, doc, Some(&me))
+}
+
+/// Creates a group from a CSV file (see `csv_file`). Who the user is in it isn't known yet.
+pub fn import_group(state: &AppState, name: &str, csv: &str) -> Res<Group> {
+    require_session(state)?;
+    let imported = csv_file::import(csv)?;
+    let doc = doc::imported_group_doc(
+        name,
+        &imported.currency,
+        &imported.participants,
+        &imported.expenses,
+    )?;
+    add_new_group(state, doc, None)
+}
+
+/// Adds a group made on this device to the account, with `me` as the user in it.
+fn add_new_group(state: &AppState, doc: LoroDoc, me: Option<&str>) -> Res<Group> {
+    let session = require_session(state)?;
+    let group = doc::read_group(&doc)?;
     let meta = SyncMeta::new(session.server_url, new_secret()?);
 
     // Account first: if the app stops in between, the group is fetched again from the
@@ -1026,7 +1046,10 @@ pub fn create_group(
     let mut store = state.store();
     store.update_account(|d| {
         account::add_group(d, &group.id, &meta.server_url, &meta.secret)?;
-        account::set_identity(d, &group.id, &me)
+        match me {
+            Some(me) => account::set_identity(d, &group.id, me),
+            None => Ok(()),
+        }
     })?;
     let inserted = store.insert(doc, Some(meta));
     if inserted.is_err() {
@@ -1035,6 +1058,41 @@ pub fn create_group(
     drop(store);
     state.sync_wakeup.notify_one();
     inserted
+}
+
+#[derive(Deserialize)]
+struct RateResponse {
+    rate: String,
+}
+
+/// The exchange rate the account's relay suggests from one currency to another on a day
+/// (`YYYY-MM-DD`): how much of `to` one unit of `from` is worth. `None` when it has no
+/// suggestion, as on a relay from before them.
+pub async fn suggested_rate(
+    state: &AppState,
+    from: &str,
+    to: &str,
+    date: Option<&str>,
+) -> Res<Option<String>> {
+    let session = require_session(state)?;
+    // They go into the address.
+    let code = |c: &str| c.len() == 3 && c.bytes().all(|b| b.is_ascii_alphabetic());
+    if !code(from) || !code(to) {
+        return Ok(None);
+    }
+    let mut url = format!("{}/v1/rates/{from}/{to}", session.server_url);
+    if let Some(date) = date.filter(|d| d.bytes().all(|b| b.is_ascii_digit() || b == b'-')) {
+        url.push_str(&format!("?date={date}"));
+    }
+    let response = state.http.get(url).send().await.map_err(request_err)?;
+    match response.status().as_u16() {
+        200 => {}
+        404 => return Ok(None),
+        status => return Err(format!("The sync server answered {status} for the rate")),
+    }
+    let answer: RateResponse = response.json().await.map_err(request_err)?;
+    // Only what an expense accepts.
+    Ok(doc::exchange_rate(&answer.rate).ok())
 }
 
 /// Downloads a shared group from its invite code and adds it to the account.
@@ -1407,6 +1465,94 @@ mod end_to_end {
         (url, dir)
     }
 
+    /// A stand-in for the rate service: it knows USD to EUR, on any day but in 2031, and
+    /// counts what it is asked.
+    fn start_rate_service() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read, Write};
+        use std::sync::atomic::Ordering;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/rate", listener.local_addr().unwrap());
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = std::sync::Arc::clone(&asked);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut request = [0u8; 2048];
+                let n = stream.read(&mut request).unwrap_or(0);
+                let request = String::from_utf8_lossy(&request[..n]).to_string();
+                let path = request.split_whitespace().nth(1).unwrap_or_default();
+                count.fetch_add(1, Ordering::SeqCst);
+                let (status, body) = if !path.starts_with("/rate/USD/EUR") {
+                    ("422 Unprocessable", r#"{"status":422}"#.to_string())
+                } else if path.contains("date=2031") {
+                    ("404 Not Found", r#"{"status":404}"#.to_string())
+                } else {
+                    let date = path.split("date=").nth(1).unwrap_or("2026-10-03");
+                    (
+                        "200 OK",
+                        format!(r#"{{"date":"{date}","base":"USD","quote":"EUR","rate":0.85856}}"#),
+                    )
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\n\
+                     content-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        (url, asked)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_relay_suggests_exchange_rates() {
+        let (rates_url, asked) = start_rate_service();
+        let asked = || asked.load(std::sync::atomic::Ordering::SeqCst);
+        let dir = std::env::temp_dir().join(format!("ezcount-relay-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let relay = ezcount_sync_server::Relay::open_with(
+            &dir.join("relay.sqlite3"),
+            ezcount_sync_server::Settings {
+                rates_url: Some(rates_url),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(ezcount_sync_server::serve(listener, relay));
+
+        let device = Device::signed_up(&url, "alice").await;
+        let rate = |from: &'static str, date: Option<&'static str>| {
+            let state = &device.state;
+            async move { suggested_rate(state, from, "EUR", date).await.unwrap() }
+        };
+        let found = Some("0.85856".to_string());
+        assert_eq!(rate("USD", Some("2026-08-29")).await, found);
+        // The relay remembers the answer.
+        assert_eq!(rate("usd", Some("2026-08-29")).await, found);
+        assert_eq!(asked(), 1);
+        // A day without a rate gets the latest one.
+        assert_eq!(rate("USD", Some("2031-01-01")).await, found);
+        assert_eq!(asked(), 3);
+        assert_eq!(rate("USD", None).await, found);
+        // A currency the service doesn't know, and something that isn't one.
+        assert_eq!(rate("XXX", Some("2026-08-29")).await, None);
+        assert_eq!(rate("../x", None).await, None);
+
+        // A relay without a rate service, like one from before them, suggests nothing.
+        let (plain, plain_dir) = start_relay().await;
+        let other = Device::signed_up(&plain, "bob").await;
+        assert_eq!(
+            suggested_rate(&other.state, "USD", "EUR", None)
+                .await
+                .unwrap(),
+            None
+        );
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(plain_dir);
+    }
+
     /// A relay that can be swapped for an empty one on the same address, as if its database
     /// had been lost.
     struct ReplaceableRelay {
@@ -1448,6 +1594,7 @@ mod end_to_end {
         ExpenseSplit {
             participant_id: id.to_string(),
             shares: 1,
+            fixed_cents: None,
         }
     }
 
@@ -1473,7 +1620,15 @@ mod end_to_end {
         // A group created on the laptop shows up on the phone.
         let flat = laptop.create("Flat", &["Alice", "Chris"]);
         laptop.edit(&trip.id, |d| {
-            doc::add_expense(d, "Taxi", 3000, alice.clone(), vec![split(&alice)], None)
+            doc::add_expense(
+                d,
+                "Taxi",
+                3000,
+                alice.clone(),
+                vec![split(&alice)],
+                None,
+                None,
+            )
         });
         laptop.sync().await;
         phone.sync().await;
@@ -1563,6 +1718,7 @@ mod end_to_end {
                 b.clone(),
                 vec![split(&a), split(&b)],
                 None,
+                None,
             )
         });
         bob.sync().await;
@@ -1575,6 +1731,7 @@ mod end_to_end {
                 6000,
                 a.clone(),
                 vec![split(&a), split(&b)],
+                None,
                 None,
             )
         });
@@ -1990,7 +2147,15 @@ mod end_to_end {
             trip.participants[1].id.clone(),
         );
         phone.edit(&trip.id, |d| {
-            doc::add_expense(d, "Taxi", 1200, a.clone(), vec![split(&a), split(&b)], None)
+            doc::add_expense(
+                d,
+                "Taxi",
+                1200,
+                a.clone(),
+                vec![split(&a), split(&b)],
+                None,
+                None,
+            )
         });
         phone.sync().await;
         laptop.sync().await;
@@ -2153,6 +2318,7 @@ mod end_to_end {
                 alice.clone(),
                 vec![split(&alice), split(&bob)],
                 None,
+                None,
             )
         });
         sync_group(&a.state, &gid).await.unwrap();
@@ -2177,6 +2343,7 @@ mod end_to_end {
                 alice.clone(),
                 vec![split(&alice), split(&bob)],
                 None,
+                None,
             )
         });
         b.edit(&gid, |d| {
@@ -2188,6 +2355,7 @@ mod end_to_end {
                 alice.clone(),
                 vec![split(&alice), split(&bob)],
                 None,
+                None,
             )
         });
         b.edit(&gid, |d| {
@@ -2197,6 +2365,7 @@ mod end_to_end {
                 3000,
                 bob.clone(),
                 vec![split(&alice), split(&bob)],
+                None,
                 None,
             )
         });
@@ -2453,7 +2622,15 @@ mod end_to_end {
             .set_sync(&trip.id, meta.clone())
             .unwrap();
         phone.edit(&trip.id, |d| {
-            doc::add_expense(d, "Taxi", 3000, alice.clone(), vec![split(&alice)], None)
+            doc::add_expense(
+                d,
+                "Taxi",
+                3000,
+                alice.clone(),
+                vec![split(&alice)],
+                None,
+                None,
+            )
         });
         leave_group(&laptop.state, &trip.id).await.unwrap();
         laptop.sync().await;

@@ -10,10 +10,10 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::models::{
-    AccountInfo, ExpenseSplit, Group, ParticipantBalance, PasswordStrength, SettlementTransfer,
-    SignedIn, SyncInfo,
+    AccountInfo, ExpenseSplit, Group, OriginalAmount, ParticipantBalance, PasswordStrength,
+    SettlementTransfer, SignedIn, SyncInfo,
 };
-use crate::{doc, engine, sync, AppState};
+use crate::{csv_file, doc, engine, sync, AppState};
 
 type Res<T> = Result<T, String>;
 
@@ -33,6 +33,28 @@ pub fn create_group(
     participants: &[String],
 ) -> Res<Group> {
     sync::create_group(state, name, currency, participants)
+}
+
+/// Creates a group from a CSV file's text, in the format `export_group_csv` writes. The user
+/// then says who they are in it.
+pub fn import_group_csv(state: &AppState, name: &str, csv: &str) -> Res<Group> {
+    sync::import_group(state, name, csv)
+}
+
+/// The group as a CSV file's text: a line per expense, a column per person.
+pub fn export_group_csv(state: &AppState, group_id: &str) -> Res<String> {
+    csv_file::export(&state.store().group(group_id)?)
+}
+
+/// The exchange rate to suggest for an expense paid in `from` on `date` (`YYYY-MM-DD`) in a
+/// group counting in `to`, from the account's relay. `None` when it has none.
+pub async fn suggest_exchange_rate(
+    state: &AppState,
+    from: &str,
+    to: &str,
+    date: Option<&str>,
+) -> Res<Option<String>> {
+    sync::suggested_rate(state, from, to, date).await
 }
 
 /// Removes the group from the account, on all the user's devices. Other members keep it.
@@ -64,6 +86,7 @@ pub fn rename_participant(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn add_expense(
     state: &AppState,
     group_id: &str,
@@ -72,9 +95,18 @@ pub fn add_expense(
     paid_by: String,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
+    original: Option<OriginalAmount>,
 ) -> Res<Group> {
     state.mutate(group_id, |d| {
-        doc::add_expense(d, title, amount_cents, paid_by, splits, created_at)
+        doc::add_expense(
+            d,
+            title,
+            amount_cents,
+            paid_by,
+            splits,
+            created_at,
+            original,
+        )
     })
 }
 
@@ -88,6 +120,7 @@ pub fn update_expense(
     paid_by: String,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
+    original: Option<OriginalAmount>,
 ) -> Res<Group> {
     state.mutate(group_id, |d| {
         doc::update_expense(
@@ -98,6 +131,7 @@ pub fn update_expense(
             paid_by,
             splits,
             created_at,
+            original,
         )
     })
 }
@@ -249,6 +283,17 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             &s("currency")?,
             &arg::<Vec<String>>(&args, "participants")?,
         )?),
+        "import_group_csv" => json(import_group_csv(state, &s("name")?, &s("csv")?)?),
+        "export_group_csv" => json(export_group_csv(state, &s("groupId")?)?),
+        "suggest_exchange_rate" => json(
+            suggest_exchange_rate(
+                state,
+                &s("from")?,
+                &s("to")?,
+                arg::<Option<String>>(&args, "date")?.as_deref(),
+            )
+            .await?,
+        ),
         "leave_group" => json(leave_group(state, &s("groupId")?).await?),
         "update_group" => json(update_group(
             state,
@@ -276,6 +321,7 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             s("paidBy")?,
             arg(&args, "splits")?,
             arg(&args, "createdAt")?,
+            arg(&args, "original")?,
         )?),
         "update_expense" => json(update_expense(
             state,
@@ -286,6 +332,7 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             s("paidBy")?,
             arg(&args, "splits")?,
             arg(&args, "createdAt")?,
+            arg(&args, "original")?,
         )?),
         "delete_expense" => json(delete_expense(state, &s("groupId")?, &s("expenseId")?)?),
         "record_reimbursement" => json(record_reimbursement(

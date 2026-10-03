@@ -5,6 +5,7 @@ export type {
   ExpenseSplit,
   Group,
   NativeFeatures,
+  OriginalAmount,
   Participant,
   ParticipantBalance,
   PasswordStrength,

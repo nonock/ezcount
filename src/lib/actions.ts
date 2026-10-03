@@ -3,7 +3,7 @@
 
 import { toast } from "svelte-sonner";
 import { api } from "@/services/api";
-import { ScanCancelled, scanQrCode } from "@/services/native.svelte";
+import { isAndroid, ScanCancelled, scanQrCode } from "@/services/native.svelte";
 import { errorMessage } from "@/utils/errors";
 import { askConfirm } from "./state/confirm.svelte";
 import { dialogs } from "./state/dialogs.svelte";
@@ -66,6 +66,45 @@ export async function joinGroup(inviteCode: string) {
   await groupList.refresh();
   navigation.open(group.id);
   toast.success(`Joined "${group.name}"`);
+}
+
+/** Creates a group from a CSV file, named after the file. The app then asks who the user is. */
+export async function importGroup(file: File) {
+  try {
+    const name = file.name.replace(/.csv$/i, "").trim() || "Imported group";
+    const group = await api.importGroupCsv(name, await file.text());
+    await groupList.refresh();
+    navigation.open(group.id);
+    toast.success(`Imported "${group.name}"`, {
+      description: `${group.expenses.length} records, ${group.participants.length} people`,
+    });
+  } catch (err) {
+    toast.error("Could not import the file", { description: errorMessage(err) });
+  }
+}
+
+/** Saves the open group as a CSV file; on Android, hands it to the share sheet. */
+export async function exportGroup() {
+  const group = openGroup.group;
+  if (!group) return;
+  try {
+    const csv = await api.exportGroupCsv(group.id);
+    const fileName = `${group.name.replace(/[/:*?"<>|]/g, "_")}.csv`;
+    if (isAndroid) {
+      // Android's web view can't download what the page makes.
+      await api.shareText(csv, fileName);
+      return;
+    }
+    // The byte order mark makes Excel read the accents right.
+    const url = URL.createObjectURL(new Blob(["﻿", csv], { type: "text/csv" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    toast.error("Could not export the group", { description: errorMessage(err) });
+  }
 }
 
 /**

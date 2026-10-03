@@ -5,7 +5,13 @@
 //! - `meta` (map): `id`, `name`, `currency`, `created_at`
 //! - `participants` (map): participant id -> map { `name`, `removed`, `position` }
 //! - `expenses` (map): expense id -> map { `title`, `amount_cents`, `paid_by`, `splits`,
-//!   `created_at`, `updated_at`, `is_reimbursement`, `history` (list) }
+//!   `created_at`, `updated_at`, `is_reimbursement`, `history` (list), `original` }
+//!
+//! `amount_cents` is always in the group's currency. An expense paid in another one also has
+//! `original` (a plain value: `currency`, `amount_cents`, `rate`). A split is a number of
+//! `shares`, or a fixed amount in the currency paid, the shares dividing what the fixed
+//! amounts leave. App versions from before fixed amounts read only `shares`, so with fixed
+//! amounts that field holds shares giving everyone the same amount (see `splits_value`).
 //!
 //! Every field is its own last-writer-wins register, so concurrent edits to different fields
 //! of one expense both survive a merge. `splits` is stored as a single plain value so an
@@ -20,12 +26,16 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-use crate::models::{Expense, ExpenseHistoryEntry, ExpenseSplit, Group, Participant};
+use crate::engine;
+use crate::models::{
+    Expense, ExpenseHistoryEntry, ExpenseSplit, Group, OriginalAmount, Participant,
+};
 
 const META: &str = "meta";
 const PARTICIPANTS: &str = "participants";
 const EXPENSES: &str = "expenses";
 const HISTORY: &str = "history";
+const ORIGINAL: &str = "original";
 
 /// Largest amount of one expense: ten trillion units, enough for any currency, and small
 /// enough that JavaScript numbers hold it exactly.
@@ -53,26 +63,96 @@ fn map_value<const N: usize>(entries: [(&str, LoroValue); N]) -> LoroValue {
     LoroValue::Map(map.into())
 }
 
-fn splits_value(splits: &[ExpenseSplit]) -> LoroValue {
+/// Shares that split an amount into `owed`, for app versions from before fixed amounts:
+/// they read only `shares`, and still get everyone's balance right.
+fn legacy_shares(owed: &[i64]) -> Vec<u32> {
+    // Someone owing nothing still needs a share to be read, so nothing is simplified then:
+    // one share in a total counted in cents is the smallest error.
+    let divisor = if owed.contains(&0) {
+        1
+    } else {
+        owed.iter().fold(0, |a, b| gcd(a, *b)).max(1)
+    };
+    let mut shares: Vec<i64> = owed.iter().map(|o| (o / divisor).max(1)).collect();
+    while shares.iter().any(|s| *s > i64::from(u32::MAX)) {
+        shares = shares.iter().map(|s| (s / 2).max(1)).collect();
+    }
+    shares.into_iter().map(|s| s as u32).collect()
+}
+
+fn gcd(a: i64, b: i64) -> i64 {
+    if b == 0 {
+        a
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+/// With fixed amounts, each split says what it is in `parts` and `fixed_cents`, and `shares`
+/// holds `legacy_shares`. Without, a split is only its `shares`, as it always was.
+fn splits_value(
+    amount_cents: i64,
+    original: Option<&OriginalAmount>,
+    splits: &[ExpenseSplit],
+) -> LoroValue {
+    let legacy = splits.iter().any(|s| s.fixed_cents.is_some()).then(|| {
+        legacy_shares(&engine::owed(
+            amount_cents,
+            original.map(|o| o.amount_cents),
+            splits,
+        ))
+    });
     let list: Vec<LoroValue> = splits
         .iter()
-        .map(|s| {
-            map_value([
-                ("participant_id", s.participant_id.as_str().into()),
-                ("shares", i64::from(s.shares).into()),
-            ])
+        .enumerate()
+        .map(|(i, s)| {
+            let mut fields = HashMap::from([
+                (
+                    "participant_id".to_string(),
+                    s.participant_id.as_str().into(),
+                ),
+                ("shares".to_string(), i64::from(s.shares).into()),
+            ]);
+            if let Some(legacy) = &legacy {
+                fields.insert("shares".to_string(), i64::from(legacy[i]).into());
+                fields.insert("parts".to_string(), i64::from(s.shares).into());
+            }
+            if let Some(fixed) = s.fixed_cents {
+                fields.insert("fixed_cents".to_string(), fixed.into());
+            }
+            LoroValue::Map(fields.into())
         })
         .collect();
     LoroValue::List(list.into())
 }
 
+fn original_value(original: &OriginalAmount) -> LoroValue {
+    map_value([
+        ("currency", original.currency.as_str().into()),
+        ("amount_cents", original.amount_cents.into()),
+        ("rate", original.rate.as_str().into()),
+    ])
+}
+
 fn history_value(entry: &ExpenseHistoryEntry) -> LoroValue {
+    let previous_original = entry.previous_original.as_ref();
     map_value([
         ("edited_at", timestamp(entry.edited_at).into()),
         ("previous_title", entry.previous_title.as_str().into()),
         ("previous_amount_cents", entry.previous_amount_cents.into()),
         ("previous_paid_by", entry.previous_paid_by.as_str().into()),
-        ("previous_splits", splits_value(&entry.previous_splits)),
+        (
+            "previous_splits",
+            splits_value(
+                entry.previous_amount_cents,
+                previous_original,
+                &entry.previous_splits,
+            ),
+        ),
+        (
+            "previous_original",
+            previous_original.map_or(LoroValue::Null, original_value),
+        ),
         ("summary", entry.summary.as_str().into()),
     ])
 }
@@ -114,18 +194,73 @@ struct DocParticipant {
     position: i64,
 }
 
+/// A split as stored (see `splits_value`).
+#[derive(Deserialize)]
+struct DocSplit {
+    participant_id: String,
+    shares: u32,
+    #[serde(default)]
+    parts: Option<u32>,
+    #[serde(default)]
+    fixed_cents: Option<i64>,
+}
+
+/// `legacy` reads only what app versions from before fixed amounts do.
+fn read_splits(splits: &[DocSplit], legacy: bool) -> Vec<ExpenseSplit> {
+    splits
+        .iter()
+        .map(|s| ExpenseSplit {
+            participant_id: s.participant_id.clone(),
+            shares: if legacy {
+                s.shares
+            } else {
+                s.parts.unwrap_or(s.shares)
+            },
+            fixed_cents: s.fixed_cents.filter(|_| !legacy),
+        })
+        .collect()
+}
+
+#[derive(Deserialize)]
+struct DocHistoryEntry {
+    edited_at: DateTime<Utc>,
+    previous_title: String,
+    previous_amount_cents: i64,
+    previous_paid_by: String,
+    previous_splits: Vec<DocSplit>,
+    #[serde(default)]
+    previous_original: Option<OriginalAmount>,
+    summary: String,
+}
+
 #[derive(Deserialize)]
 struct DocExpense {
     title: String,
     amount_cents: i64,
+    #[serde(default)]
+    original: Option<OriginalAmount>,
     paid_by: String,
-    splits: Vec<ExpenseSplit>,
+    splits: Vec<DocSplit>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     #[serde(default)]
     is_reimbursement: bool,
     #[serde(default)]
-    history: Vec<ExpenseHistoryEntry>,
+    history: Vec<DocHistoryEntry>,
+}
+
+impl DocExpense {
+    /// The splits, checked. An older app version changes the amount without the splits; if
+    /// the fixed amounts no longer fit it, the shares that version reads are used.
+    fn checked_splits(&self) -> Res<Vec<ExpenseSplit>> {
+        let splits = read_splits(&self.splits, false);
+        if check_amounts(self.amount_cents, self.original.as_ref(), &splits).is_ok() {
+            return Ok(splits);
+        }
+        let splits = read_splits(&self.splits, true);
+        check_amounts(self.amount_cents, self.original.as_ref(), &splits)?;
+        Ok(splits)
+    }
 }
 
 // Documents are read value by value with a depth bound rather than through
@@ -237,24 +372,42 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
     let mut expenses: Vec<Expense> = entries::<DocExpense>(&doc.get_map(EXPENSES), EXPENSES)
         .into_iter()
         // Synced edits skip `validate_expense`, and the balance engine relies on these.
-        .filter(|(id, e)| match check_amounts(e.amount_cents, &e.splits) {
-            Ok(()) => true,
-            Err(err) => {
-                eprintln!("[doc] skipping expense {id}: {err}");
-                false
-            }
-        })
-        .map(|(id, e)| Expense {
-            id,
-            group_id: meta.id.clone(),
-            title: e.title,
-            amount_cents: e.amount_cents,
-            paid_by: e.paid_by,
-            splits: e.splits,
-            created_at: e.created_at,
-            updated_at: e.updated_at,
-            history: e.history,
-            is_reimbursement: e.is_reimbursement,
+        .filter_map(|(id, mut e)| {
+            // What the expense cost elsewhere is a note next to its amount: unusable, it is
+            // left out rather than taking the expense with it.
+            e.original = e.original.filter(|o| check_original(o).is_ok());
+            let splits = match e.checked_splits() {
+                Ok(splits) => splits,
+                Err(err) => {
+                    eprintln!("[doc] skipping expense {id}: {err}");
+                    return None;
+                }
+            };
+            Some(Expense {
+                id,
+                group_id: meta.id.clone(),
+                title: e.title,
+                amount_cents: e.amount_cents,
+                original: e.original,
+                paid_by: e.paid_by,
+                splits,
+                created_at: e.created_at,
+                updated_at: e.updated_at,
+                history: e
+                    .history
+                    .into_iter()
+                    .map(|h| ExpenseHistoryEntry {
+                        edited_at: h.edited_at,
+                        previous_title: h.previous_title,
+                        previous_amount_cents: h.previous_amount_cents,
+                        previous_paid_by: h.previous_paid_by,
+                        previous_splits: read_splits(&h.previous_splits, false),
+                        previous_original: h.previous_original,
+                        summary: h.summary,
+                    })
+                    .collect(),
+                is_reimbursement: e.is_reimbursement,
+            })
         })
         .collect();
     expenses.sort_by(|a, b| {
@@ -315,8 +468,16 @@ fn insert_expense(doc: &LoroDoc, expense: &Expense) -> Res<()> {
         .map_err(doc_err)?;
     e.insert("paid_by", expense.paid_by.as_str())
         .map_err(doc_err)?;
-    e.insert("splits", splits_value(&expense.splits))
-        .map_err(doc_err)?;
+    let original = expense.original.as_ref();
+    if let Some(original) = original {
+        e.insert(ORIGINAL, original_value(original))
+            .map_err(doc_err)?;
+    }
+    e.insert(
+        "splits",
+        splits_value(expense.amount_cents, original, &expense.splits),
+    )
+    .map_err(doc_err)?;
     e.insert("created_at", timestamp(expense.created_at))
         .map_err(doc_err)?;
     e.insert("updated_at", timestamp(expense.updated_at))
@@ -372,6 +533,84 @@ pub fn new_group_doc(name: &str, currency: &str, participant_names: &[String]) -
     Ok(doc)
 }
 
+/// An expense read from a file, before the group exists: people are positions in the
+/// imported list of names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedExpense {
+    pub title: String,
+    pub amount_cents: i64,
+    pub paid_by: usize,
+    pub original: Option<OriginalAmount>,
+    // (person, shares, fixed amount), as in `ExpenseSplit`
+    pub splits: Vec<(usize, u32, Option<i64>)>,
+    pub created_at: DateTime<Utc>,
+    pub is_reimbursement: bool,
+}
+
+/// Creates the document for a group read from a file, with its expenses.
+pub fn imported_group_doc(
+    name: &str,
+    currency: &str,
+    participant_names: &[String],
+    expenses: &[ImportedExpense],
+) -> Res<LoroDoc> {
+    let doc = new_group_doc(name, currency, participant_names)?;
+    let group = read_group(&doc)?;
+    // `new_group_doc` skips blank names, which would shift the positions.
+    if group.participants.len() != participant_names.len() {
+        return Err("Participant name cannot be empty".to_string());
+    }
+    let id = |position: usize| {
+        group
+            .participants
+            .get(position)
+            .map(|p| p.id.clone())
+            .ok_or_else(|| "Participant not found".to_string())
+    };
+    let now = Utc::now();
+    for e in expenses {
+        let splits = e
+            .splits
+            .iter()
+            .map(|(position, shares, fixed_cents)| {
+                Ok(ExpenseSplit {
+                    participant_id: id(*position)?,
+                    shares: *shares,
+                    fixed_cents: *fixed_cents,
+                })
+            })
+            .collect::<Res<Vec<_>>>()?;
+        let paid_by = id(e.paid_by)?;
+        let original = normal_original(&group, e.original.clone())?;
+        validate_expense(
+            &group,
+            e.amount_cents,
+            original.as_ref(),
+            &paid_by,
+            &splits,
+            &HashSet::new(),
+        )?;
+        insert_expense(
+            &doc,
+            &Expense {
+                id: Uuid::new_v4().to_string(),
+                group_id: group.id.clone(),
+                title: e.title.trim().to_string(),
+                amount_cents: e.amount_cents,
+                original,
+                paid_by,
+                splits,
+                created_at: e.created_at,
+                updated_at: now,
+                history: Vec::new(),
+                is_reimbursement: e.is_reimbursement,
+            },
+        )?;
+    }
+    doc.commit();
+    Ok(doc)
+}
+
 /// Converts a group from the old JSON file, keeping every ID so saved preferences
 /// (such as "viewing as") still match.
 pub fn doc_from_legacy(group: &Group) -> Res<LoroDoc> {
@@ -411,7 +650,7 @@ pub fn update_group(doc: &LoroDoc, name: &str, currency: &str) -> Res<()> {
 }
 
 /// The title `record_reimbursement` gives a payment, before any notes.
-fn payment_title(from_name: &str, to_name: &str) -> String {
+pub(crate) fn payment_title(from_name: &str, to_name: &str) -> String {
     format!("Payment: {from_name} → {to_name}")
 }
 
@@ -497,13 +736,91 @@ fn check_amount(amount_cents: i64) -> Res<()> {
     Ok(())
 }
 
-fn check_amounts(amount_cents: i64, splits: &[ExpenseSplit]) -> Res<()> {
+/// An exchange rate as stored: a positive decimal number with a point, such as "0.9234".
+pub(crate) fn exchange_rate(rate: &str) -> Res<String> {
+    let rate = rate.trim().replace(',', ".");
+    let (whole, decimals) = rate.split_once('.').unwrap_or((&rate, ""));
+    let digits = |s: &str| s.chars().all(|c| c.is_ascii_digit());
+    if rate.len() > 20
+        || !digits(whole)
+        || !digits(decimals)
+        || !rate.chars().any(|c| matches!(c, '1'..='9'))
+    {
+        return Err("The exchange rate must be a number above zero, such as 0.92".to_string());
+    }
+    Ok(rate)
+}
+
+fn check_original(original: &OriginalAmount) -> Res<()> {
+    check_amount(original.amount_cents)?;
+    if currency_code(&original.currency)? != original.currency
+        || exchange_rate(&original.rate)? != original.rate
+    {
+        return Err("The expense's currency or exchange rate is not valid".to_string());
+    }
+    Ok(())
+}
+
+/// What the user typed for an expense in another currency, as stored. An expense in the
+/// group's own currency has no original amount.
+fn normal_original(group: &Group, original: Option<OriginalAmount>) -> Res<Option<OriginalAmount>> {
+    let Some(original) = original else {
+        return Ok(None);
+    };
+    let currency = currency_code(&original.currency)?;
+    if currency == group.currency {
+        return Err(format!(
+            "The group is in {currency} already: leave out the exchange rate"
+        ));
+    }
+    check_amount(original.amount_cents)?;
+    Ok(Some(OriginalAmount {
+        currency,
+        amount_cents: original.amount_cents,
+        rate: exchange_rate(&original.rate)?,
+    }))
+}
+
+fn money(cents: i128) -> String {
+    format!("{}.{:02}", cents / 100, cents % 100)
+}
+
+/// `original` is taken as checked. Fixed amounts are in its currency when there is one.
+pub(crate) fn check_amounts(
+    amount_cents: i64,
+    original: Option<&OriginalAmount>,
+    splits: &[ExpenseSplit],
+) -> Res<()> {
     check_amount(amount_cents)?;
     if splits.is_empty() {
         return Err("Expense must be split among at least one participant".to_string());
     }
-    if splits.iter().any(|s| s.shares == 0) {
-        return Err("Shares must be at least 1".to_string());
+    let mut fixed: i128 = 0;
+    let mut parts = false;
+    for s in splits {
+        match s.fixed_cents {
+            Some(amount) if amount > 0 && amount <= MAX_AMOUNT_CENTS && s.shares == 0 => {
+                fixed += i128::from(amount);
+            }
+            Some(_) => return Err("A fixed amount must be above zero".to_string()),
+            None if s.shares == 0 => return Err("Shares must be at least 1".to_string()),
+            None => parts = true,
+        }
+    }
+    let paid = i128::from(original.map_or(amount_cents, |o| o.amount_cents));
+    if fixed > paid {
+        return Err(format!(
+            "The fixed amounts add up to {}, more than the expense's {}",
+            money(fixed),
+            money(paid)
+        ));
+    }
+    if !parts && fixed != paid {
+        return Err(format!(
+            "The amounts add up to {}, not the expense's {}",
+            money(fixed),
+            money(paid)
+        ));
     }
     Ok(())
 }
@@ -513,11 +830,12 @@ fn check_amounts(amount_cents: i64, splits: &[ExpenseSplit]) -> Res<()> {
 fn validate_expense(
     group: &Group,
     amount_cents: i64,
+    original: Option<&OriginalAmount>,
     paid_by: &str,
     splits: &[ExpenseSplit],
     grandfathered: &HashSet<&str>,
 ) -> Res<()> {
-    check_amounts(amount_cents, splits)?;
+    check_amounts(amount_cents, original, splits)?;
     let mut seen = HashSet::new();
     if !splits
         .iter()
@@ -549,9 +867,18 @@ pub fn add_expense(
     paid_by: String,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
+    original: Option<OriginalAmount>,
 ) -> Res<()> {
     let group = read_group(doc)?;
-    validate_expense(&group, amount_cents, &paid_by, &splits, &HashSet::new())?;
+    let original = normal_original(&group, original)?;
+    validate_expense(
+        &group,
+        amount_cents,
+        original.as_ref(),
+        &paid_by,
+        &splits,
+        &HashSet::new(),
+    )?;
     let now = Utc::now();
     insert_expense(
         doc,
@@ -560,6 +887,7 @@ pub fn add_expense(
             group_id: group.id,
             title: title.trim().to_string(),
             amount_cents,
+            original,
             paid_by,
             splits,
             created_at: created_at.unwrap_or(now),
@@ -579,6 +907,7 @@ pub fn update_expense(
     paid_by: String,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
+    original: Option<OriginalAmount>,
 ) -> Res<()> {
     let group = read_group(doc)?;
     let expense = group
@@ -589,7 +918,15 @@ pub fn update_expense(
     let grandfathered: HashSet<&str> = std::iter::once(expense.paid_by.as_str())
         .chain(expense.splits.iter().map(|s| s.participant_id.as_str()))
         .collect();
-    validate_expense(&group, amount_cents, &paid_by, &splits, &grandfathered)?;
+    let original = normal_original(&group, original)?;
+    validate_expense(
+        &group,
+        amount_cents,
+        original.as_ref(),
+        &paid_by,
+        &splits,
+        &grandfathered,
+    )?;
 
     let name_of = |id: &str| {
         group
@@ -633,10 +970,41 @@ pub fn update_expense(
             .insert("paid_by", paid_by.as_str())
             .map_err(doc_err)?;
     }
+    if expense.original != original {
+        let describe = |o: &Option<OriginalAmount>| match o {
+            Some(o) => format!(
+                "{} {} at {}",
+                money(i128::from(o.amount_cents)),
+                o.currency,
+                o.rate
+            ),
+            None => group.currency.clone(),
+        };
+        changes.push(format!(
+            "Paid in {} instead of {}",
+            describe(&original),
+            describe(&expense.original)
+        ));
+        match &original {
+            Some(original) => target.insert(ORIGINAL, original_value(original)),
+            None => target.delete(ORIGINAL),
+        }
+        .map_err(doc_err)?;
+    }
     if expense.splits != splits {
         changes.push("Participants / parts allocation updated".to_string());
+    }
+    // With fixed amounts, the stored splits also depend on the amounts (see `splits_value`).
+    let fixed = |splits: &[ExpenseSplit]| splits.iter().any(|s| s.fixed_cents.is_some());
+    if expense.splits != splits
+        || (fixed(&splits)
+            && (expense.amount_cents != amount_cents || expense.original != original))
+    {
         target
-            .insert("splits", splits_value(&splits))
+            .insert(
+                "splits",
+                splits_value(amount_cents, original.as_ref(), &splits),
+            )
             .map_err(doc_err)?;
     }
     if let Some(new_created_at) = created_at {
@@ -664,6 +1032,7 @@ pub fn update_expense(
         previous_amount_cents: expense.amount_cents,
         previous_paid_by: expense.paid_by.clone(),
         previous_splits: expense.splits.clone(),
+        previous_original: expense.original.clone(),
         summary,
     };
     child_list(&target, HISTORY)?
@@ -730,11 +1099,13 @@ pub fn record_reimbursement(
             splits: vec![ExpenseSplit {
                 participant_id: to_id,
                 shares: 1,
+                fixed_cents: None,
             }],
             created_at: now,
             updated_at: now,
             history: Vec::new(),
             is_reimbursement: true,
+            original: None,
         },
     )
 }
@@ -748,6 +1119,7 @@ mod tests {
         ExpenseSplit {
             participant_id: id.to_string(),
             shares,
+            fixed_cents: None,
         }
     }
 
@@ -781,6 +1153,157 @@ mod tests {
         assert_eq!(names, ["Alice", "Bob"], "blank names dropped, order kept");
     }
 
+    fn fixed(id: &str, amount: i64) -> ExpenseSplit {
+        ExpenseSplit {
+            participant_id: id.to_string(),
+            shares: 0,
+            fixed_cents: Some(amount),
+        }
+    }
+
+    fn net(doc: &LoroDoc, id: &str) -> i64 {
+        engine::calculate_balances(&read_group(doc).unwrap())
+            .into_iter()
+            .find(|b| b.participant_id == id)
+            .unwrap()
+            .net_cents
+    }
+
+    /// The splits as an app version from before fixed amounts reads them.
+    fn legacy_splits(doc: &LoroDoc) -> Vec<ExpenseSplit> {
+        entries::<DocExpense>(&doc.get_map(EXPENSES), EXPENSES)
+            .into_iter()
+            .flat_map(|(_, e)| read_splits(&e.splits, true))
+            .collect()
+    }
+
+    #[test]
+    fn fixed_amounts_and_another_currency() {
+        let (doc, g) = sample();
+        let (alice, bob) = (&g.participants[0].id, &g.participants[1].id);
+        let usd = |amount_cents: i64, rate: &str| {
+            Some(OriginalAmount {
+                currency: "usd".to_string(),
+                amount_cents,
+                rate: rate.to_string(),
+            })
+        };
+        let add = |amount: i64, splits: Vec<ExpenseSplit>, original| {
+            add_expense(&doc, "Taxi", amount, alice.clone(), splits, None, original)
+        };
+
+        // Bob owes 12.50, Alice the rest.
+        add(3000, vec![split(alice, 1), fixed(bob, 1250)], None).unwrap();
+        assert_eq!(net(&doc, bob), -1250);
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+        assert_eq!(e.splits, [split(alice, 1), fixed(bob, 1250)]);
+        // An older app reads plain shares that give the same amounts.
+        assert_eq!(legacy_splits(&doc), [split(alice, 7), split(bob, 5)]);
+
+        // Changing the amount keeps the fixed part, and what the older app reads follows.
+        update_expense(
+            &doc,
+            &e.id,
+            "Taxi",
+            2500,
+            alice.clone(),
+            e.splits.clone(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(net(&doc, bob), -1250);
+        assert_eq!(legacy_splits(&doc), [split(alice, 1), split(bob, 1)]);
+
+        // An older app changes the amount alone. The fixed part no longer fits in 10.00, so
+        // the shares it reads are used here too.
+        child_map(&doc.get_map(EXPENSES), &e.id)
+            .unwrap()
+            .insert("amount_cents", 1000)
+            .unwrap();
+        assert_eq!(
+            read_group(&doc).unwrap().expenses[0].splits,
+            [split(alice, 1), split(bob, 1)]
+        );
+        delete_expense(&doc, &e.id).unwrap();
+
+        // 50.00 USD at 0.9234: Bob owes 20.00 USD of it, which is 18.47 of the 46.17.
+        add(
+            4617,
+            vec![split(alice, 1), fixed(bob, 2000)],
+            usd(5000, " 0,9234 "),
+        )
+        .unwrap();
+        assert_eq!(net(&doc, bob), -1847);
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+        assert_eq!(
+            e.original,
+            usd(5000, "0.9234").map(|o| OriginalAmount {
+                currency: "USD".to_string(),
+                ..o
+            })
+        );
+        // Back to the group's currency: recorded in the history.
+        update_expense(
+            &doc,
+            &e.id,
+            "Taxi",
+            4617,
+            alice.clone(),
+            vec![split(alice, 1), split(bob, 1)],
+            None,
+            None,
+        )
+        .unwrap();
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+        assert_eq!(e.original, None);
+        assert_eq!(
+            e.history[0].previous_original,
+            usd(5000, "0.9234").map(|o| OriginalAmount {
+                currency: "USD".to_string(),
+                ..o
+            })
+        );
+        assert_eq!(
+            e.history[0].previous_splits,
+            [split(alice, 1), fixed(bob, 2000)]
+        );
+        assert!(e.history[0]
+            .summary
+            .contains("Paid in EUR instead of 50.00 USD at 0.9234"));
+
+        let both = || vec![fixed(alice, 1000), fixed(bob, 1250)];
+        assert_eq!(
+            add(3000, both(), None).unwrap_err(),
+            "The amounts add up to 22.50, not the expense's 30.00"
+        );
+        assert_eq!(
+            add(2000, vec![split(alice, 1), fixed(bob, 2500)], None).unwrap_err(),
+            "The fixed amounts add up to 25.00, more than the expense's 20.00"
+        );
+        assert_eq!(
+            add(2000, vec![split(alice, 1), fixed(bob, 0)], None).unwrap_err(),
+            "A fixed amount must be above zero"
+        );
+        assert_eq!(
+            add(2000, vec![split(alice, 1)], usd(2200, "0")).unwrap_err(),
+            "The exchange rate must be a number above zero, such as 0.92"
+        );
+        assert_eq!(
+            add(
+                2000,
+                vec![split(alice, 1)],
+                Some(OriginalAmount {
+                    currency: "EUR".to_string(),
+                    amount_cents: 2000,
+                    rate: "1".to_string(),
+                })
+            )
+            .unwrap_err(),
+            "The group is in EUR already: leave out the exchange rate"
+        );
+    }
+
     #[test]
     fn expense_edit_records_history() {
         let (doc, g) = sample();
@@ -791,6 +1314,7 @@ mod tests {
             3000,
             alice.clone(),
             vec![split(alice, 1), split(bob, 1)],
+            None,
             None,
         )
         .unwrap();
@@ -803,6 +1327,7 @@ mod tests {
             4500,
             bob.clone(),
             vec![split(bob, 1)],
+            None,
             None,
         )
         .unwrap();
@@ -821,8 +1346,16 @@ mod tests {
     fn rejects_unknown_and_removed_participants() {
         let (doc, g) = sample();
         let (alice, bob) = (&g.participants[0].id, &g.participants[1].id);
-        let err =
-            add_expense(&doc, "X", 100, "ghost".into(), vec![split(alice, 1)], None).unwrap_err();
+        let err = add_expense(
+            &doc,
+            "X",
+            100,
+            "ghost".into(),
+            vec![split(alice, 1)],
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(err.contains("payer"));
 
         add_expense(
@@ -832,11 +1365,20 @@ mod tests {
             alice.clone(),
             vec![split(alice, 1), split(bob, 1)],
             None,
+            None,
         )
         .unwrap();
         remove_participant(&doc, bob).unwrap();
-        let err =
-            add_expense(&doc, "New", 100, alice.clone(), vec![split(bob, 1)], None).unwrap_err();
+        let err = add_expense(
+            &doc,
+            "New",
+            100,
+            alice.clone(),
+            vec![split(bob, 1)],
+            None,
+            None,
+        )
+        .unwrap_err();
         assert!(err.contains("not an active member"));
 
         // Editing an expense Bob was already on is still allowed.
@@ -849,6 +1391,7 @@ mod tests {
             alice.clone(),
             vec![split(alice, 1), split(bob, 1)],
             None,
+            None,
         )
         .unwrap();
 
@@ -860,7 +1403,16 @@ mod tests {
     fn concurrent_field_edits_both_survive() {
         let (a, g) = sample();
         let alice = &g.participants[0].id;
-        add_expense(&a, "Taxi", 1000, alice.clone(), vec![split(alice, 1)], None).unwrap();
+        add_expense(
+            &a,
+            "Taxi",
+            1000,
+            alice.clone(),
+            vec![split(alice, 1)],
+            None,
+            None,
+        )
+        .unwrap();
         a.commit();
         let b = fork(&a);
         let id = read_group(&a).unwrap().expenses[0].id.clone();
@@ -873,6 +1425,7 @@ mod tests {
             alice.clone(),
             vec![split(alice, 1)],
             None,
+            None,
         )
         .unwrap();
         update_expense(
@@ -882,6 +1435,7 @@ mod tests {
             1000,
             alice.clone(),
             vec![split(alice, 1)],
+            None,
             None,
         )
         .unwrap();
@@ -909,6 +1463,7 @@ mod tests {
             alice.clone(),
             vec![split(alice, 1)],
             None,
+            None,
         )
         .unwrap();
         add_participant(&b, "Charlie").unwrap();
@@ -932,6 +1487,7 @@ mod tests {
             1000,
             alice.clone(),
             vec![split(alice, 1)],
+            None,
             None,
         )
         .unwrap();
@@ -983,6 +1539,7 @@ mod tests {
             alice.clone(),
             vec![split(&bob, 1)],
             None,
+            None,
         )
         .unwrap();
         // A payment whose title someone rewrote keeps it.
@@ -1000,6 +1557,7 @@ mod tests {
             100,
             alice.clone(),
             custom.splits.clone(),
+            None,
             None,
         )
         .unwrap();
@@ -1035,6 +1593,7 @@ mod tests {
             alice.clone(),
             vec![split(alice, 1)],
             None,
+            None,
         )
         .unwrap();
         let original = read_group(&doc).unwrap();
@@ -1055,6 +1614,7 @@ mod tests {
             alice.clone(),
             vec![split(alice, 1)],
             None,
+            None,
         )
         .unwrap();
 
@@ -1071,6 +1631,7 @@ mod tests {
                 updated_at: now,
                 history: Vec::new(),
                 is_reimbursement: false,
+                original: None,
             };
             insert_expense(&doc, &expense).unwrap();
         };
@@ -1104,6 +1665,7 @@ mod tests {
             MAX_AMOUNT_CENTS + 1,
             alice.clone(),
             vec![split(alice, 1)],
+            None,
             None,
         )
         .unwrap_err();

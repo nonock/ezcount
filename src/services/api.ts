@@ -4,6 +4,7 @@ import type {
   ExpenseSplit,
   Group,
   NativeFeatures,
+  OriginalAmount,
   ParticipantBalance,
   PasswordStrength,
   SettlementTransfer,
@@ -27,6 +28,24 @@ export const api = {
 
   async createGroup(name: string, currency: string, participants: string[]): Promise<Group> {
     return unwrap(await commands.createGroup(name, currency, participants));
+  },
+
+  /** Creates a group from the text of a CSV file, as `exportGroupCsv` writes them. */
+  async importGroupCsv(name: string, csv: string): Promise<Group> {
+    return unwrap(await commands.importGroupCsv(name, csv));
+  },
+
+  /** The group as CSV text: a line per expense, a column per person. */
+  async exportGroupCsv(groupId: string): Promise<string> {
+    return unwrap(await commands.exportGroupCsv(groupId));
+  },
+
+  /**
+   * The relay's exchange rate from one currency to another on a day (`YYYY-MM-DD`), to
+   * suggest; null when it has none.
+   */
+  async suggestExchangeRate(from: string, to: string, date: string | null): Promise<string | null> {
+    return unwrap(await commands.suggestExchangeRate(from, to, date));
   },
 
   /** Removes the group from the account, on all the user's devices. */
@@ -53,10 +72,19 @@ export const api = {
     amountCents: number,
     paidBy: string,
     splits: ExpenseSplit[],
-    createdAt?: string | null
+    createdAt?: string | null,
+    original?: OriginalAmount | null
   ): Promise<Group> {
     return unwrap(
-      await commands.addExpense(groupId, title, amountCents, paidBy, splits, createdAt || null)
+      await commands.addExpense(
+        groupId,
+        title,
+        amountCents,
+        paidBy,
+        splits,
+        createdAt || null,
+        original ?? null
+      )
     );
   },
 
@@ -67,7 +95,8 @@ export const api = {
     amountCents: number,
     paidBy: string,
     splits: ExpenseSplit[],
-    createdAt?: string | null
+    createdAt?: string | null,
+    original?: OriginalAmount | null
   ): Promise<Group> {
     return unwrap(
       await commands.updateExpense(
@@ -77,7 +106,8 @@ export const api = {
         amountCents,
         paidBy,
         splits,
-        createdAt || null
+        createdAt || null,
+        original ?? null
       )
     );
   },

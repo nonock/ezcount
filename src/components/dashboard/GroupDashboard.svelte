@@ -1,5 +1,6 @@
 <script lang="ts">
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
+  import FileUpIcon from "@lucide/svelte/icons/file-up";
   import LinkIcon from "@lucide/svelte/icons/link";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import UsersIcon from "@lucide/svelte/icons/users";
@@ -8,6 +9,7 @@
   import { Button } from "@/components/ui/button";
   import * as Card from "@/components/ui/card";
   import * as Empty from "@/components/ui/empty";
+  import { importGroup } from "@/lib/actions";
   import type { Group } from "@/types";
 
   interface Props {
@@ -18,7 +20,26 @@
   }
 
   let { groups, onSelectGroup, onOpenCreateGroup, onOpenJoinGroup }: Props = $props();
+
+  let fileInput = $state<HTMLInputElement>();
+
+  function importChosenFile() {
+    const file = fileInput?.files?.[0];
+    if (!fileInput || !file) return;
+    // So choosing the same file again, once fixed, is a change too.
+    fileInput.value = "";
+    importGroup(file);
+  }
 </script>
+
+<input
+  bind:this={fileInput}
+  type="file"
+  accept=".csv,text/csv"
+  class="hidden"
+  aria-label="CSV file to import"
+  onchange={importChosenFile}
+/>
 
 {#if groups.length === 0}
   <Empty.Root class="border border-dashed py-16">
@@ -30,7 +51,7 @@
         join one a friend shared with you.
       </Empty.Description>
     </Empty.Header>
-    <Empty.Content class="flex-row justify-center gap-2">
+    <Empty.Content class="flex-row flex-wrap justify-center gap-2">
       <Button onclick={onOpenCreateGroup}>
         <PlusIcon data-icon="inline-start" />
         Create Group
@@ -38,6 +59,10 @@
       <Button variant="outline" onclick={onOpenJoinGroup}>
         <LinkIcon data-icon="inline-start" />
         Join with Code
+      </Button>
+      <Button variant="outline" onclick={() => fileInput?.click()}>
+        <FileUpIcon data-icon="inline-start" />
+        Import CSV
       </Button>
     </Empty.Content>
   </Empty.Root>
@@ -51,10 +76,16 @@
           active {groups.length === 1 ? "group" : "groups"}
         </p>
       </div>
-      <Button variant="outline" onclick={onOpenJoinGroup}>
-        <LinkIcon data-icon="inline-start" />
-        Join with code
-      </Button>
+      <div class="flex flex-wrap gap-2">
+        <Button variant="outline" onclick={onOpenJoinGroup}>
+          <LinkIcon data-icon="inline-start" />
+          Join with code
+        </Button>
+        <Button variant="outline" onclick={() => fileInput?.click()}>
+          <FileUpIcon data-icon="inline-start" />
+          Import CSV
+        </Button>
+      </div>
     </div>
 
     <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

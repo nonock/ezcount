@@ -7,8 +7,8 @@ mod share;
 
 use chrono::{DateTime, Utc};
 use ezcount_core::models::{
-    AccountInfo, ExpenseSplit, Group, NativeFeatures, ParticipantBalance, PasswordStrength,
-    SettlementTransfer, SignedIn, SyncInfo,
+    AccountInfo, ExpenseSplit, Group, NativeFeatures, OriginalAmount, ParticipantBalance,
+    PasswordStrength, SettlementTransfer, SignedIn, SyncInfo,
 };
 use ezcount_core::storage::Store;
 use ezcount_core::{api, AppState};
@@ -39,6 +39,38 @@ fn create_group(
     participants: Vec<String>,
 ) -> Result<Group, String> {
     api::create_group(&state, &name, &currency, &participants)
+}
+
+/// Creates a group from a CSV file's text, in the format `export_group_csv` writes. The user
+/// then says who they are in it.
+#[tauri::command]
+#[specta::specta]
+async fn import_group_csv(
+    state: State<'_, AppState>,
+    name: String,
+    csv: String,
+) -> Result<Group, String> {
+    api::import_group_csv(&state, &name, &csv)
+}
+
+/// The group as a CSV file's text: a line per expense, a column per person.
+#[tauri::command]
+#[specta::specta]
+async fn export_group_csv(state: State<'_, AppState>, group_id: String) -> Result<String, String> {
+    api::export_group_csv(&state, &group_id)
+}
+
+/// The exchange rate to suggest for an expense paid in `from` on `date` (`YYYY-MM-DD`) in a
+/// group counting in `to`, from the account's relay. Null when it has none.
+#[tauri::command]
+#[specta::specta]
+async fn suggest_exchange_rate(
+    state: State<'_, AppState>,
+    from: String,
+    to: String,
+    date: Option<String>,
+) -> Result<Option<String>, String> {
+    api::suggest_exchange_rate(&state, &from, &to, date.as_deref()).await
 }
 
 /// Removes the group from the account, on all the user's devices. Other members keep it.
@@ -93,6 +125,7 @@ fn rename_participant(
 
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::too_many_arguments)]
 fn add_expense(
     state: State<AppState>,
     group_id: String,
@@ -101,6 +134,7 @@ fn add_expense(
     paid_by: String,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
+    original: Option<OriginalAmount>,
 ) -> Result<Group, String> {
     api::add_expense(
         &state,
@@ -110,6 +144,7 @@ fn add_expense(
         paid_by,
         splits,
         created_at,
+        original,
     )
 }
 
@@ -125,6 +160,7 @@ fn update_expense(
     paid_by: String,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
+    original: Option<OriginalAmount>,
 ) -> Result<Group, String> {
     api::update_expense(
         &state,
@@ -135,6 +171,7 @@ fn update_expense(
         paid_by,
         splits,
         created_at,
+        original,
     )
 }
 
@@ -325,6 +362,9 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         get_groups,
         get_group,
         create_group,
+        import_group_csv,
+        export_group_csv,
+        suggest_exchange_rate,
         leave_group,
         update_group,
         add_participant,

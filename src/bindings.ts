@@ -30,6 +30,41 @@ async createGroup(name: string, currency: string, participants: string[]) : Prom
 }
 },
 /**
+ * Creates a group from a CSV file's text, in the format `export_group_csv` writes. The user
+ * then says who they are in it.
+ */
+async importGroupCsv(name: string, csv: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("import_group_csv", { name, csv }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The group as a CSV file's text: a line per expense, a column per person.
+ */
+async exportGroupCsv(groupId: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("export_group_csv", { groupId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The exchange rate to suggest for an expense paid in `from` on `date` (`YYYY-MM-DD`) in a
+ * group counting in `to`, from the account's relay. Null when it has none.
+ */
+async suggestExchangeRate(from: string, to: string, date: string | null) : Promise<Result<string | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("suggest_exchange_rate", { from, to, date }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Removes the group from the account, on all the user's devices. Other members keep it.
  */
 async leaveGroup(groupId: string) : Promise<Result<null, string>> {
@@ -75,17 +110,17 @@ async removeParticipant(groupId: string, participantId: string) : Promise<Result
     else return { status: "error", error: e  as any };
 }
 },
-async addExpense(groupId: string, title: string, amountCents: number, paidBy: string, splits: ExpenseSplit[], createdAt: string | null) : Promise<Result<Group, string>> {
+async addExpense(groupId: string, title: string, amountCents: number, paidBy: string, splits: ExpenseSplit[], createdAt: string | null, original: OriginalAmount | null) : Promise<Result<Group, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("add_expense", { groupId, title, amountCents, paidBy, splits, createdAt }) };
+    return { status: "ok", data: await TAURI_INVOKE("add_expense", { groupId, title, amountCents, paidBy, splits, createdAt, original }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async updateExpense(groupId: string, expenseId: string, title: string, amountCents: number, paidBy: string, splits: ExpenseSplit[], createdAt: string | null) : Promise<Result<Group, string>> {
+async updateExpense(groupId: string, expenseId: string, title: string, amountCents: number, paidBy: string, splits: ExpenseSplit[], createdAt: string | null, original: OriginalAmount | null) : Promise<Result<Group, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("update_expense", { groupId, expenseId, title, amountCents, paidBy, splits, createdAt }) };
+    return { status: "ok", data: await TAURI_INVOKE("update_expense", { groupId, expenseId, title, amountCents, paidBy, splits, createdAt, original }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -278,11 +313,15 @@ async replaceRecoveryKey(password: string) : Promise<Result<string, string>> {
 /** user-defined types **/
 
 export type AccountInfo = { username: string; server_url: string; identities: { [key in string]: string } }
-export type Expense = { id: string; group_id: string; title: string; amount_cents: number; paid_by: string; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean }
-export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_splits: ExpenseSplit[]; summary: string }
-export type ExpenseSplit = { participant_id: string; shares: number }
+export type Expense = { id: string; group_id: string; title: string; amount_cents: number; original?: OriginalAmount | null; paid_by: string; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean }
+export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; summary: string }
+export type ExpenseSplit = { participant_id: string; shares: number; fixed_cents?: number | null }
 export type Group = { id: string; name: string; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string }
 export type NativeFeatures = { share: boolean; scan: boolean }
+/**
+ * What an expense paid in another currency than the group's cost there.
+ */
+export type OriginalAmount = { currency: string; amount_cents: number; rate: string }
 export type Participant = { id: string; name: string; removed?: boolean }
 export type ParticipantBalance = { participant_id: string; participant_name: string; paid_cents: number; owed_cents: number; net_cents: number; removed: boolean }
 export type PasswordStrength = { score: number; acceptable: boolean; warning: string | null; suggestions: string[] }

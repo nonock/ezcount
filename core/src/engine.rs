@@ -1,11 +1,78 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::models::{Group, Participant, ParticipantBalance, SettlementTransfer};
+use crate::models::{ExpenseSplit, Group, Participant, ParticipantBalance, SettlementTransfer};
 
 /// Totals are summed in `i128`, which no realistic number of expenses can overflow, and
 /// saturate into `i64` (symmetrically, so negating one is always safe).
 fn to_cents(total: i128) -> i64 {
     total.clamp(-i128::from(i64::MAX), i128::from(i64::MAX)) as i64
+}
+
+/// `amount_cents` divided in proportion to `weights`, in the same order: integer division,
+/// with the leftover cents given by the Largest Remainder Method. All zero without weights.
+fn split_weighted(amount_cents: i64, weights: &[i64]) -> Vec<i64> {
+    let amount = i128::from(amount_cents);
+    let total: i128 = weights.iter().map(|w| i128::from(*w)).sum();
+    if total <= 0 {
+        return vec![0; weights.len()];
+    }
+    let mut allocated: Vec<(i128, i128)> = weights
+        .iter()
+        .map(|w| {
+            let weight = i128::from(*w);
+            ((amount * weight) / total, (amount * weight) % total)
+        })
+        .collect();
+
+    let total_allocated: i128 = allocated.iter().map(|(base, _)| *base).sum();
+    // Below the number of splits for a positive amount; `read_group` drops the others.
+    let remainder_cents = usize::try_from(amount - total_allocated).unwrap_or(0);
+
+    // Sort indices by remainder descending to give leftover cents to highest fractional remainders
+    let mut order: Vec<usize> = (0..allocated.len()).collect();
+    order.sort_by(|&a, &b| allocated[b].1.cmp(&allocated[a].1));
+
+    for &idx in order.iter().take(remainder_cents) {
+        allocated[idx].0 += 1;
+    }
+    allocated
+        .into_iter()
+        .map(|(base, _)| to_cents(base))
+        .collect()
+}
+
+/// What each of `shares` owes of `amount_cents`, in the same order.
+pub fn split_amount(amount_cents: i64, shares: &[u32]) -> Vec<i64> {
+    let weights: Vec<i64> = shares.iter().map(|s| i64::from(*s)).collect();
+    split_weighted(amount_cents, &weights)
+}
+
+/// What each split owes of an expense, in the group's currency and in the same order.
+///
+/// Fixed amounts come first, and the parts share what is left. For an expense paid in another
+/// currency (`original_cents`), that happens in that currency, and `amount_cents` is then
+/// divided in the same proportions.
+pub fn owed(amount_cents: i64, original_cents: Option<i64>, splits: &[ExpenseSplit]) -> Vec<i64> {
+    let shares: Vec<u32> = splits.iter().map(|s| s.shares).collect();
+    if splits.iter().all(|s| s.fixed_cents.is_none()) {
+        return split_amount(amount_cents, &shares);
+    }
+    let paid = original_cents.unwrap_or(amount_cents);
+    let fixed: i128 = splits
+        .iter()
+        .filter_map(|s| s.fixed_cents)
+        .map(i128::from)
+        .sum();
+    let rest = to_cents((i128::from(paid) - fixed).max(0));
+    let there: Vec<i64> = splits
+        .iter()
+        .zip(split_amount(rest, &shares))
+        .map(|(s, part)| s.fixed_cents.unwrap_or(part))
+        .collect();
+    match original_cents {
+        Some(_) => split_weighted(amount_cents, &there),
+        None => there,
+    }
 }
 
 /// Calculates the detailed balance (paid, owed, net) for each participant in a group.
@@ -20,40 +87,16 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
     }
 
     for expense in &group.expenses {
-        let amount = i128::from(expense.amount_cents);
         // Payer is credited the full expense amount
-        *paid_map.entry(expense.paid_by.clone()).or_default() += amount;
+        *paid_map.entry(expense.paid_by.clone()).or_default() += i128::from(expense.amount_cents);
 
-        let total_shares: i128 = expense.splits.iter().map(|s| i128::from(s.shares)).sum();
-        if total_shares > 0 {
-            // Integer division with exact remainder distribution using Largest Remainder Method
-            let mut allocated: Vec<(i128, i128, usize)> = expense
-                .splits
-                .iter()
-                .enumerate()
-                .map(|(idx, s)| {
-                    let shares = i128::from(s.shares);
-                    let base = (amount * shares) / total_shares;
-                    let rem = (amount * shares) % total_shares;
-                    (base, rem, idx)
-                })
-                .collect();
-
-            let total_allocated: i128 = allocated.iter().map(|(base, _, _)| *base).sum();
-            // Below the number of splits for a positive amount; `read_group` drops the others.
-            let remainder_cents = usize::try_from(amount - total_allocated).unwrap_or(0);
-
-            // Sort indices by remainder descending to give leftover cents to highest fractional remainders
-            let mut order: Vec<usize> = (0..allocated.len()).collect();
-            order.sort_by(|&a, &b| allocated[b].1.cmp(&allocated[a].1));
-
-            for &idx in order.iter().take(remainder_cents) {
-                allocated[idx].0 += 1;
-            }
-
-            for (idx, s) in expense.splits.iter().enumerate() {
-                *owed_map.entry(s.participant_id.clone()).or_default() += allocated[idx].0;
-            }
+        let owed = owed(
+            expense.amount_cents,
+            expense.original.as_ref().map(|o| o.amount_cents),
+            &expense.splits,
+        );
+        for (s, owed) in expense.splits.iter().zip(owed) {
+            *owed_map.entry(s.participant_id.clone()).or_default() += i128::from(owed);
         }
     }
 
@@ -212,20 +255,24 @@ mod tests {
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
                 ExpenseSplit {
                     participant_id: "p2".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
                 ExpenseSplit {
                     participant_id: "p3".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
             ],
             created_at: Utc::now(),
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            original: None,
         });
         // Bob pays 30.00 for Alice & Bob
         group.expenses.push(Expense {
@@ -238,16 +285,19 @@ mod tests {
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
                 ExpenseSplit {
                     participant_id: "p2".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
             ],
             created_at: Utc::now(),
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            original: None,
         });
 
         let balances = calculate_balances(&group);
@@ -289,20 +339,24 @@ mod tests {
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
                 ExpenseSplit {
                     participant_id: "p2".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
                 ExpenseSplit {
                     participant_id: "p3".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
             ],
             created_at: Utc::now(),
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            original: None,
         });
 
         let balances = calculate_balances(&group);
@@ -327,16 +381,19 @@ mod tests {
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
                 ExpenseSplit {
                     participant_id: "p2".to_string(),
                     shares: 2,
+                    fixed_cents: None,
                 },
             ],
             created_at: Utc::now(),
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            original: None,
         });
 
         let balances = calculate_balances(&group);
@@ -375,20 +432,24 @@ mod tests {
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
                 ExpenseSplit {
                     participant_id: "p2".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
                 ExpenseSplit {
                     participant_id: "p3".to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 },
             ],
             created_at: Utc::now(),
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            original: None,
         });
 
         // Bob reimburses Alice 20.00
@@ -401,11 +462,13 @@ mod tests {
             splits: vec![ExpenseSplit {
                 participant_id: "p1".to_string(),
                 shares: 1,
+                fixed_cents: None,
             }],
             created_at: Utc::now(),
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: true,
+            original: None,
         });
 
         let balances = calculate_balances(&group);
@@ -437,12 +500,14 @@ mod tests {
                 .map(|p| ExpenseSplit {
                     participant_id: p.to_string(),
                     shares: 1,
+                    fixed_cents: None,
                 })
                 .collect(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            original: None,
         }
     }
 

@@ -53,7 +53,7 @@ async function addExpense(page: Page, title: string, amount: string) {
   await page.getByRole("button", { name: "Add Expense" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Description").fill(title);
-  await dialog.getByLabel("Amount").fill(amount);
+  await dialog.getByLabel("Amount", { exact: true }).fill(amount);
   await dialog.getByRole("button", { name: "Save Expense" }).click();
   await expect(dialog).not.toBeVisible();
 }

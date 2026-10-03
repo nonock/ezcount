@@ -6,6 +6,7 @@
 mod account;
 pub mod api;
 mod crypto;
+pub mod csv_file;
 pub mod doc;
 pub mod engine;
 pub mod models;

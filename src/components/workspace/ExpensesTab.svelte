@@ -16,6 +16,7 @@
   import * as Empty from "@/components/ui/empty";
   import * as Item from "@/components/ui/item";
   import { deleteExpense } from "@/lib/actions";
+  import { paidCurrency } from "@/lib/split";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { memberTone } from "@/lib/tones";
@@ -171,6 +172,7 @@
           {@const isReimbursement = Boolean(e.is_reimbursement)}
           {@const editCount = e.history?.length ?? 0}
           {@const totalShares = e.splits.reduce((sum, s) => sum + s.shares, 0)}
+          {@const anyFixed = e.splits.some((s) => s.fixed_cents != null)}
           <li data-testid="expense-item">
             <Item.Root variant="outline" class="items-start sm:items-center">
               <Item.Media>
@@ -226,7 +228,11 @@
                     {#each e.splits as s (s.participant_id)}
                       <li>
                         <Badge variant="secondary" class={memberTone(group, s.participant_id)}>
-                          {nameOf(s.participant_id)}{s.shares > 1 ? ` ×${s.shares}` : ""}
+                          {nameOf(s.participant_id)}{s.fixed_cents != null
+                            ? ` ${formatMoney(s.fixed_cents, paidCurrency(e, group.currency))}`
+                            : s.shares > 1
+                              ? ` ×${s.shares}`
+                              : ""}
                         </Badge>
                       </li>
                     {/each}
@@ -243,7 +249,11 @@
                     tone={isReimbursement ? "positive" : "neutral"}
                     class="block font-semibold"
                   />
-                  {#if !isReimbursement}
+                  {#if e.original}
+                    <span class="block text-xs text-muted-foreground tabular-nums">
+                      {formatMoney(e.original.amount_cents, e.original.currency)}
+                    </span>
+                  {:else if !isReimbursement && !anyFixed}
                     <span class="block text-xs text-muted-foreground tabular-nums">
                       {formatMoney(Math.floor(e.amount_cents / (totalShares || 1)), group.currency)}
                       / part
