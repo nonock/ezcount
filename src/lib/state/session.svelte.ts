@@ -22,6 +22,11 @@ class Session {
     return this.account?.display_name ?? this.account?.username ?? "";
   }
 
+  /** Whether the user put this group away. */
+  isArchived(groupId: string): boolean {
+    return this.account?.archived?.includes(groupId) ?? false;
+  }
+
   /** Which participant the user is in a group, if they said. */
   identityIn(groupId: string): string | null {
     return this.account?.identities[groupId] ?? null;

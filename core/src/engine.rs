@@ -268,6 +268,8 @@ mod tests {
                 },
             ],
             expenses: vec![],
+            deleted: false,
+            deletion_votes: vec![],
         }
     }
 

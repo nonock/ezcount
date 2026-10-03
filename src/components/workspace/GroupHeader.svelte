@@ -1,8 +1,11 @@
 <script lang="ts">
+  import ArchiveIcon from "@lucide/svelte/icons/archive";
+  import ArchiveRestoreIcon from "@lucide/svelte/icons/archive-restore";
   import DownloadIcon from "@lucide/svelte/icons/download";
   import EllipsisVerticalIcon from "@lucide/svelte/icons/ellipsis-vertical";
   import LogOutIcon from "@lucide/svelte/icons/log-out";
   import PencilIcon from "@lucide/svelte/icons/pencil";
+  import TrashIcon from "@lucide/svelte/icons/trash-2";
   import UserPlusIcon from "@lucide/svelte/icons/user-plus";
   import UserRoundIcon from "@lucide/svelte/icons/user-round";
   import UsersIcon from "@lucide/svelte/icons/users";
@@ -12,12 +15,13 @@
   import * as Card from "@/components/ui/card";
   import * as DropdownMenu from "@/components/ui/dropdown-menu";
   import { Separator } from "@/components/ui/separator";
-  import { exportGroup, leaveGroup } from "@/lib/actions";
+  import { deleteGroup, exportGroup, leaveGroup, setArchived } from "@/lib/actions";
   import { backendText } from "@/lib/i18n/backend";
   import { t } from "@/lib/i18n/index.svelte";
   import { paidAmounts } from "@/lib/split";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
+  import { session } from "@/lib/state/session.svelte";
   import { memberTone } from "@/lib/tones";
   import { cn } from "@/lib/utils";
   import type { Group } from "@/types";
@@ -38,6 +42,7 @@
       .reduce((sum, paid) => sum + paid.cents, 0)
   );
   const me = $derived(group.participants.find((p) => p.id === currentUserId));
+  const archived = $derived(session.isArchived(group.id));
   const syncError = $derived(openGroup.syncInfo?.last_error ?? null);
 
   function renameMember(participantId: string) {
@@ -60,6 +65,9 @@
       <h1 class="truncate text-2xl font-semibold tracking-tight lg:text-xl lg:whitespace-normal">
         {group.name}
       </h1>
+      {#if archived}
+        <Badge variant="secondary">{t("archive.badge")}</Badge>
+      {/if}
       <Badge variant="soft" class={group.image ? "max-sm:hidden lg:hidden" : "lg:hidden"}
         >{group.currency}</Badge
       >
@@ -109,9 +117,23 @@
             <DownloadIcon />
             {t("group.export")}
           </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => setArchived(!archived)}>
+            {#if archived}
+              <ArchiveRestoreIcon />
+              {t("archive.restore")}
+            {:else}
+              <ArchiveIcon />
+              {t("archive.archive")}
+            {/if}
+          </DropdownMenu.Item>
+          <DropdownMenu.Separator />
           <DropdownMenu.Item variant="destructive" onSelect={leaveGroup}>
             <LogOutIcon />
             {t("group.leave")}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item variant="destructive" onSelect={deleteGroup}>
+            <TrashIcon />
+            {t("deletion.menu")}
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Root>

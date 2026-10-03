@@ -58,6 +58,24 @@ pub async fn suggest_exchange_rate(
     sync::suggested_rate(state, from, to, date).await
 }
 
+/// Deletes the group for every member. While someone still owes something it takes
+/// everyone's agreement: this gives the user's, and returns the group still waiting for the
+/// others. Returns nothing once the group is deleted.
+pub fn delete_group(state: &AppState, group_id: &str) -> Res<Option<Group>> {
+    sync::delete_group(state, group_id)
+}
+
+/// Refuses the deletion some members asked for, or takes the request back.
+pub fn refuse_group_deletion(state: &AppState, group_id: &str) -> Res<Group> {
+    state.mutate(group_id, doc::refuse_deletion)
+}
+
+/// Puts a group away for the user (it stays theirs, listed apart), or back.
+pub fn set_group_archived(state: &AppState, group_id: &str, archived: bool) -> Res<AccountInfo> {
+    sync::set_group_archived(state, group_id, archived)?;
+    state.require_account_info()
+}
+
 /// Removes the group from the account, on all the user's devices. Other members keep it.
 pub async fn leave_group(state: &AppState, group_id: &str) -> Res<()> {
     sync::leave_group(state, group_id).await
@@ -326,6 +344,13 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             .await?,
         ),
         "leave_group" => json(leave_group(state, &s("groupId")?).await?),
+        "delete_group" => json(delete_group(state, &s("groupId")?)?),
+        "refuse_group_deletion" => json(refuse_group_deletion(state, &s("groupId")?)?),
+        "set_group_archived" => json(set_group_archived(
+            state,
+            &s("groupId")?,
+            arg(&args, "archived")?,
+        )?),
         "update_group" => json(update_group(
             state,
             &s("groupId")?,

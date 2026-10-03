@@ -226,7 +226,7 @@ test.describe("Sharing and joining", () => {
     await expect(page.getByText("Your balance", { exact: true })).toBeVisible();
   });
 
-  test("reloads the open group when another device's changes arrive", async ({ page }) => {
+  test("offers to show what another device changed in the open group", async ({ page }) => {
     await seed(page, { __SEED_GROUPS__: [tripGroup] });
     await page.goto("/");
     await page.getByRole("button", { name: /Lisbon Trip/ }).click();
@@ -245,7 +245,13 @@ test.describe("Sharing and joining", () => {
       });
       w.__emitMockEvent("sync-updated", { group_id: "group-trip", changed: true });
     });
+    // Nothing moves until the user asks.
+    const refresh = page.getByRole("button", { name: /New changes from the group/ });
+    await expect(refresh).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Museum" })).toHaveCount(0);
+    await refresh.click();
     await expect(page.getByRole("heading", { name: "Museum" })).toBeVisible();
+    await expect(refresh).toHaveCount(0);
   });
 });
 

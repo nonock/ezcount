@@ -102,18 +102,16 @@
     });
   }
 
-  // Background sync reports every attempt; reload when another device changed something.
+  // Background sync reports every attempt. What another device changed in the open group is
+  // offered rather than applied, so the list doesn't move while it is being read.
   onEvent<SyncUpdatedEvent>("sync-updated", (payload) => {
     if (payload.changed) groupList.refresh();
     if (payload.group_id !== navigation.groupId) return;
-    if (payload.changed) {
-      openGroup.load(payload.group_id);
-    } else {
-      api
-        .getSyncInfo(payload.group_id)
-        .then((info) => (openGroup.syncInfo = info))
-        .catch(() => {});
-    }
+    if (payload.changed) openGroup.stale = true;
+    api
+      .getSyncInfo(payload.group_id)
+      .then((info) => (openGroup.syncInfo = info))
+      .catch(() => {});
   });
 
   // Another device of this account joined or left a group, or changed who the user is.

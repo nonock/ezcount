@@ -48,6 +48,8 @@ export interface MockGroup {
   participants: { id: string; name: string; removed?: boolean; avatar?: string | null }[];
   expenses: MockExpense[];
   created_at: string;
+  deleted?: boolean;
+  deletion_votes?: string[];
 }
 
 export const MOCK_PASSWORD = "correct horse";
@@ -68,6 +70,7 @@ export const MOCK_SERVER = "http://localhost:8787";
  * - `__SCANNED__`: what the camera "scans"
  * - `__LINK_SECONDS__`: how long a login link works, 120 by default
  * - `__RATES__`: exchange rates the relay suggests, as `{ "USD/EUR": "0.9234" }`
+ * - `__ARCHIVED__`: ids of the groups the user archived
  * - `__PROFILE__`: the account's `{ display_name, avatar }`
  * - `__STORAGE_WARNINGS__`
  */
@@ -82,6 +85,7 @@ export function installTauriMock() {
     server_url: string;
     display_name: string | null;
     avatar: string | null;
+    archived: string[];
     identities: Record<string, string>;
   } | null = null;
   let accountLoaded = false;
@@ -110,6 +114,7 @@ export function installTauriMock() {
           server_url: MOCK_SERVER,
           display_name: w.__PROFILE__?.display_name ?? null,
           avatar: w.__PROFILE__?.avatar ?? null,
+          archived: [...(w.__ARCHIVED__ ?? [])],
           identities: w.__SEED_IDENTITIES__ ? { ...w.__SEED_IDENTITIES__ } : identities,
         };
       }
@@ -455,6 +460,7 @@ export function installTauriMock() {
             server_url: args.serverUrl,
             display_name: null,
             avatar: null,
+            archived: [],
             identities: {},
           };
           password = args.password;
@@ -473,6 +479,7 @@ export function installTauriMock() {
             server_url: args.serverUrl,
             display_name: null,
             avatar: null,
+            archived: [],
             identities: {},
           };
           groups = [];
@@ -491,6 +498,7 @@ export function installTauriMock() {
             server_url: args.serverUrl,
             display_name: null,
             avatar: null,
+            archived: [],
             identities: {},
           };
           groups = [];
@@ -538,6 +546,7 @@ export function installTauriMock() {
             server_url: params.get("server") || "",
             display_name: null,
             avatar: null,
+            archived: [],
             identities: {},
           };
           groups = [];
@@ -784,8 +793,48 @@ export function installTauriMock() {
           }
           const idx = getGroups().findIndex((x) => x.id === args.groupId);
           if (idx !== -1) getGroups().splice(idx, 1);
-          if (account) delete account.identities[args.groupId];
+          if (account) {
+            delete account.identities[args.groupId];
+            account.archived = account.archived.filter((id) => id !== args.groupId);
+          }
           return null;
+        }
+
+        // Like `delete_or_vote` in doc.rs: settled balances delete at once, otherwise every
+        // member has to agree.
+        case "delete_group": {
+          const acc = requireAccount();
+          const groups = getGroups();
+          const g = groups.find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          const members = g.participants.filter((p) => !p.removed);
+          if (!computeBalances(g).every((b) => b.net_cents === 0)) {
+            const me = acc.identities[g.id];
+            if (!members.some((p) => p.id === me)) {
+              throw new Error("Say who you are in this group before asking to delete it");
+            }
+            g.deletion_votes = [...new Set([...(g.deletion_votes ?? []), me])];
+            if (!members.every((p) => g.deletion_votes?.includes(p.id))) return clone(g);
+          }
+          groups.splice(groups.indexOf(g), 1);
+          delete acc.identities[g.id];
+          acc.archived = acc.archived.filter((id) => id !== g.id);
+          return null;
+        }
+
+        case "refuse_group_deletion": {
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          g.deletion_votes = [];
+          return clone(g);
+        }
+
+        case "set_group_archived": {
+          const acc = requireAccount();
+          if (!getGroups().some((x) => x.id === args?.groupId)) throw new Error("Group not found");
+          acc.archived = acc.archived.filter((id) => id !== args.groupId);
+          if (args.archived) acc.archived.push(args.groupId);
+          return clone(acc);
         }
 
         case "update_group": {

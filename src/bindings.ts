@@ -77,7 +77,40 @@ async leaveGroup(groupId: string) : Promise<Result<null, string>> {
 },
 /**
  * Renames the group and sets its currency. Amounts are not converted.
+ * Deletes the group for every member. While someone still owes something it takes
+ * everyone's agreement: this gives the user's, and returns the group still waiting for the
+ * others. Returns nothing once the group is deleted.
  */
+async deleteGroup(groupId: string) : Promise<Result<Group | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_group", { groupId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Refuses the deletion some members asked for, or takes the request back.
+ */
+async refuseGroupDeletion(groupId: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("refuse_group_deletion", { groupId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Puts a group away for the user (it stays theirs, listed apart), or back.
+ */
+async setGroupArchived(groupId: string, archived: boolean) : Promise<Result<AccountInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_group_archived", { groupId, archived }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async updateGroup(groupId: string, name: string, currency: string, description: string, image: string | null) : Promise<Result<Group, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_group", { groupId, name, currency, description, image }) };
@@ -359,7 +392,7 @@ async logInWithLink(link: string) : Promise<Result<AccountInfo, string>> {
 
 /** user-defined types **/
 
-export type AccountInfo = { username: string; server_url: string; display_name: string | null; avatar: string | null; identities: { [key in string]: string } }
+export type AccountInfo = { username: string; server_url: string; display_name: string | null; avatar: string | null; archived: string[]; identities: { [key in string]: string } }
 export type Expense = { id: string; group_id: string; title: string; amount_cents: number; original?: OriginalAmount | null; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean }
 export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_payers?: ExpensePayer[]; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; summary: string }
 /**
@@ -367,7 +400,7 @@ export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; p
  */
 export type ExpensePayer = { participant_id: string; amount_cents: number }
 export type ExpenseSplit = { participant_id: string; shares: number; fixed_cents?: number | null }
-export type Group = { id: string; name: string; description?: string; image?: string | null; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string }
+export type Group = { id: string; name: string; description?: string; image?: string | null; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string; deleted?: boolean; deletion_votes?: string[] }
 /**
  * A link that logs another device into the account, shown as a QR code.
  */

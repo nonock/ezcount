@@ -81,6 +81,33 @@ async fn leave_group(state: State<'_, AppState>, group_id: String) -> Result<(),
 }
 
 /// Renames the group and sets its currency. Amounts are not converted.
+/// Deletes the group for every member. While someone still owes something it takes
+/// everyone's agreement: this gives the user's, and returns the group still waiting for the
+/// others. Returns nothing once the group is deleted.
+#[tauri::command]
+#[specta::specta]
+fn delete_group(state: State<AppState>, group_id: String) -> Result<Option<Group>, String> {
+    api::delete_group(&state, &group_id)
+}
+
+/// Refuses the deletion some members asked for, or takes the request back.
+#[tauri::command]
+#[specta::specta]
+fn refuse_group_deletion(state: State<AppState>, group_id: String) -> Result<Group, String> {
+    api::refuse_group_deletion(&state, &group_id)
+}
+
+/// Puts a group away for the user (it stays theirs, listed apart), or back.
+#[tauri::command]
+#[specta::specta]
+fn set_group_archived(
+    state: State<AppState>,
+    group_id: String,
+    archived: bool,
+) -> Result<AccountInfo, String> {
+    api::set_group_archived(&state, &group_id, archived)
+}
+
 #[tauri::command]
 #[specta::specta]
 fn update_group(
@@ -448,6 +475,9 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         export_group_csv,
         suggest_exchange_rate,
         leave_group,
+        delete_group,
+        refuse_group_deletion,
+        set_group_archived,
         update_group,
         add_participant,
         rename_participant,

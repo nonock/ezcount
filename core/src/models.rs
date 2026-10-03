@@ -94,6 +94,12 @@ pub struct Group {
     pub participants: Vec<Participant>,
     pub expenses: Vec<Expense>,
     pub created_at: DateTime<Utc>,
+    // Deleted for everyone: no longer listed, and dropped from each device once synced.
+    #[serde(default)]
+    pub deleted: bool,
+    // The members who agreed to delete the group while its balances aren't settled.
+    #[serde(default)]
+    pub deletion_votes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -173,6 +179,8 @@ pub struct AccountInfo {
     // The name and picture the user shows in their groups, from their profile.
     pub display_name: Option<String>,
     pub avatar: Option<String>,
+    // The groups the user put away: still theirs, listed apart.
+    pub archived: Vec<String>,
     // Group id -> id of the participant the user is in that group.
     pub identities: std::collections::HashMap<String, String>,
 }

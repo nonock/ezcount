@@ -80,6 +80,17 @@
   background: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
   border-radius: 9999px;
 }
+/* A dialog that scrolls keeps its scrollbar inside its rounded corners, off its edge. */
+[data-slot="dialog-content"]::-webkit-scrollbar {
+  width: 10px;
+}
+[data-slot="dialog-content"]::-webkit-scrollbar-track {
+  margin-block: var(--radius-box);
+}
+[data-slot="dialog-content"]::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
 
 @theme inline {
   --font-heading: var(--font-sans);

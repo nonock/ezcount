@@ -82,11 +82,12 @@ test("keeps its data and syncs it with the user's other devices", async ({ brows
   await phone.getByRole("button", { name: /Lisbon/ }).click();
   await expect(phone.getByTestId("expense-item").filter({ hasText: "Dinner" })).toBeVisible();
 
-  // Its edits reach the first device through background sync.
+  // Its edits reach the first device through background sync, which offers to show them.
   await addExpense(phone, "Taxi", "12.50");
-  await expect(laptop.getByTestId("expense-item").filter({ hasText: "Taxi" })).toBeVisible({
-    timeout: 45_000,
-  });
+  const refresh = laptop.getByRole("button", { name: /New changes from the group/ });
+  await expect(refresh).toBeVisible({ timeout: 45_000 });
+  await refresh.click();
+  await expect(laptop.getByTestId("expense-item").filter({ hasText: "Taxi" })).toBeVisible();
 });
 
 test("shows a code to log a phone in, after the password", async ({ browser }) => {

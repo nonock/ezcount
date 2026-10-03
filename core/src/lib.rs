@@ -72,6 +72,7 @@ impl AppState {
             server_url: session.server_url.clone(),
             display_name: profile.name,
             avatar: profile.avatar,
+            archived: account::archived(store.account_doc()?),
             identities: account::identities(store.account_doc()?)?,
         }))
     }

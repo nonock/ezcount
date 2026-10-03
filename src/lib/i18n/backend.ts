@@ -66,6 +66,11 @@ const FR: Pattern[] = [
   ],
   [/^This person is not a member of the group$/, "Cette personne n'est pas membre du groupe"],
   [/^Add yourself to the group$/, "Ajoutez-vous au groupe"],
+  [/^This group was deleted$/, "Ce groupe a été supprimé"],
+  [
+    /^Say who you are in this group before asking to delete it$/,
+    "Dites qui vous êtes dans ce groupe avant de demander sa suppression",
+  ],
   [/^This file name can't be used$/, "Ce nom de fichier ne peut pas être utilisé"],
   [/^Could not find the Downloads folder$/, "Dossier Téléchargements introuvable"],
   [/^Could not save the file: (.*)$/, (why) => `Impossible d'enregistrer le fichier : ${why}`],

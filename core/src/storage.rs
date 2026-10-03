@@ -329,13 +329,14 @@ impl Store {
         doc::read_group(self.doc(id)?)
     }
 
-    /// All readable groups, oldest first.
+    /// All readable groups, oldest first. A deleted one waiting to be dropped isn't listed.
     pub fn groups(&self) -> Vec<Group> {
         let mut groups: Vec<Group> = self
             .docs
             .iter()
             .filter(|(id, _)| !self.is_account(id))
             .filter_map(|(id, d)| match doc::read_group(d) {
+                Ok(g) if g.deleted => None,
                 Ok(g) => Some(g),
                 Err(e) => {
                     eprintln!("[storage] group {id} is unreadable: {e}");

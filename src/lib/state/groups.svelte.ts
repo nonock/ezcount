@@ -30,6 +30,11 @@ class OpenGroup {
   balances = $state<ParticipantBalance[]>([]);
   settlements = $state<SettlementTransfer[]>([]);
   syncInfo = $state<SyncInfo | null>(null);
+  /**
+   * Other devices changed the group since it was loaded. It isn't reloaded under the user's
+   * eyes, which would move what they are reading: they are offered to.
+   */
+  stale = $state(false);
 
   /** The participant the user is in this group, if they said. */
   get currentUserId(): string | null {
@@ -46,6 +51,7 @@ class OpenGroup {
       ]);
       // The user went elsewhere meanwhile.
       if (navigation.groupId !== groupId) return;
+      this.stale = false;
       this.group = group;
       this.balances = balances;
       this.settlements = settlements;
@@ -59,6 +65,7 @@ class OpenGroup {
   }
 
   clear() {
+    this.stale = false;
     this.group = null;
     this.balances = [];
     this.settlements = [];

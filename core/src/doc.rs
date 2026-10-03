@@ -2,7 +2,8 @@
 //!
 //! Each group is one `LoroDoc`. It is the source of truth and the unit of sync:
 //!
-//! - `meta` (map): `id`, `name`, `currency`, `created_at`, `description`, `image`
+//! - `meta` (map): `id`, `name`, `currency`, `created_at`, `description`, `image`, `deleted`
+//! - `deletion` (map): participant id -> true, for the members who agreed to delete the group
 //! - `participants` (map): participant id -> map { `name`, `removed`, `position`, `avatar` }
 //! - `expenses` (map): expense id -> map { `title`, `amount_cents`, `paid_by`, `splits`,
 //!   `created_at`, `updated_at`, `is_reimbursement`, `history` (list), `original`, `payers` }
@@ -17,6 +18,10 @@
 //! currency paid), with the one who paid the most in `paid_by`. App versions from before that
 //! read only `paid_by` and credit them the whole amount; when one of them edits the expense
 //! so that `payers` no longer fits it, `paid_by` alone counts (see `check_payers`).
+//!
+//! A group is deleted for everyone by setting `deleted`: devices stop listing it and drop it
+//! once that is synced. While someone still owes something, that takes every member's
+//! agreement, recorded in `deletion` (see `delete_or_vote`).
 //!
 //! Pictures (`image`, `avatar`) are `data:` URLs of small images, which the app shrinks before
 //! saving them.
@@ -44,6 +49,7 @@ const PARTICIPANTS: &str = "participants";
 const EXPENSES: &str = "expenses";
 const HISTORY: &str = "history";
 const ORIGINAL: &str = "original";
+const DELETION: &str = "deletion";
 
 /// Largest amount of one expense: ten trillion units, enough for any currency, and small
 /// enough that JavaScript numbers hold it exactly.
@@ -216,6 +222,8 @@ struct DocMeta {
     description: String,
     #[serde(default)]
     image: Option<String>,
+    #[serde(default)]
+    deleted: bool,
 }
 
 #[derive(Deserialize)]
@@ -479,6 +487,17 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
             .then_with(|| a.id.cmp(&b.id))
     });
 
+    // Votes of people who are still members, in the group's order.
+    let voted: HashSet<String> = entries::<bool>(&doc.get_map(DELETION), "deletion vote")
+        .into_iter()
+        .filter_map(|(id, agreed)| agreed.then_some(id))
+        .collect();
+    let deletion_votes = participants
+        .iter()
+        .filter(|(_, p)| !p.removed && voted.contains(&p.id))
+        .map(|(_, p)| p.id.clone())
+        .collect();
+
     Ok(Group {
         id: meta.id,
         name: meta.name,
@@ -492,6 +511,8 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
         participants: participants.into_iter().map(|(_, p)| p).collect(),
         expenses,
         created_at: meta.created_at,
+        deleted: meta.deleted,
+        deletion_votes,
     })
 }
 
@@ -780,6 +801,42 @@ pub fn update_group(
             Some(image) => meta.insert("image", image).map_err(doc_err)?,
             None => meta.delete("image").map_err(doc_err)?,
         }
+    }
+    Ok(())
+}
+
+/// Deletes the group for everyone when nobody owes anything. Otherwise it takes every
+/// member's agreement: this records `me`'s, and deletes once all the members have agreed.
+/// Returns whether the group is now deleted.
+pub fn delete_or_vote(doc: &LoroDoc, me: Option<&str>) -> Res<bool> {
+    let group = read_group(doc)?;
+    let settled = engine::calculate_balances(&group)
+        .iter()
+        .all(|b| b.net_cents == 0);
+    let members = || group.participants.iter().filter(|p| !p.removed);
+    if !settled {
+        let me = me
+            .filter(|me| members().any(|p| p.id == *me))
+            .ok_or_else(|| {
+                "Say who you are in this group before asking to delete it".to_string()
+            })?;
+        doc.get_map(DELETION).insert(me, true).map_err(doc_err)?;
+        let agreed = |id: &str| id == me || group.deletion_votes.iter().any(|voted| voted == id);
+        if !members().all(|p| agreed(&p.id)) {
+            return Ok(false);
+        }
+    }
+    doc.get_map(META).insert("deleted", true).map_err(doc_err)?;
+    Ok(true)
+}
+
+/// Drops the request to delete the group: someone refused, or changed their mind.
+pub fn refuse_deletion(doc: &LoroDoc) -> Res<()> {
+    let votes = doc.get_map(DELETION);
+    let mut voters = Vec::new();
+    votes.for_each(|id, _| voters.push(id.to_string()));
+    for id in voters {
+        votes.delete(&id).map_err(doc_err)?;
     }
     Ok(())
 }
@@ -1775,6 +1832,61 @@ mod tests {
             );
         }
         assert!(new_group_doc("Trip", "euro", &[]).is_err());
+    }
+
+    #[test]
+    fn deleting_takes_settled_balances_or_everyone() {
+        // Nobody owes anything: anyone deletes, without saying who they are.
+        let (doc, _) = sample();
+        assert!(delete_or_vote(&doc, None).unwrap());
+        assert!(read_group(&doc).unwrap().deleted);
+
+        let (doc, group) = sample();
+        let ids: Vec<String> = group.participants.iter().map(|p| p.id.clone()).collect();
+        let (alice, bob) = (&ids[0], &ids[1]);
+        add_expense(
+            &doc,
+            "Dinner",
+            9000,
+            alice.clone(),
+            vec![split(alice, 1), split(bob, 1)],
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(delete_or_vote(&doc, None).is_err(), "who asks?");
+        assert!(delete_or_vote(&doc, Some("ghost")).is_err());
+
+        // Everyone agrees one after the other; the last one deletes.
+        for (i, id) in ids.iter().enumerate() {
+            let last = i == ids.len() - 1;
+            assert_eq!(delete_or_vote(&doc, Some(id)).unwrap(), last, "{i}");
+            let read = read_group(&doc).unwrap();
+            assert_eq!(read.deleted, last);
+            assert_eq!(read.deletion_votes, ids[..=i]);
+        }
+
+        // A refusal starts over, and a removed member has no say.
+        let (doc, group) = sample();
+        let ids: Vec<String> = group.participants.iter().map(|p| p.id.clone()).collect();
+        add_expense(
+            &doc,
+            "Dinner",
+            9000,
+            ids[0].clone(),
+            vec![split(&ids[0], 1), split(&ids[1], 1)],
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(!delete_or_vote(&doc, Some(&ids[0])).unwrap());
+        refuse_deletion(&doc).unwrap();
+        assert!(read_group(&doc).unwrap().deletion_votes.is_empty());
+        for id in &ids[2..] {
+            remove_participant(&doc, id).unwrap();
+        }
+        assert!(!delete_or_vote(&doc, Some(&ids[0])).unwrap());
+        assert!(delete_or_vote(&doc, Some(&ids[1])).unwrap());
     }
 
     #[test]

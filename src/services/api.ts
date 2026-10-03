@@ -51,6 +51,19 @@ export const api = {
   },
 
   /** Removes the group from the account, on all the user's devices. */
+  /** Deletes the group for everyone, or gives the user's agreement; null once it is deleted. */
+  async deleteGroup(groupId: string): Promise<Group | null> {
+    return unwrap(await commands.deleteGroup(groupId));
+  },
+
+  async refuseGroupDeletion(groupId: string): Promise<Group> {
+    return unwrap(await commands.refuseGroupDeletion(groupId));
+  },
+
+  async setGroupArchived(groupId: string, archived: boolean): Promise<AccountInfo> {
+    return unwrap(await commands.setGroupArchived(groupId, archived));
+  },
+
   async leaveGroup(groupId: string): Promise<void> {
     unwrap(await commands.leaveGroup(groupId));
   },

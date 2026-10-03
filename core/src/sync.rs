@@ -1288,6 +1288,9 @@ pub async fn join_group(state: &AppState, code: &str) -> Res<Group> {
     .await?;
     let group = doc::read_group(&doc)
         .map_err(|_| "The sync server has no usable data for this group".to_string())?;
+    if group.deleted {
+        return Err("This group was deleted".to_string());
+    }
     if group.id != invite.group_id {
         return Err("The invite code does not match the group on the server".to_string());
     }
@@ -1319,6 +1322,47 @@ pub async fn leave_group(state: &AppState, group_id: &str) -> Res<()> {
     drop(store);
     state.sync_wakeup.notify_one();
     Ok(())
+}
+
+/// Deletes a group for everyone, or asks to: with balances that aren't settled it takes every
+/// member's agreement, and this gives the user's. Returns the group while it waits for the
+/// others, and nothing once it is deleted.
+pub fn delete_group(state: &AppState, group_id: &str) -> Res<Option<Group>> {
+    require_session(state)?;
+    let mut store = state.store();
+    let me = account::identities(store.account_doc()?)?.remove(group_id);
+    let mut deleted = false;
+    let group = store.update(group_id, |d| {
+        deleted = doc::delete_or_vote(d, me.as_deref())?;
+        Ok(())
+    })?;
+    drop(store);
+    // The next sync tells the others, then drops the group here (`drop_deleted`).
+    state.sync_wakeup.notify_one();
+    Ok((!deleted).then_some(group))
+}
+
+/// Puts a group away for the user, on all their devices, or back among the others.
+pub fn set_group_archived(state: &AppState, group_id: &str, archived: bool) -> Res<()> {
+    let mut store = state.store();
+    store.doc(group_id)?;
+    store.update_account(|d| account::set_archived(d, group_id, archived))?;
+    drop(store);
+    state.sync_wakeup.notify_one();
+    Ok(())
+}
+
+/// Drops a group that was deleted for everyone, once this device has nothing left to upload
+/// for it (its own deletion included). Returns whether it did.
+fn drop_deleted(state: &AppState, group_id: &str) -> bool {
+    let mut store = state.store();
+    if !store.group(group_id).is_ok_and(|g| g.deleted) || store.has_unpushed(group_id) {
+        return false;
+    }
+    if store.session().is_some() {
+        let _ = store.update_account(|d| account::remove_group(d, group_id));
+    }
+    store.delete(group_id).is_ok()
 }
 
 /// Records which participant the user is in a group, for all their devices.
@@ -1426,6 +1470,11 @@ pub async fn sync_all(state: &AppState, mut report: impl FnMut(SyncEvent)) {
     let ids = state.store().synced_ids();
     for group_id in ids {
         let changed = matches!(sync_group(state, &group_id).await, Ok(true));
+        if drop_deleted(state, &group_id) {
+            state.sync_wakeup.notify_one();
+            report(SyncEvent::Account);
+            continue;
+        }
         report(SyncEvent::Group { group_id, changed });
     }
 }
@@ -1662,8 +1711,14 @@ mod end_to_end {
             sync_account(&self.state).await.unwrap();
             reconcile(&self.state).await.unwrap();
             let ids = self.state.store().synced_ids();
+            let mut dropped = false;
             for id in ids {
                 sync_group(&self.state, &id).await.unwrap();
+                dropped |= drop_deleted(&self.state, &id);
+            }
+            // As the next pass of `sync_all` would: the account no longer lists them.
+            if dropped {
+                sync_account(&self.state).await.unwrap();
             }
         }
     }
@@ -1863,6 +1918,86 @@ mod end_to_end {
         phone.sync().await;
         laptop.sync().await;
         assert_eq!(laptop.group_ids(), vec![trip.id.clone()]);
+
+        let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_group_is_archived_for_one_and_deleted_for_all() {
+        let (url, relay_dir) = start_relay().await;
+        let alice = Device::signed_up(&url, "alice").await;
+        let trip = alice.create("Trip", &["Alice", "Bob"]);
+        let flat = alice.create("Flat", &["Alice", "Bob"]);
+        alice.sync().await;
+        let bob = Device::signed_up(&url, "bob").await;
+        for group in [&trip, &flat] {
+            let joined = join_group(&bob.state, &alice.invite(&group.id))
+                .await
+                .unwrap();
+            set_identity(&bob.state, &group.id, &joined.participants[1].id).unwrap();
+        }
+        let archived = |d: &Device| d.state.require_account_info().unwrap().archived;
+
+        // Archiving is the user's own: their other devices see it, the other members don't.
+        set_group_archived(&alice.state, &trip.id, true).unwrap();
+        alice.sync().await;
+        let laptop = Device::logged_in(&url, "alice").await;
+        assert_eq!(archived(&laptop), vec![trip.id.clone()]);
+        bob.sync().await;
+        assert!(archived(&bob).is_empty());
+        set_group_archived(&laptop.state, &trip.id, false).unwrap();
+        laptop.sync().await;
+        alice.sync().await;
+        assert!(archived(&alice).is_empty());
+
+        // Nobody owes anything in Flat: deleting it removes it for everyone.
+        let flat_invite = alice.invite(&flat.id);
+        assert_eq!(delete_group(&alice.state, &flat.id).unwrap(), None);
+        assert!(!alice.state.store().groups().iter().any(|g| g.id == flat.id));
+        alice.sync().await;
+        assert_eq!(alice.group_ids(), vec![trip.id.clone()]);
+        bob.sync().await;
+        assert_eq!(bob.group_ids(), vec![trip.id.clone()]);
+        laptop.sync().await;
+        assert_eq!(laptop.group_ids(), vec![trip.id.clone()]);
+        let carol = Device::signed_up(&url, "carol").await;
+        assert_eq!(
+            join_group(&carol.state, &flat_invite).await.unwrap_err(),
+            "This group was deleted"
+        );
+
+        // Bob owes Alice in Trip: it takes both of them.
+        let (a, b) = (&trip.participants[0].id, &trip.participants[1].id);
+        alice.edit(&trip.id, |d| {
+            doc::add_expense(
+                d,
+                "Taxi",
+                3000,
+                a.clone(),
+                vec![split(a), split(b)],
+                None,
+                None,
+            )
+        });
+        let waiting = delete_group(&alice.state, &trip.id).unwrap().unwrap();
+        assert_eq!(waiting.deletion_votes, vec![a.clone()]);
+        alice.sync().await;
+        bob.sync().await;
+        assert_eq!(bob.group(&trip.id).deletion_votes, vec![a.clone()]);
+
+        // Bob refuses, then Alice asks again and he agrees.
+        bob.edit(&trip.id, doc::refuse_deletion);
+        bob.sync().await;
+        alice.sync().await;
+        assert!(alice.group(&trip.id).deletion_votes.is_empty());
+        delete_group(&alice.state, &trip.id).unwrap();
+        alice.sync().await;
+        bob.sync().await;
+        assert_eq!(delete_group(&bob.state, &trip.id).unwrap(), None);
+        bob.sync().await;
+        assert!(bob.group_ids().is_empty());
+        alice.sync().await;
+        assert!(alice.group_ids().is_empty());
 
         let _ = std::fs::remove_dir_all(relay_dir);
     }

@@ -14,7 +14,12 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 - Search the expenses of a group (title, who paid, amount), show only expenses or reimbursements or what involves one person, and sort by date, amount or title.
 - An expense can be paid by several people: "Several people…" under "Paid by", with what each one paid; the amount is their total. Devices still on an older version count the whole expense for whoever paid the most, until they update.
 
+- Archive a group: it leaves your list for an "Archived" section, on your devices only, and can come back.
+- Delete a group for everyone. When someone still owes something, every member has to agree first; members on an older version keep the group.
+
 ### Changed
+
+- Changes made on other devices no longer move the list while you read it: a "Refresh" button shows them.
 
 - Amounts and dates are written the way the language does (`€1,234.50`, `1 234,50 €`), with smaller cents. Round amounts have no decimals (`€90`).
 - Exporting a group on a computer saves the file in the Downloads folder and says so, with a button to show it.
@@ -22,6 +27,10 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 - Expenses are listed by day, and a group shows your balance first. On wide screens the group stays beside its expenses.
 - Calmer look: fewer greys and font weights, flat secondary buttons, roomier menus.
 - "Who are you in this group?" is changed from the group's menu.
+
+### Fixed
+
+- A window taller than the screen (the Account window on a small one) scrolls instead of being cut off.
 
 ## 0.3.0 - 2026-10-03
 

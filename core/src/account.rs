@@ -2,6 +2,7 @@
 //!
 //! - `groups` (map): group id -> plain map { `server_url`, `secret`, `added_at` }
 //! - `identities` (map): group id -> id of the participant this person is in that group
+//! - `archived` (map): group id -> true, for the groups this person put away
 //! - `profile` (map): `name` and `avatar` (a `data:` URL), what this person shows in their
 //!   groups
 //!
@@ -22,6 +23,7 @@ type Res<T> = Result<T, String>;
 const GROUPS: &str = "groups";
 const IDENTITIES: &str = "identities";
 const PROFILE: &str = "profile";
+const ARCHIVED: &str = "archived";
 
 /// Longest name in a profile, in characters.
 pub const MAX_NAME_CHARS: usize = 50;
@@ -69,6 +71,7 @@ pub fn add_group(doc: &LoroDoc, group_id: &str, server_url: &str, secret: &Secre
 /// Removes a group from the account, so every device of the account drops it.
 pub fn remove_group(doc: &LoroDoc, group_id: &str) -> Res<()> {
     doc.get_map(GROUPS).delete(group_id).map_err(doc_err)?;
+    doc.get_map(ARCHIVED).delete(group_id).map_err(doc_err)?;
     doc.get_map(IDENTITIES).delete(group_id).map_err(doc_err)
 }
 
@@ -83,6 +86,24 @@ pub fn set_identity(doc: &LoroDoc, group_id: &str, participant_id: &str) -> Res<
     doc.get_map(IDENTITIES)
         .insert(group_id, participant_id)
         .map_err(doc_err)
+}
+
+/// The groups this person put away, by id.
+pub fn archived(doc: &LoroDoc) -> Vec<String> {
+    entries::<bool>(&doc.get_map(ARCHIVED), "archived group")
+        .into_iter()
+        .filter_map(|(group_id, archived)| archived.then_some(group_id))
+        .collect()
+}
+
+/// Puts a group away, or back among the others.
+pub fn set_archived(doc: &LoroDoc, group_id: &str, archived: bool) -> Res<()> {
+    let map = doc.get_map(ARCHIVED);
+    if archived {
+        map.insert(group_id, true).map_err(doc_err)
+    } else {
+        map.delete(group_id).map_err(doc_err)
+    }
 }
 
 /// The name and picture this person shows in their groups.
@@ -173,9 +194,15 @@ mod tests {
         assert_eq!(list[0].secret.expose(), "secret-1");
         assert_eq!(identities(&doc).unwrap().get("g1").unwrap(), "p-alice");
 
+        set_archived(&doc, "g1", true).unwrap();
+        set_archived(&doc, "g2", true).unwrap();
+        set_archived(&doc, "g2", false).unwrap();
+        assert_eq!(archived(&doc), vec!["g1".to_string()]);
+
         remove_group(&doc, "g1").unwrap();
         assert_eq!(groups(&doc).unwrap().len(), 1);
         assert!(identities(&doc).unwrap().is_empty());
+        assert!(archived(&doc).is_empty());
     }
 
     #[test]
