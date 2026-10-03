@@ -42,6 +42,12 @@
 //!   recovery key (`new_recovery_token`, `new_recovery_wrapped_key`), or both. A recovery key
 //!   works once: proving with it requires replacing it. 204, or errors as for login
 //!
+//! - `GET /v1/rates/{from}/{to}?date=YYYY-MM-DD`: the exchange rate between two currencies
+//!   that day (the latest without a date, or when that day has none), as
+//!   `{ "rate": "0.85856", "date": "2026-08-29" }`, from a public rate service
+//!   ([`Settings::rates_url`]). 404 when there is none: no service configured, or a currency
+//!   it doesn't know; 503 when the service can't be reached
+//!
 //! Invite links point at the relay: `GET /join` is a small page that opens the app with the
 //! invite in the link's fragment, which never reaches the relay. With [`AndroidApp`]
 //! configured, `GET /.well-known/assetlinks.json` lets that Android app open invite links
@@ -56,8 +62,10 @@
 //! sign-ups and failed logins (429).
 
 mod limits;
+mod rates;
 
 pub use limits::Limits;
+pub use rates::DEFAULT_RATES_URL;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
@@ -96,6 +104,9 @@ pub struct Settings {
     /// The web version to serve (`bun run build:web` writes it to `sync-server/web`). Ignored
     /// without an `index.html` in it.
     pub web_dir: Option<PathBuf>,
+    /// The rate service behind `/v1/rates` ([`DEFAULT_RATES_URL`] is one). Without it the
+    /// relay suggests no exchange rates, and makes no requests of its own.
+    pub rates_url: Option<String>,
 }
 
 pub struct Relay {
@@ -110,6 +121,7 @@ pub struct Relay {
     pub(crate) client_ip_header: Option<HeaderName>,
     limits: Limits,
     web_dir: Option<PathBuf>,
+    rates: rates::Rates,
 }
 
 impl Relay {
@@ -195,6 +207,7 @@ impl Relay {
             web_dir: settings
                 .web_dir
                 .filter(|dir| dir.join("index.html").is_file()),
+            rates: rates::Rates::new(settings.rates_url),
         }))
     }
 }
@@ -231,7 +244,8 @@ pub fn router(relay: Arc<Relay>) -> Router {
         .route("/v1/accounts", post(sign_up))
         .route("/v1/accounts/login", post(log_in))
         .route("/v1/accounts/recover", post(recover))
-        .route("/v1/accounts/credentials", post(update_credentials));
+        .route("/v1/accounts/credentials", post(update_credentials))
+        .route("/v1/rates/{from}/{to}", get(rates::rate));
     if let Some(dir) = &relay.web_dir {
         router = router.fallback_service(web_app(dir));
     }
@@ -316,6 +330,10 @@ enum ApiError {
     TooLarge,
     /// All documents together reached `Limits::max_total_bytes`.
     StorageFull,
+    /// No exchange rate to suggest.
+    NoRate,
+    /// Something the relay depends on didn't answer.
+    Unavailable(String),
     Internal(String),
 }
 
@@ -355,6 +373,11 @@ impl IntoResponse for ApiError {
             ApiError::StorageFull => {
                 eprintln!("[relay] storage limit reached: refusing uploads");
                 (StatusCode::INSUFFICIENT_STORAGE, "the relay is full").into_response()
+            }
+            ApiError::NoRate => (StatusCode::NOT_FOUND, "no rate").into_response(),
+            ApiError::Unavailable(e) => {
+                eprintln!("[relay] {e}");
+                (StatusCode::SERVICE_UNAVAILABLE, "try later").into_response()
             }
             ApiError::Internal(e) => {
                 eprintln!("[relay] internal error: {e}");

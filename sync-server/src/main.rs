@@ -12,8 +12,11 @@
 //!   stored data in all, and per group or account. Keep the first under the disk's size
 //! - `EZCOUNT_WEB_DIR`: the web version to serve at `/` (`bun run build:web` writes it to
 //!   `sync-server/web`); none when unset or without an `index.html`
+//! - `EZCOUNT_RATES_URL`: the service asked for exchange rates, Frankfurter by default
+//!   (`<url>/USD/EUR?date=…` answering `{"date": …, "rate": …}`). Set it to `off` for a relay
+//!   that makes no requests of its own: the app then suggests no rates
 
-use ezcount_sync_server::{AndroidApp, Limits, Settings};
+use ezcount_sync_server::{AndroidApp, Limits, Settings, DEFAULT_RATES_URL};
 use std::path::PathBuf;
 
 fn megabytes(name: &str, default: u64) -> Result<u64, String> {
@@ -59,6 +62,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..defaults
         },
         web_dir: std::env::var_os("EZCOUNT_WEB_DIR").map(PathBuf::from),
+        rates_url: match std::env::var("EZCOUNT_RATES_URL") {
+            Ok(url) if matches!(url.trim(), "" | "off") => None,
+            Ok(url) => Some(url.trim().to_string()),
+            Err(_) => Some(DEFAULT_RATES_URL.to_string()),
+        },
     };
 
     println!(
@@ -75,6 +83,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             true => println!("serving the web version from {}", dir.display()),
             false => println!("no web version in {} (no index.html)", dir.display()),
         }
+    }
+    match &settings.rates_url {
+        Some(url) => println!("exchange rates from {url}"),
+        None => println!("no exchange rates"),
     }
     if let Some(app) = &settings.android_app {
         println!("invite links open the Android app {}", app.package);

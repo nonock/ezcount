@@ -37,6 +37,11 @@ pub struct Limits {
     /// Failed logins per username from all networks together, per `LOGIN_WINDOW`: bounds
     /// guessing spread over many addresses. Locking someone out takes that many addresses.
     pub login_failures_per_username: u64,
+    /// Exchange rates one client network may have the relay look up per hour. Rates the relay
+    /// already knows don't count.
+    pub rate_lookups_per_hour: u64,
+    /// The same for all networks together: the most the relay asks the rate service per hour.
+    pub rate_lookups_per_hour_total: u64,
 }
 
 impl Default for Limits {
@@ -49,6 +54,8 @@ impl Default for Limits {
             sign_ups_per_hour: 10,
             login_failures_per_client: 5,
             login_failures_per_username: 50,
+            rate_lookups_per_hour: 120,
+            rate_lookups_per_hour_total: 600,
         }
     }
 }
