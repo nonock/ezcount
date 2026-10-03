@@ -35,53 +35,60 @@
     {t("group.back")}
   </Button>
 
-  <GroupHeader {group} />
+  <!-- On wide screens the group stays on the left while its tabs scroll on the right. -->
+  <div
+    class="space-y-4 lg:grid lg:grid-cols-[22rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0"
+  >
+    <div class="lg:sticky lg:top-20">
+      <GroupHeader {group} />
+    </div>
 
-  <Tabs.Root bind:value={() => navigation.tab, (tab) => (navigation.tab = tab as TabType)}>
-    <BottomBar onHome={goHome}>
-      <Tabs.List
-        class="w-full sm:w-fit max-sm:h-auto! max-sm:flex-1 max-sm:gap-1 max-sm:bg-transparent max-sm:p-0"
-      >
-        <Tabs.Trigger value="expenses" class={BOTTOM_TAB}>
-          <ReceiptTextIcon />
-          {t("tabs.expenses")}
-          <Badge variant="secondary" class={cn("tabular-nums", BOTTOM_TAB_BADGE)}>
-            {group.expenses.length}
-          </Badge>
-        </Tabs.Trigger>
-        <Tabs.Trigger value="balances" class={BOTTOM_TAB}>
-          <ScaleIcon />
-          {t("tabs.balances")}
-        </Tabs.Trigger>
-        <Tabs.Trigger value="settle" class={BOTTOM_TAB}>
-          <ArrowLeftRightIcon />
-          {t("tabs.settle")}
-          {#if openGroup.settlements.length > 0}
+    <Tabs.Root bind:value={() => navigation.tab, (tab) => (navigation.tab = tab as TabType)}>
+      <BottomBar onHome={goHome}>
+        <Tabs.List
+          class="w-full sm:w-fit max-sm:h-auto! max-sm:flex-1 max-sm:gap-1 max-sm:bg-transparent max-sm:p-0"
+        >
+          <Tabs.Trigger value="expenses" class={BOTTOM_TAB}>
+            <ReceiptTextIcon />
+            {t("tabs.expenses")}
             <Badge variant="secondary" class={cn("tabular-nums", BOTTOM_TAB_BADGE)}>
-              {openGroup.settlements.length}
+              {group.expenses.length}
             </Badge>
-          {/if}
-        </Tabs.Trigger>
-      </Tabs.List>
-    </BottomBar>
+          </Tabs.Trigger>
+          <Tabs.Trigger value="balances" class={BOTTOM_TAB}>
+            <ScaleIcon />
+            {t("tabs.balances")}
+          </Tabs.Trigger>
+          <Tabs.Trigger value="settle" class={BOTTOM_TAB}>
+            <ArrowLeftRightIcon />
+            {t("tabs.settle")}
+            {#if openGroup.settlements.length > 0}
+              <Badge variant="secondary" class={cn("tabular-nums", BOTTOM_TAB_BADGE)}>
+                {openGroup.settlements.length}
+              </Badge>
+            {/if}
+          </Tabs.Trigger>
+        </Tabs.List>
+      </BottomBar>
 
-    <!-- Only the open tab is rendered, so the others' amounts and buttons aren't in the page. -->
-    <Tabs.Content value="expenses" class="pt-4">
-      {#if navigation.tab === "expenses"}
-        {#key group.id}
-          <ExpensesTab {group} />
-        {/key}
-      {/if}
-    </Tabs.Content>
-    <Tabs.Content value="balances" class="pt-4">
-      {#if navigation.tab === "balances"}
-        <BalancesTab {group} />
-      {/if}
-    </Tabs.Content>
-    <Tabs.Content value="settle" class="pt-4">
-      {#if navigation.tab === "settle"}
-        <SettleUpTab {group} />
-      {/if}
-    </Tabs.Content>
-  </Tabs.Root>
+      <!-- Only the open tab is rendered, so the others' amounts and buttons aren't in the page. -->
+      <Tabs.Content value="expenses" class="pt-4">
+        {#if navigation.tab === "expenses"}
+          {#key group.id}
+            <ExpensesTab {group} />
+          {/key}
+        {/if}
+      </Tabs.Content>
+      <Tabs.Content value="balances" class="pt-4">
+        {#if navigation.tab === "balances"}
+          <BalancesTab {group} />
+        {/if}
+      </Tabs.Content>
+      <Tabs.Content value="settle" class="pt-4">
+        {#if navigation.tab === "settle"}
+          <SettleUpTab {group} />
+        {/if}
+      </Tabs.Content>
+    </Tabs.Root>
+  </div>
 </div>

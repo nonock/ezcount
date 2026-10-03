@@ -40,8 +40,10 @@ export interface MockExpense {
 export interface MockGroup {
   id: string;
   name: string;
+  description?: string;
+  image?: string | null;
   currency: string;
-  participants: { id: string; name: string; removed?: boolean }[];
+  participants: { id: string; name: string; removed?: boolean; avatar?: string | null }[];
   expenses: MockExpense[];
   created_at: string;
 }
@@ -64,6 +66,7 @@ export const MOCK_SERVER = "http://localhost:8787";
  * - `__SCANNED__`: what the camera "scans"
  * - `__LINK_SECONDS__`: how long a login link works, 120 by default
  * - `__RATES__`: exchange rates the relay suggests, as `{ "USD/EUR": "0.9234" }`
+ * - `__PROFILE__`: the account's `{ display_name, avatar }`
  * - `__STORAGE_WARNINGS__`
  */
 export function installTauriMock() {
@@ -75,6 +78,8 @@ export function installTauriMock() {
   let account: {
     username: string;
     server_url: string;
+    display_name: string | null;
+    avatar: string | null;
     identities: Record<string, string>;
   } | null = null;
   let accountLoaded = false;
@@ -101,6 +106,8 @@ export function installTauriMock() {
         account = {
           username: "alice",
           server_url: MOCK_SERVER,
+          display_name: w.__PROFILE__?.display_name ?? null,
+          avatar: w.__PROFILE__?.avatar ?? null,
           identities: w.__SEED_IDENTITIES__ ? { ...w.__SEED_IDENTITIES__ } : identities,
         };
       }
@@ -118,6 +125,10 @@ export function installTauriMock() {
     if (!groups) {
       const seed = w.__SEED_GROUPS__;
       const seeded: MockGroup[] = seed && getAccount() ? JSON.parse(JSON.stringify(seed)) : [];
+      for (const group of seeded) {
+        group.description ??= "";
+        group.image ??= null;
+      }
       groups = seeded;
       return seeded;
     }
@@ -125,6 +136,25 @@ export function installTauriMock() {
   }
 
   // A stand-in for zxcvbn: longer is stronger, a few common passwords and the username are weak.
+  const PICTURE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+  function checkPicture(picture: string | null | undefined) {
+    if (picture == null) return;
+    if (!PICTURE.test(picture)) {
+      throw new Error("This picture can't be used: pick a JPEG, PNG or WebP image");
+    }
+    if (picture.length > 200_000) throw new Error("This picture is too big");
+  }
+
+  /** Gives a member the profile's name and picture, like `show_profile` in sync.rs. */
+  function showProfile(groupId: string, participantId: string) {
+    const member = getGroups()
+      .find((g) => g.id === groupId)
+      ?.participants.find((p) => p.id === participantId);
+    if (!member || !account) return;
+    if (account.display_name) member.name = account.display_name;
+    member.avatar = account.avatar;
+  }
+
   function passwordStrength(password: string, username: string) {
     const pw = String(password || "");
     let score =
@@ -385,7 +415,13 @@ export function installTauriMock() {
           if ((w.__TAKEN_USERNAMES__ || []).includes(username)) {
             throw new Error(`The username "${username}" is already taken`);
           }
-          account = { username, server_url: args.serverUrl, identities: {} };
+          account = {
+            username,
+            server_url: args.serverUrl,
+            display_name: null,
+            avatar: null,
+            identities: {},
+          };
           password = args.password;
           return {
             account: clone(account),
@@ -397,7 +433,13 @@ export function installTauriMock() {
           if (getAccount()) throw new Error("This device is already logged in");
           const username = checkCredentials(args.username, args.password, false);
           if (args.password !== password) throw new Error("Wrong username or password");
-          account = { username, server_url: args.serverUrl, identities: {} };
+          account = {
+            username,
+            server_url: args.serverUrl,
+            display_name: null,
+            avatar: null,
+            identities: {},
+          };
           groups = [];
           return clone(account);
         }
@@ -409,7 +451,13 @@ export function installTauriMock() {
           if (!currentRecoveryKey() || typed !== currentRecoveryKey().replace(/-/g, "")) {
             throw new Error("Wrong username or recovery key");
           }
-          account = { username, server_url: args.serverUrl, identities: {} };
+          account = {
+            username,
+            server_url: args.serverUrl,
+            display_name: null,
+            avatar: null,
+            identities: {},
+          };
           groups = [];
           password = args.newPassword;
           return { account: clone(account), recovery_key: nextRecoveryKey() };
@@ -450,7 +498,13 @@ export function installTauriMock() {
               "This code has expired or was already used. Show a new one and scan it."
             );
           }
-          account = { username: "alice", server_url: params.get("server") || "", identities: {} };
+          account = {
+            username: "alice",
+            server_url: params.get("server") || "",
+            display_name: null,
+            avatar: null,
+            identities: {},
+          };
           groups = [];
           return clone(account);
         }
@@ -473,7 +527,23 @@ export function installTauriMock() {
           if (!g.participants.some((x) => x.id === args.participantId && !x.removed)) {
             throw new Error("This person is not a member of the group");
           }
+          const previous = g.participants.find((x) => x.id === acc.identities[args.groupId]);
+          if (previous && previous.id !== args.participantId) previous.avatar = null;
           acc.identities[args.groupId] = args.participantId;
+          showProfile(args.groupId, args.participantId);
+          return clone(acc);
+        }
+
+        case "update_profile": {
+          const acc = requireAccount();
+          const name = String(args.name).trim();
+          if (name.length > 50) throw new Error("This name is too long (50 characters at most)");
+          checkPicture(args.avatar);
+          acc.display_name = name || null;
+          acc.avatar = args.avatar ?? null;
+          for (const [groupId, participantId] of Object.entries(acc.identities)) {
+            showProfile(groupId, participantId);
+          }
           return clone(acc);
         }
 
@@ -484,6 +554,7 @@ export function installTauriMock() {
           const id = `p-self-${Date.now()}`;
           g.participants.push({ id, name: args.name });
           acc.identities[args.groupId] = id;
+          showProfile(args.groupId, id);
           return clone(g);
         }
 
@@ -558,10 +629,13 @@ export function installTauriMock() {
           const newGroup: MockGroup = {
             id: `group-${Date.now()}`,
             name: args.name,
+            description: "",
+            image: null,
             currency: args.currency || "EUR",
             participants: args.participants.map((p: string, i: number) => ({
               id: `p-${i + 1}`,
               name: p,
+              avatar: i === 0 ? acc.avatar : null,
             })),
             expenses: [],
             created_at: now,
@@ -688,8 +762,15 @@ export function installTauriMock() {
           if (!/^[A-Z]{3}$/.test(currency)) {
             throw new Error("The currency must be a three-letter code, such as EUR");
           }
+          const description = String(args.description ?? "").trim();
+          if (description.length > 500) {
+            throw new Error("This description is too long (500 characters at most)");
+          }
+          checkPicture(args.image);
           g.name = name;
           g.currency = currency;
+          g.description = description;
+          g.image = args.image ?? null;
           return clone(g);
         }
 

@@ -224,7 +224,7 @@
 
     <main
       class={cn(
-        "mx-auto w-full max-w-3xl flex-1 space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]",
+        "mx-auto w-full max-w-6xl flex-1 space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]",
         // Room for the bottom bar on phones.
         "max-sm:pb-[calc(5rem+env(safe-area-inset-bottom))]"
       )}

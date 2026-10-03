@@ -135,6 +135,17 @@ export const fr: Messages = {
   "link.again": "Nouveau code",
 
   "account.intro": "Vos groupes suivent ce compte sur tous vos appareils.",
+  "account.picture": "Photo de profil",
+  "account.name": "Nom",
+  "account.nameHelp":
+    "Votre nom et votre photo s'affichent sur vous dans tous vos groupes, pour les autres membres aussi.",
+  "account.save": "Enregistrer le profil",
+  "account.saved": "Profil enregistré",
+
+  "picture.choose": "Choisir une image",
+  "picture.change": "Changer l'image",
+  "picture.remove": "Retirer l'image",
+  "picture.unreadable": "Ce fichier n'est pas une image que l'application sait lire.",
 
   "logout.title": (username) => `Se déconnecter de ${username} ?`,
   "logout.description":
@@ -181,6 +192,9 @@ export const fr: Messages = {
 
   "editGroup.title": "Modifier le groupe",
   "editGroup.intro": "Les changements apparaissent chez tous les membres du groupe.",
+  "editGroup.picture": "Image du groupe",
+  "editGroup.description": "Description",
+  "editGroup.descriptionPlaceholder": "ex. Lisbonne, du 12 au 19 mai",
   "editGroup.currencyHelp":
     "Les montants restent tels quels : 10 € deviennent 10 dans la nouvelle devise, sans conversion.",
 

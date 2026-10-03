@@ -2,8 +2,8 @@
 //!
 //! Each group is one `LoroDoc`. It is the source of truth and the unit of sync:
 //!
-//! - `meta` (map): `id`, `name`, `currency`, `created_at`
-//! - `participants` (map): participant id -> map { `name`, `removed`, `position` }
+//! - `meta` (map): `id`, `name`, `currency`, `created_at`, `description`, `image`
+//! - `participants` (map): participant id -> map { `name`, `removed`, `position`, `avatar` }
 //! - `expenses` (map): expense id -> map { `title`, `amount_cents`, `paid_by`, `splits`,
 //!   `created_at`, `updated_at`, `is_reimbursement`, `history` (list), `original` }
 //!
@@ -12,6 +12,9 @@
 //! `shares`, or a fixed amount in the currency paid, the shares dividing what the fixed
 //! amounts leave. App versions from before fixed amounts read only `shares`, so with fixed
 //! amounts that field holds shares giving everyone the same amount (see `splits_value`).
+//!
+//! Pictures (`image`, `avatar`) are `data:` URLs of small images, which the app shrinks before
+//! saving them.
 //!
 //! Every field is its own last-writer-wins register, so concurrent edits to different fields
 //! of one expense both survive a merge. `splits` is stored as a single plain value so an
@@ -40,6 +43,13 @@ const ORIGINAL: &str = "original";
 /// Largest amount of one expense: ten trillion units, enough for any currency, and small
 /// enough that JavaScript numbers hold it exactly.
 pub const MAX_AMOUNT_CENTS: i64 = 1_000_000_000_000_000;
+
+/// Longest description of a group, in characters.
+pub const MAX_DESCRIPTION_CHARS: usize = 500;
+
+/// Largest picture, as the `data:` URL it is stored as. The app saves them far smaller; this
+/// keeps a crafted one from weighing on every member's device.
+pub const MAX_IMAGE_LEN: usize = 200_000;
 
 /// Deepest nesting read from a document. The schemas need 6 levels; anything deeper comes
 /// from a crafted update, and following it without a bound could overflow the stack.
@@ -183,6 +193,10 @@ struct DocMeta {
     name: String,
     currency: String,
     created_at: DateTime<Utc>,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    image: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -192,6 +206,13 @@ struct DocParticipant {
     removed: bool,
     #[serde(default)]
     position: i64,
+    #[serde(default)]
+    avatar: Option<String>,
+}
+
+/// A picture read from a document, or nothing when it isn't one the app would have saved.
+fn read_image(image: Option<String>) -> Option<String> {
+    image.filter(|image| check_image(image).is_ok())
 }
 
 /// A split as stored (see `splits_value`).
@@ -362,6 +383,7 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
                         id,
                         name: p.name,
                         removed: p.removed,
+                        avatar: read_image(p.avatar),
                     },
                 )
             })
@@ -419,6 +441,12 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
     Ok(Group {
         id: meta.id,
         name: meta.name,
+        description: meta
+            .description
+            .chars()
+            .take(MAX_DESCRIPTION_CHARS)
+            .collect(),
+        image: read_image(meta.image),
         currency: meta.currency,
         participants: participants.into_iter().map(|(_, p)| p).collect(),
         expenses,
@@ -499,6 +527,29 @@ fn group_name(name: &str) -> Res<&str> {
         return Err("Group name cannot be empty".to_string());
     }
     Ok(name)
+}
+
+/// Checks a picture is one the app stores: a `data:` URL of a JPEG, PNG or WebP, not too big.
+pub fn check_image(image: &str) -> Res<()> {
+    let is_picture = ["jpeg", "png", "webp"].iter().any(|kind| {
+        image
+            .strip_prefix("data:image/")
+            .and_then(|rest| rest.strip_prefix(kind))
+            .and_then(|rest| rest.strip_prefix(";base64,"))
+            .is_some_and(|data| {
+                !data.is_empty()
+                    && data
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
+            })
+    });
+    if !is_picture {
+        return Err("This picture can't be used: pick a JPEG, PNG or WebP image".to_string());
+    }
+    if image.len() > MAX_IMAGE_LEN {
+        return Err("This picture is too big".to_string());
+    }
+    Ok(())
 }
 
 /// A currency code as stored: three letters, upper-cased.
@@ -632,10 +683,26 @@ pub fn doc_from_legacy(group: &Group) -> Res<LoroDoc> {
     Ok(doc)
 }
 
-/// Renames the group and sets its currency. Amounts are kept as they are, not converted.
-pub fn update_group(doc: &LoroDoc, name: &str, currency: &str) -> Res<()> {
+/// Sets the group's name, currency, description and picture. Amounts are kept as they are,
+/// not converted. An empty description, or no picture, removes it.
+pub fn update_group(
+    doc: &LoroDoc,
+    name: &str,
+    currency: &str,
+    description: &str,
+    image: Option<&str>,
+) -> Res<()> {
     let name = group_name(name)?;
     let currency = currency_code(currency)?;
+    let description = description.trim();
+    if description.chars().count() > MAX_DESCRIPTION_CHARS {
+        return Err(format!(
+            "This description is too long ({MAX_DESCRIPTION_CHARS} characters at most)"
+        ));
+    }
+    if let Some(image) = image {
+        check_image(image)?;
+    }
     let group = read_group(doc)?;
     let meta = doc.get_map(META);
     // Only changed fields are written, so a concurrent change to the other one survives.
@@ -646,7 +713,40 @@ pub fn update_group(doc: &LoroDoc, name: &str, currency: &str) -> Res<()> {
         meta.insert("currency", currency.as_str())
             .map_err(doc_err)?;
     }
+    if group.description != description {
+        meta.insert("description", description).map_err(doc_err)?;
+    }
+    if group.image.as_deref() != image {
+        match image {
+            Some(image) => meta.insert("image", image).map_err(doc_err)?,
+            None => meta.delete("image").map_err(doc_err)?,
+        }
+    }
     Ok(())
+}
+
+/// Sets or removes a participant's picture.
+pub fn set_participant_avatar(
+    doc: &LoroDoc,
+    participant_id: &str,
+    avatar: Option<&str>,
+) -> Res<()> {
+    let participant = child_map(&doc.get_map(PARTICIPANTS), participant_id)
+        .ok_or_else(|| "Participant not found".to_string())?;
+    let current = match participant.get("avatar") {
+        Some(ValueOrContainer::Value(LoroValue::String(current))) => Some(current.to_string()),
+        _ => None,
+    };
+    if current.as_deref() == avatar {
+        return Ok(());
+    }
+    match avatar {
+        Some(avatar) => {
+            check_image(avatar)?;
+            participant.insert("avatar", avatar).map_err(doc_err)
+        }
+        None => participant.delete("avatar").map_err(doc_err),
+    }
 }
 
 /// The title `record_reimbursement` gives a payment, before any notes.
@@ -1492,7 +1592,7 @@ mod tests {
         )
         .unwrap();
 
-        update_group(&doc, " Lisbon ", "usd").unwrap();
+        update_group(&doc, " Lisbon ", "usd", "", None).unwrap();
         let g = read_group(&doc).unwrap();
         assert_eq!((g.name.as_str(), g.currency.as_str()), ("Lisbon", "USD"));
         assert_eq!(
@@ -1500,10 +1600,10 @@ mod tests {
             "amounts are not converted"
         );
 
-        assert!(update_group(&doc, "  ", "EUR").is_err());
+        assert!(update_group(&doc, "  ", "EUR", "", None).is_err());
         for bad in ["", "EURO", "€", "E1R"] {
             assert!(
-                update_group(&doc, "Lisbon", bad).is_err(),
+                update_group(&doc, "Lisbon", bad, "", None).is_err(),
                 "{bad:?} accepted"
             );
         }
@@ -1511,12 +1611,57 @@ mod tests {
     }
 
     #[test]
+    fn a_group_and_its_people_have_pictures() {
+        let (doc, group) = sample();
+        let picture = "data:image/webp;base64,UklGRg==";
+        assert_eq!((group.description.as_str(), &group.image), ("", &None));
+
+        update_group(&doc, "Trip", "EUR", " A week away ", Some(picture)).unwrap();
+        let alice = group.participants[0].id.clone();
+        set_participant_avatar(&doc, &alice, Some(picture)).unwrap();
+        let read = read_group(&doc).unwrap();
+        assert_eq!(read.description, "A week away");
+        assert_eq!(read.image.as_deref(), Some(picture));
+        assert_eq!(read.participants[0].avatar.as_deref(), Some(picture));
+        assert_eq!(read.participants[1].avatar, None);
+
+        // Not pictures, or too big.
+        for bad in [
+            "https://example.com/a.png",
+            "data:image/svg+xml;base64,AAAA",
+            "data:image/png;base64,<script>",
+            "data:image/png;base64,",
+        ] {
+            assert!(
+                update_group(&doc, "Trip", "EUR", "", Some(bad)).is_err(),
+                "{bad}"
+            );
+        }
+        let big = format!("data:image/png;base64,{}", "A".repeat(MAX_IMAGE_LEN));
+        assert!(set_participant_avatar(&doc, &alice, Some(&big)).is_err());
+        let long = "a".repeat(MAX_DESCRIPTION_CHARS + 1);
+        assert!(update_group(&doc, "Trip", "EUR", &long, None).is_err());
+
+        update_group(&doc, "Trip", "EUR", "", None).unwrap();
+        set_participant_avatar(&doc, &alice, None).unwrap();
+        let read = read_group(&doc).unwrap();
+        assert_eq!((read.description.as_str(), &read.image), ("", &None));
+        assert_eq!(read.participants[0].avatar, None);
+
+        // A picture written by something else than the app is left out, not shown.
+        doc.get_map(META)
+            .insert("image", "javascript:alert(1)")
+            .unwrap();
+        assert_eq!(read_group(&doc).unwrap().image, None);
+    }
+
+    #[test]
     fn concurrent_rename_and_currency_change_both_survive() {
         let (a, _) = sample();
         a.commit();
         let b = fork(&a);
-        update_group(&a, "Lisbon", "EUR").unwrap();
-        update_group(&b, "Trip", "CHF").unwrap();
+        update_group(&a, "Lisbon", "EUR", "", None).unwrap();
+        update_group(&b, "Trip", "CHF", "", None).unwrap();
         a.commit();
         b.commit();
         merge(&a, &b);

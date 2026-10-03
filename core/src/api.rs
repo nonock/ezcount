@@ -62,9 +62,19 @@ pub async fn leave_group(state: &AppState, group_id: &str) -> Res<()> {
     sync::leave_group(state, group_id).await
 }
 
-/// Renames the group and sets its currency. Amounts are not converted.
-pub fn update_group(state: &AppState, group_id: &str, name: &str, currency: &str) -> Res<Group> {
-    state.mutate(group_id, |d| doc::update_group(d, name, currency))
+/// Sets the group's name, currency, description and picture (a `data:` URL). Amounts are not
+/// converted.
+pub fn update_group(
+    state: &AppState,
+    group_id: &str,
+    name: &str,
+    currency: &str,
+    description: &str,
+    image: Option<&str>,
+) -> Res<Group> {
+    state.mutate(group_id, |d| {
+        doc::update_group(d, name, currency, description, image)
+    })
 }
 
 pub fn add_participant(state: &AppState, group_id: &str, name: &str) -> Res<Group> {
@@ -261,6 +271,13 @@ pub fn set_identity(state: &AppState, group_id: &str, participant_id: &str) -> R
     state.require_account_info()
 }
 
+/// Sets the name and picture (a `data:` URL) the user shows, in every group where they said
+/// who they are. An empty name keeps the names the groups have.
+pub fn update_profile(state: &AppState, name: &str, avatar: Option<&str>) -> Res<AccountInfo> {
+    sync::update_profile(state, name, avatar)?;
+    state.require_account_info()
+}
+
 /// Adds the user to a group as a new participant.
 pub fn add_self(state: &AppState, group_id: &str, name: &str) -> Res<Group> {
     sync::add_self(state, group_id, name)
@@ -311,6 +328,8 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             &s("groupId")?,
             &s("name")?,
             &s("currency")?,
+            &s("description")?,
+            arg::<Option<String>>(&args, "image")?.as_deref(),
         )?),
         "add_participant" => json(add_participant(state, &s("groupId")?, &s("name")?)?),
         "remove_participant" => json(remove_participant(
@@ -383,6 +402,11 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
         "log_in_with_link" => json(log_in_with_link(state, &s("link")?).await?),
         "log_out" => json(log_out(state, arg(&args, "force")?).await?),
         "set_identity" => json(set_identity(state, &s("groupId")?, &s("participantId")?)?),
+        "update_profile" => json(update_profile(
+            state,
+            &s("name")?,
+            arg::<Option<String>>(&args, "avatar")?.as_deref(),
+        )?),
         "add_self" => json(add_self(state, &s("groupId")?, &s("name")?)?),
         "password_strength" => json(password_strength(&s("password")?, &s("username")?)),
         _ => Err(format!("Unknown command {command}")),

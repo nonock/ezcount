@@ -4,14 +4,13 @@
   import PlusIcon from "@lucide/svelte/icons/plus";
   import Amount from "@/components/common/Amount.svelte";
   import HelpPopover from "@/components/common/HelpPopover.svelte";
-  import * as Avatar from "@/components/ui/avatar";
+  import MemberAvatar from "@/components/common/MemberAvatar.svelte";
   import { Button } from "@/components/ui/button";
   import * as Empty from "@/components/ui/empty";
   import * as Item from "@/components/ui/item";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
-  import { memberTone } from "@/lib/tones";
   import type { Group } from "@/types";
 
   let { group }: { group: Group } = $props();
@@ -47,11 +46,7 @@
         <li>
           <Item.Root class="rounded-none">
             <Item.Media>
-              <Avatar.Root>
-                <Avatar.Fallback class={memberTone(group, s.from_id)}
-                  >{s.from_name.charAt(0).toUpperCase()}</Avatar.Fallback
-                >
-              </Avatar.Root>
+              <MemberAvatar {group} participantId={s.from_id} name={s.from_name} />
             </Item.Media>
             <Item.Content>
               <Item.Title>

@@ -3,7 +3,7 @@
 Split group expenses (Tricount-style) on Windows, Linux, Android and in the browser. Groups work offline, sync between everyone's devices through a relay that can't read them, and the whole thing can be self-hosted.
 
 - **Expenses and payments** split in parts or set amounts, paid in any currency, with who owes whom worked out in the fewest transfers.
-- **Accounts**: log in with a username and password and find your groups on every device; a phone logs in by scanning a QR code shown by another device.
+- **Accounts**: log in with a username and password and find your groups on every device; a phone logs in by scanning a QR code shown by another device. Your name and picture follow you into your groups.
 - **Invites** by link or QR code. Anyone with the link can read and edit the group.
 - **End-to-end encrypted**: the relay stores only ciphertext.
 - **CSV** import and export, and `bun scripts/tricount-to-csv.ts <share link>` to move a group over from Tricount.

@@ -1,7 +1,7 @@
 <script lang="ts">
   import Amount from "@/components/common/Amount.svelte";
   import HelpPopover from "@/components/common/HelpPopover.svelte";
-  import * as Avatar from "@/components/ui/avatar";
+  import MemberAvatar from "@/components/common/MemberAvatar.svelte";
   import { Badge } from "@/components/ui/badge";
   import { Button } from "@/components/ui/button";
   import * as Card from "@/components/ui/card";
@@ -9,7 +9,6 @@
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
-  import { memberTone } from "@/lib/tones";
   import { cn } from "@/lib/utils";
   import type { Group } from "@/types";
 
@@ -41,11 +40,7 @@
           <Card.Content class="space-y-3">
             <div class="flex items-center justify-between gap-3">
               <div class="flex min-w-0 items-center gap-2.5">
-                <Avatar.Root>
-                  <Avatar.Fallback class={memberTone(group, b.participant_id)}
-                    >{b.participant_name.charAt(0).toUpperCase()}</Avatar.Fallback
-                  >
-                </Avatar.Root>
+                <MemberAvatar {group} participantId={b.participant_id} name={b.participant_name} />
                 <div class="min-w-0">
                   <h3 class="flex items-center gap-1.5 truncate font-medium">
                     {b.participant_name}

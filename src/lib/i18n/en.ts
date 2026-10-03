@@ -131,6 +131,17 @@ export const en = {
   "link.again": "New Code",
 
   "account.intro": "Your groups follow this account on all your devices.",
+  "account.picture": "Profile picture",
+  "account.name": "Name",
+  "account.nameHelp":
+    "Your name and picture show on you in all your groups, for the other members too.",
+  "account.save": "Save profile",
+  "account.saved": "Profile saved",
+
+  "picture.choose": "Choose a picture",
+  "picture.change": "Change picture",
+  "picture.remove": "Remove picture",
+  "picture.unreadable": "This file isn't a picture the app can read.",
 
   "logout.title": (username: string) => `Log out of ${username}?`,
   "logout.description":
@@ -175,6 +186,9 @@ export const en = {
 
   "editGroup.title": "Edit Group",
   "editGroup.intro": "Changes show up for every member of the group.",
+  "editGroup.picture": "Group picture",
+  "editGroup.description": "Description",
+  "editGroup.descriptionPlaceholder": "e.g. Lisbon, 12 to 19 May",
   "editGroup.currencyHelp":
     "Amounts stay as they are: 10 € becomes 10 in the new currency, not converted.",
 

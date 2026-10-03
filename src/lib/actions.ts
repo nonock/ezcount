@@ -186,6 +186,9 @@ export async function chooseIdentity(participantId: string) {
   const group = openGroup.group;
   if (!group) return;
   session.account = await api.setIdentity(group.id, participantId);
+  // That member now carries the profile's name and picture.
+  await openGroup.load(group.id);
+  await groupList.refresh();
 }
 
 export async function addSelf(name: string) {

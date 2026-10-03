@@ -1,11 +1,14 @@
 <script lang="ts">
+  import UsersIcon from "@lucide/svelte/icons/users";
   import { untrack } from "svelte";
+  import PictureField from "@/components/common/PictureField.svelte";
   import { Button } from "@/components/ui/button";
   import * as Dialog from "@/components/ui/dialog";
   import * as Field from "@/components/ui/field";
   import { Input } from "@/components/ui/input";
   import * as Select from "@/components/ui/select";
   import { Spinner } from "@/components/ui/spinner";
+  import { Textarea } from "@/components/ui/textarea";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
@@ -18,15 +21,24 @@
 
   let name = $state("");
   let currency = $state("");
+  let description = $state("");
+  let image = $state<string | null>(null);
   let submitting = $state(false);
   let error = $state<string | null>(null);
 
   $effect.pre(() => {
     if (!dialogs.editGroup) return;
-    const initial = { name: group.name, currency: group.currency };
+    const initial = {
+      name: group.name,
+      currency: group.currency,
+      description: group.description ?? "",
+      image: group.image ?? null,
+    };
     untrack(() => {
       name = initial.name;
       currency = initial.currency;
+      description = initial.description;
+      image = initial.image;
       error = null;
     });
   });
@@ -46,7 +58,9 @@
     submitting = true;
     error = null;
     try {
-      await openGroup.change((groupId) => api.updateGroup(groupId, trimmed, currency));
+      await openGroup.change((groupId) =>
+        api.updateGroup(groupId, trimmed, currency, description.trim(), image)
+      );
       dialogs.editGroup = false;
     } catch (err) {
       error = errorMessage(err);
@@ -64,9 +78,25 @@
     </Dialog.Header>
     <form onsubmit={handleSubmit}>
       <Field.Group>
+        <PictureField bind:value={image} label={t("editGroup.picture")}>
+          {#snippet placeholder()}
+            <UsersIcon class="size-6" />
+          {/snippet}
+        </PictureField>
         <Field.Field>
           <Field.Label for="input-edit-group-name">{t("create.name")}</Field.Label>
           <Input id="input-edit-group-name" required bind:value={name} />
+        </Field.Field>
+        <Field.Field>
+          <Field.Label for="input-edit-group-description">
+            {t("editGroup.description")}
+          </Field.Label>
+          <Textarea
+            id="input-edit-group-description"
+            bind:value={description}
+            maxlength={500}
+            placeholder={t("editGroup.descriptionPlaceholder")}
+          />
         </Field.Field>
         <Field.Field>
           <Field.Label for="select-edit-group-currency">{t("common.currency")}</Field.Label>

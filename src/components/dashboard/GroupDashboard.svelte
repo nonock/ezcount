@@ -87,16 +87,24 @@
       </div>
     </div>
 
-    <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {#each groups as group (group.id)}
         {@const totalCents = group.expenses.reduce((sum, e) => sum + e.amount_cents, 0)}
         {@const members = group.participants.filter((p) => !p.removed).length}
         <li>
           <Card.Root
-            class="relative transition-colors has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 hover:bg-muted/50"
+            class="relative h-full transition-colors has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 hover:bg-muted/50"
           >
             <Card.Header>
-              <Card.Title>
+              <Card.Title class="flex items-center gap-2.5">
+                {#if group.image}
+                  <img
+                    src={group.image}
+                    alt=""
+                    class="size-9 shrink-0 rounded-lg object-cover"
+                    data-testid="group-picture"
+                  />
+                {/if}
                 <h2 class="truncate">
                   <!-- Stretched over the whole card so any tap on it opens the group. -->
                   <button
@@ -108,6 +116,9 @@
                   </button>
                 </h2>
               </Card.Title>
+              {#if group.description}
+                <Card.Description class="line-clamp-1">{group.description}</Card.Description>
+              {/if}
               <Badge variant="soft" class="w-fit">{group.currency}</Badge>
             </Card.Header>
             <Card.Content class="flex items-end justify-between gap-2">

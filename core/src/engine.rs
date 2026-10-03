@@ -218,6 +218,8 @@ mod tests {
         Group {
             id: "group_1".to_string(),
             name: "Vacation".to_string(),
+            description: String::new(),
+            image: None,
             currency: "EUR".to_string(),
             created_at: Utc::now(),
             participants: vec![
@@ -225,16 +227,19 @@ mod tests {
                     id: "p1".to_string(),
                     name: "Alice".to_string(),
                     removed: false,
+                    avatar: None,
                 },
                 Participant {
                     id: "p2".to_string(),
                     name: "Bob".to_string(),
                     removed: false,
+                    avatar: None,
                 },
                 Participant {
                     id: "p3".to_string(),
                     name: "Charlie".to_string(),
                     removed: false,
+                    avatar: None,
                 },
             ],
             expenses: vec![],

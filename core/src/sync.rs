@@ -25,7 +25,7 @@ use crate::crypto::{new_recovery_key, CredentialKeys, GroupKeys, LinkKeys, Secre
 use crate::csv_file;
 use crate::doc;
 use crate::models::{Group, LoginLink, PasswordStrength};
-use crate::storage::{import_remote_update, Session, SyncMeta};
+use crate::storage::{import_remote_update, Session, Store, SyncMeta};
 use crate::AppState;
 
 type Res<T> = Result<T, String>;
@@ -1217,9 +1217,18 @@ fn add_new_group(state: &AppState, doc: LoroDoc, me: Option<&str>) -> Res<Group>
             None => Ok(()),
         }
     })?;
-    let inserted = store.insert(doc, Some(meta));
+    let mut inserted = store.insert(doc, Some(meta));
     if inserted.is_err() {
         let _ = store.update_account(|d| account::remove_group(d, &group.id));
+    } else if let Some(me) = me {
+        let profile = account::profile(store.account_doc()?);
+        // The name typed for the group is kept: only the picture comes from the profile.
+        let picture = profile.avatar.as_deref();
+        if let Ok(with_picture) =
+            store.update(&group.id, |d| doc::set_participant_avatar(d, me, picture))
+        {
+            inserted = Ok(with_picture);
+        }
     }
     drop(store);
     state.sync_wakeup.notify_one();
@@ -1323,7 +1332,51 @@ pub fn set_identity(state: &AppState, group_id: &str, participant_id: &str) -> R
     {
         return Err("This person is not a member of the group".to_string());
     }
+    let previous = account::identities(store.account_doc()?)?.remove(group_id);
     store.update_account(|d| account::set_identity(d, group_id, participant_id))?;
+    // The profile follows the user: off the member they said they were before, onto this one.
+    if let Some(previous) = previous.filter(|previous| previous != participant_id) {
+        let _ = store.update(group_id, |d| {
+            doc::set_participant_avatar(d, &previous, None)
+        });
+    }
+    let profile = account::profile(store.account_doc()?);
+    let _ = show_profile(&mut store, group_id, participant_id, &profile);
+    drop(store);
+    state.sync_wakeup.notify_one();
+    Ok(())
+}
+
+/// Gives a member of a group the profile's name and picture. Without a name in the profile,
+/// the member keeps theirs.
+fn show_profile(
+    store: &mut Store,
+    group_id: &str,
+    participant_id: &str,
+    profile: &account::Profile,
+) -> Res<()> {
+    store
+        .update(group_id, |d| {
+            if let Some(name) = &profile.name {
+                doc::rename_participant(d, participant_id, name)?;
+            }
+            doc::set_participant_avatar(d, participant_id, profile.avatar.as_deref())
+        })
+        .map(|_| ())
+}
+
+/// Sets the name and picture the user shows, and gives them to the member they are in each
+/// of their groups, for the other members to see.
+pub fn update_profile(state: &AppState, name: &str, avatar: Option<&str>) -> Res<()> {
+    require_session(state)?;
+    let mut store = state.store();
+    store.update_account(|d| account::set_profile(d, name, avatar))?;
+    let profile = account::profile(store.account_doc()?);
+    for (group_id, participant_id) in account::identities(store.account_doc()?)? {
+        // A group that is gone, or a member that was removed, doesn't keep the others from
+        // getting it.
+        let _ = show_profile(&mut store, &group_id, &participant_id, &profile);
+    }
     drop(store);
     state.sync_wakeup.notify_one();
     Ok(())
@@ -1810,6 +1863,59 @@ mod end_to_end {
         phone.sync().await;
         laptop.sync().await;
         assert_eq!(laptop.group_ids(), vec![trip.id.clone()]);
+
+        let _ = std::fs::remove_dir_all(relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_profile_shows_in_every_group() {
+        let (url, relay_dir) = start_relay().await;
+        let picture = "data:image/webp;base64,UklGRg==";
+        let alice = Device::signed_up(&url, "alice").await;
+        let trip = alice.create("Trip", &["Alice", "Bob"]);
+        let flat = alice.create("Flat", &["Al", "Chris"]);
+        let me = |group: &Group| group.participants[0].clone();
+
+        update_profile(&alice.state, " Alice M. ", Some(picture)).unwrap();
+        for id in [&trip.id, &flat.id] {
+            let group = alice.group(id);
+            assert_eq!(me(&group).name, "Alice M.");
+            assert_eq!(me(&group).avatar.as_deref(), Some(picture));
+            assert_eq!(group.participants[1].avatar, None);
+        }
+        let info = alice.state.require_account_info().unwrap();
+        assert_eq!(info.display_name.as_deref(), Some("Alice M."));
+        assert_eq!(info.avatar.as_deref(), Some(picture));
+
+        // A new group gets the picture, and the other members see it.
+        let dinner = alice.create("Dinner", &["Alice", "Bob"]);
+        assert_eq!(me(&dinner).avatar.as_deref(), Some(picture));
+        alice.sync().await;
+        let bob = Device::signed_up(&url, "bob").await;
+        let joined = join_group(&bob.state, &alice.invite(&dinner.id))
+            .await
+            .unwrap();
+        assert_eq!(me(&joined).avatar.as_deref(), Some(picture));
+
+        // The profile is on the account's other devices.
+        let laptop = Device::logged_in(&url, "alice").await;
+        let info = laptop.state.require_account_info().unwrap();
+        assert_eq!(info.display_name.as_deref(), Some("Alice M."));
+
+        // Saying to be someone else moves the picture and the name there.
+        let other = dinner.participants[1].id.clone();
+        set_identity(&alice.state, &dinner.id, &other).unwrap();
+        let group = alice.group(&dinner.id);
+        assert_eq!(me(&group).avatar, None);
+        assert_eq!(group.participants[1].name, "Alice M.");
+        assert_eq!(group.participants[1].avatar.as_deref(), Some(picture));
+
+        // Without a name or a picture, groups keep their names and lose the picture.
+        update_profile(&alice.state, "", None).unwrap();
+        let group = alice.group(&trip.id);
+        assert_eq!(me(&group).name, "Alice M.");
+        assert_eq!(me(&group).avatar, None);
+        assert!(update_profile(&alice.state, "Alice", Some("not a picture")).is_err());
 
         let _ = std::fs::remove_dir_all(relay_dir);
     }

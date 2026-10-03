@@ -46,8 +46,20 @@
 <Card.Root>
   <Card.Header>
     <div class="flex min-w-0 items-center gap-2">
-      <h1 class="truncate text-2xl font-semibold tracking-tight">{group.name}</h1>
-      <Badge variant="soft">{group.currency}</Badge>
+      {#if group.image}
+        <img
+          src={group.image}
+          alt=""
+          class="size-10 shrink-0 rounded-lg object-cover"
+          data-testid="group-picture"
+        />
+      {/if}
+      <h1 class="truncate text-2xl font-semibold tracking-tight lg:text-xl lg:whitespace-normal">
+        {group.name}
+      </h1>
+      <Badge variant="soft" class={group.image ? "max-sm:hidden lg:hidden" : "lg:hidden"}
+        >{group.currency}</Badge
+      >
     </div>
     <Card.Description>
       {t("group.summary", activeParticipants.length)}
@@ -104,6 +116,9 @@
   </Card.Header>
 
   <Card.Content class="space-y-4">
+    {#if group.description}
+      <p class="text-sm whitespace-pre-line">{group.description}</p>
+    {/if}
     <ul class="flex flex-wrap gap-1.5" aria-label={t("common.members")}>
       {#each activeParticipants as p (p.id)}
         <li>
@@ -114,10 +129,13 @@
             aria-label={t("group.editMember", p.name)}
             class={cn(
               badgeVariants({ variant: "outline" }),
-              "h-7 cursor-pointer border-transparent px-2.5 text-sm font-normal hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              "h-7 cursor-pointer gap-1.5 border-transparent px-2.5 text-sm font-normal hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
               memberTone(group, p.id)
             )}
           >
+            {#if p.avatar}
+              <img src={p.avatar} alt="" class="-ml-1.5 size-5 rounded-full object-cover" />
+            {/if}
             {p.name}
           </button>
         </li>

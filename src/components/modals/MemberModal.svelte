@@ -53,7 +53,7 @@
 </script>
 
 <Dialog.Root bind:open>
-  <Dialog.Content class="sm:max-w-sm">
+  <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
       <Dialog.Title
         >{member ? t("group.renameMember", member.name) : t("member.addTitle")}</Dialog.Title

@@ -9,12 +9,14 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 - French, besides English. The app follows the device's language; the Account window has a switch.
 - Log a phone in by scanning a QR code: "Connect a device" in the menu of a device that is already logged in. The code works once, for two minutes.
 - An Account window, with the password, the recovery key, the language and logging out.
+- A profile: a name and a picture, shown on you in all your groups, for the other members too.
+- A picture and a description for each group ("Edit group").
 
 ### Changed
 
 - Amounts and dates are written the way the language does (`€1,234.50`, `1 234,50 €`), with smaller cents.
 - One menu on every screen size, with a three-way theme switch (system, light, dark).
-- Expenses are listed by day, and a group shows your balance first.
+- Expenses are listed by day, and a group shows your balance first. On wide screens the group stays beside its expenses.
 - Calmer look: fewer greys and font weights, flat secondary buttons, roomier menus.
 - "Who are you in this group?" is changed from the group's menu.
 

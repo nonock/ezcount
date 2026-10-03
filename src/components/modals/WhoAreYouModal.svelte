@@ -2,7 +2,7 @@
   import CheckIcon from "@lucide/svelte/icons/check";
   import UserPlusIcon from "@lucide/svelte/icons/user-plus";
   import { untrack } from "svelte";
-  import * as Avatar from "@/components/ui/avatar";
+  import MemberAvatar from "@/components/common/MemberAvatar.svelte";
   import { Button } from "@/components/ui/button";
   import * as Dialog from "@/components/ui/dialog";
   import * as Field from "@/components/ui/field";
@@ -13,7 +13,6 @@
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { session } from "@/lib/state/session.svelte";
-  import { memberTone } from "@/lib/tones";
   import type { Group } from "@/types";
   import { errorMessage } from "@/utils/errors";
 
@@ -36,7 +35,7 @@
 
   $effect.pre(() => {
     if (!dialogs.who) return;
-    const suggested = session.account?.username ?? "";
+    const suggested = session.name;
     untrack(() => {
       addingSelf = false;
       name = suggested;
@@ -89,11 +88,7 @@
               disabled={busyId !== null}
               onclick={() => run(p.id, () => chooseIdentity(p.id))}
             >
-              <Avatar.Root size="sm" aria-hidden="true">
-                <Avatar.Fallback class={memberTone(group, p.id)}
-                  >{p.name.slice(0, 1).toUpperCase()}</Avatar.Fallback
-                >
-              </Avatar.Root>
+              <MemberAvatar {group} participantId={p.id} size="sm" />
               <span class="truncate">{p.name}</span>
               {#if busyId === p.id}
                 <Spinner class="ml-auto" />

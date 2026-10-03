@@ -17,6 +17,11 @@ class Session {
     return Boolean(this.account);
   }
 
+  /** The name the user goes by: their profile's, or their username. */
+  get name(): string {
+    return this.account?.display_name ?? this.account?.username ?? "";
+  }
+
   /** Which participant the user is in a group, if they said. */
   identityIn(groupId: string): string | null {
     return this.account?.identities[groupId] ?? null;

@@ -244,6 +244,8 @@ test.describe("Expense & Settlement Lifecycle", () => {
       (window as any).__SEED_GROUPS__ = seed;
     }, seedGroups);
 
+    // Short enough that the first ten fill it: the next ones load once the list's end shows.
+    await page.setViewportSize({ width: 1280, height: 500 });
     await page.goto("/");
 
     // Click on the seeded group card

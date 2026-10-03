@@ -88,8 +88,17 @@ fn update_group(
     group_id: String,
     name: String,
     currency: String,
+    description: String,
+    image: Option<String>,
 ) -> Result<Group, String> {
-    api::update_group(&state, &group_id, &name, &currency)
+    api::update_group(
+        &state,
+        &group_id,
+        &name,
+        &currency,
+        &description,
+        image.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -340,6 +349,18 @@ fn set_identity(
     api::set_identity(&state, &group_id, &participant_id)
 }
 
+/// Sets the name and picture (a `data:` URL) the user shows, in every group where they said
+/// who they are. An empty name keeps the names the groups have.
+#[tauri::command]
+#[specta::specta]
+fn update_profile(
+    state: State<AppState>,
+    name: String,
+    avatar: Option<String>,
+) -> Result<AccountInfo, String> {
+    api::update_profile(&state, &name, avatar.as_deref())
+}
+
 /// Adds the user to a group as a new participant.
 #[tauri::command]
 #[specta::specta]
@@ -399,6 +420,7 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         sync_now,
         join_group,
         get_account,
+        update_profile,
         sign_up,
         log_in,
         log_out,

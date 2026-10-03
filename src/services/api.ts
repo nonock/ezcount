@@ -55,8 +55,14 @@ export const api = {
   },
 
   /** Renames the group and sets its currency; amounts are not converted. */
-  async updateGroup(groupId: string, name: string, currency: string): Promise<Group> {
-    return unwrap(await commands.updateGroup(groupId, name, currency));
+  async updateGroup(
+    groupId: string,
+    name: string,
+    currency: string,
+    description: string,
+    image: string | null
+  ): Promise<Group> {
+    return unwrap(await commands.updateGroup(groupId, name, currency, description, image));
   },
 
   async addParticipant(groupId: string, name: string): Promise<Group> {
@@ -201,6 +207,10 @@ export const api = {
 
   async setIdentity(groupId: string, participantId: string): Promise<AccountInfo> {
     return unwrap(await commands.setIdentity(groupId, participantId));
+  },
+
+  async updateProfile(name: string, avatar: string | null): Promise<AccountInfo> {
+    return unwrap(await commands.updateProfile(name, avatar));
   },
 
   async addSelf(groupId: string, name: string): Promise<Group> {

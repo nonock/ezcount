@@ -78,9 +78,9 @@ async leaveGroup(groupId: string) : Promise<Result<null, string>> {
 /**
  * Renames the group and sets its currency. Amounts are not converted.
  */
-async updateGroup(groupId: string, name: string, currency: string) : Promise<Result<Group, string>> {
+async updateGroup(groupId: string, name: string, currency: string, description: string, image: string | null) : Promise<Result<Group, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("update_group", { groupId, name, currency }) };
+    return { status: "ok", data: await TAURI_INVOKE("update_group", { groupId, name, currency, description, image }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -191,6 +191,18 @@ async joinGroup(inviteCode: string) : Promise<Result<Group, string>> {
 async getAccount() : Promise<Result<AccountInfo | null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_account") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Sets the name and picture (a `data:` URL) the user shows, in every group where they said
+ * who they are. An empty name keeps the names the groups have.
+ */
+async updateProfile(name: string, avatar: string | null) : Promise<Result<AccountInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_profile", { name, avatar }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -335,11 +347,11 @@ async logInWithLink(link: string) : Promise<Result<AccountInfo, string>> {
 
 /** user-defined types **/
 
-export type AccountInfo = { username: string; server_url: string; identities: { [key in string]: string } }
+export type AccountInfo = { username: string; server_url: string; display_name: string | null; avatar: string | null; identities: { [key in string]: string } }
 export type Expense = { id: string; group_id: string; title: string; amount_cents: number; original?: OriginalAmount | null; paid_by: string; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean }
 export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; summary: string }
 export type ExpenseSplit = { participant_id: string; shares: number; fixed_cents?: number | null }
-export type Group = { id: string; name: string; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string }
+export type Group = { id: string; name: string; description?: string; image?: string | null; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string }
 /**
  * A link that logs another device into the account, shown as a QR code.
  */
@@ -349,7 +361,7 @@ export type NativeFeatures = { share: boolean; scan: boolean }
  * What an expense paid in another currency than the group's cost there.
  */
 export type OriginalAmount = { currency: string; amount_cents: number; rate: string }
-export type Participant = { id: string; name: string; removed?: boolean }
+export type Participant = { id: string; name: string; removed?: boolean; avatar?: string | null }
 export type ParticipantBalance = { participant_id: string; participant_name: string; paid_cents: number; owed_cents: number; net_cents: number; removed: boolean }
 export type PasswordStrength = { score: number; acceptable: boolean; warning: string | null; suggestions: string[] }
 export type SettlementTransfer = { from_id: string; from_name: string; to_id: string; to_name: string; amount_cents: number }

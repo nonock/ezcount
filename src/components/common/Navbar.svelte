@@ -14,6 +14,7 @@
   import * as DropdownMenu from "@/components/ui/dropdown-menu";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
+  import { session } from "@/lib/state/session.svelte";
 
   interface Props {
     /** A group is open: creating another one is offered on the group list only. */
@@ -24,6 +25,9 @@
   }
 
   let { inGroup, onNavigateHome, onOpenCreateGroup, username }: Props = $props();
+
+  /** The profile's name once there is one. */
+  const name = $derived(session.account?.display_name ?? username);
 
   type Mode = "light" | "dark" | "system";
   const themes = [
@@ -36,7 +40,7 @@
 <header
   class="sticky top-0 z-30 border-b bg-card/80 pt-[env(safe-area-inset-top)] backdrop-blur-lg"
 >
-  <div class="mx-auto flex h-14 max-w-3xl items-center justify-between gap-3 px-4">
+  <div class="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 px-4">
     <!-- On phones the logo is in the bottom bar, and the header names the app. -->
     <Wordmark class="text-lg sm:hidden" />
     <button
@@ -69,10 +73,18 @@
         <DropdownMenu.Content align="end" class="min-w-60">
           <DropdownMenu.Item onSelect={() => (dialogs.account = true)} class="gap-2.5">
             <Avatar.Root size="sm" aria-hidden="true">
-              <Avatar.Fallback>{username.slice(0, 1).toUpperCase()}</Avatar.Fallback>
+              {#if session.account?.avatar}
+                <img
+                  src={session.account.avatar}
+                  alt=""
+                  class="size-full rounded-full object-cover"
+                />
+              {:else}
+                <Avatar.Fallback>{name.slice(0, 1).toUpperCase()}</Avatar.Fallback>
+              {/if}
             </Avatar.Root>
             <span class="min-w-0">
-              <span class="block truncate font-medium">{username}</span>
+              <span class="block truncate font-medium">{name}</span>
               <span class="block text-xs text-muted-foreground">{t("menu.account")}</span>
             </span>
             <ChevronRightIcon class="ml-auto text-muted-foreground" />

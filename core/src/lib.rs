@@ -66,9 +66,12 @@ impl AppState {
         let Some(session) = store.session() else {
             return Ok(None);
         };
+        let profile = account::profile(store.account_doc()?);
         Ok(Some(AccountInfo {
             username: session.username.clone(),
             server_url: session.server_url.clone(),
+            display_name: profile.name,
+            avatar: profile.avatar,
             identities: account::identities(store.account_doc()?)?,
         }))
     }

@@ -10,6 +10,10 @@ pub struct Participant {
     // but no longer offered for new expenses.
     #[serde(default)]
     pub removed: bool,
+    // Their picture, as a `data:` URL: the profile picture of the account that said
+    // "this is me".
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -67,6 +71,11 @@ pub struct Expense {
 pub struct Group {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub description: String,
+    // The group's picture, as a `data:` URL.
+    #[serde(default)]
+    pub image: Option<String>,
     pub currency: String,
     pub participants: Vec<Participant>,
     pub expenses: Vec<Expense>,
@@ -144,6 +153,9 @@ pub struct SignedIn {
 pub struct AccountInfo {
     pub username: String,
     pub server_url: String,
+    // The name and picture the user shows in their groups, from their profile.
+    pub display_name: Option<String>,
+    pub avatar: Option<String>,
     // Group id -> id of the participant the user is in that group.
     pub identities: std::collections::HashMap<String, String>,
 }

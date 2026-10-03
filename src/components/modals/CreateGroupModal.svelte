@@ -27,7 +27,7 @@
     { id: "p-init-3", name: "" },
   ];
 
-  const ownName = $derived(session.account?.username ?? "");
+  const ownName = $derived(session.name);
 
   let name = $state("");
   let currency = $state("EUR");

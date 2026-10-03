@@ -2,6 +2,8 @@
 //!
 //! - `groups` (map): group id -> plain map { `server_url`, `secret`, `added_at` }
 //! - `identities` (map): group id -> id of the participant this person is in that group
+//! - `profile` (map): `name` and `avatar` (a `data:` URL), what this person shows in their
+//!   groups
 //!
 //! The document is synced through the relay like a group, end-to-end encrypted with the
 //! account key, so every device logged into the account sees the same groups and knows who
@@ -9,9 +11,9 @@
 //! conflicts with joining or leaving a group on another device.
 
 use crate::crypto::Secret;
-use crate::doc::entries;
+use crate::doc::{self, entries};
 use chrono::{SecondsFormat, Utc};
-use loro::{LoroDoc, LoroValue};
+use loro::{LoroDoc, LoroValue, ValueOrContainer};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -19,6 +21,10 @@ type Res<T> = Result<T, String>;
 
 const GROUPS: &str = "groups";
 const IDENTITIES: &str = "identities";
+const PROFILE: &str = "profile";
+
+/// Longest name in a profile, in characters.
+pub const MAX_NAME_CHARS: usize = 50;
 
 fn doc_err(e: impl std::fmt::Display) -> String {
     format!("Account document error: {e}")
@@ -79,9 +85,78 @@ pub fn set_identity(doc: &LoroDoc, group_id: &str, participant_id: &str) -> Res<
         .map_err(doc_err)
 }
 
+/// The name and picture this person shows in their groups.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Profile {
+    pub name: Option<String>,
+    pub avatar: Option<String>,
+}
+
+/// The profile. Anything unusable in it reads as not set.
+pub fn profile(doc: &LoroDoc) -> Profile {
+    let map = doc.get_map(PROFILE);
+    let text = |key: &str| match map.get(key) {
+        Some(ValueOrContainer::Value(LoroValue::String(text))) => Some(text.to_string()),
+        _ => None,
+    };
+    Profile {
+        name: text("name").filter(|name| !name.trim().is_empty()),
+        avatar: text("avatar").filter(|avatar| doc::check_image(avatar).is_ok()),
+    }
+}
+
+/// Sets the profile. An empty name, or no picture, removes it.
+pub fn set_profile(doc: &LoroDoc, name: &str, avatar: Option<&str>) -> Res<()> {
+    let name = name.trim();
+    if name.chars().count() > MAX_NAME_CHARS {
+        return Err(format!(
+            "This name is too long ({MAX_NAME_CHARS} characters at most)"
+        ));
+    }
+    if let Some(avatar) = avatar {
+        doc::check_image(avatar)?;
+    }
+    let current = profile(doc);
+    let map = doc.get_map(PROFILE);
+    // Only what changed is written, so a change to the other one elsewhere survives.
+    if current.name.as_deref().unwrap_or("") != name {
+        if name.is_empty() {
+            map.delete("name").map_err(doc_err)?;
+        } else {
+            map.insert("name", name).map_err(doc_err)?;
+        }
+    }
+    if current.avatar.as_deref() != avatar {
+        match avatar {
+            Some(avatar) => map.insert("avatar", avatar).map_err(doc_err)?,
+            None => map.delete("avatar").map_err(doc_err)?,
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_profile_is_set_and_removed() {
+        let doc = LoroDoc::new();
+        assert_eq!(profile(&doc), Profile::default());
+        let picture = "data:image/png;base64,AAAA";
+        set_profile(&doc, " Alice ", Some(picture)).unwrap();
+        assert_eq!(
+            profile(&doc),
+            Profile {
+                name: Some("Alice".into()),
+                avatar: Some(picture.into())
+            }
+        );
+        assert!(set_profile(&doc, &"a".repeat(MAX_NAME_CHARS + 1), None).is_err());
+        assert!(set_profile(&doc, "Alice", Some("data:text/html;base64,AAAA")).is_err());
+        set_profile(&doc, "", None).unwrap();
+        assert_eq!(profile(&doc), Profile::default());
+    }
 
     #[test]
     fn groups_and_identities_round_trip() {

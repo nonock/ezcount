@@ -50,6 +50,19 @@ const FR: Pattern[] = [
   ],
   [/^This person is not a member of the group$/, "Cette personne n'est pas membre du groupe"],
   [/^Add yourself to the group$/, "Ajoutez-vous au groupe"],
+  [
+    /^This picture can't be used: pick a JPEG, PNG or WebP image$/,
+    "Cette image ne peut pas être utilisée : choisissez une image JPEG, PNG ou WebP",
+  ],
+  [/^This picture is too big$/, "Cette image est trop lourde"],
+  [
+    /^This name is too long \((\d+) characters at most\)$/,
+    (max) => `Ce nom est trop long (${max} caractères au plus)`,
+  ],
+  [
+    /^This description is too long \((\d+) characters at most\)$/,
+    (max) => `Cette description est trop longue (${max} caractères au plus)`,
+  ],
 
   // CSV files
   [/^Line (\d+): (.*)$/s, (line, rest) => `Ligne ${line} : ${translate(rest, FR)}`],
