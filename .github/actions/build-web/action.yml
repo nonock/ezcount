@@ -23,8 +23,11 @@ runs:
     - uses: taiki-e/install-action@v2
       with:
         tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
+    # SQLite is compiled for WebAssembly with clang and archived with llvm-ar
+    # (scripts/build-wasm.ts finds them).
+    - shell: bash
+      run: sudo apt-get update && sudo apt-get install -y clang llvm
     - shell: bash
       run: bun install --frozen-lockfile
-    # SQLite is compiled for WebAssembly with the runner's clang (scripts/build-wasm.ts).
     - shell: bash
       run: bun run build:web

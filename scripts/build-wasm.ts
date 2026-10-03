@@ -41,10 +41,22 @@ function findTool(names: string[], candidates: string[]): string | null {
   return candidates.find((path) => existsSync(path)) ?? null;
 }
 
+/**
+ * The Android NDK: NDK_HOME, also when this process started before it was set (VS Code and
+ * its git hooks, say). Windows keeps user variables in the registry.
+ */
+function ndkHome(): string | undefined {
+  if (process.env.NDK_HOME) return process.env.NDK_HOME;
+  if (process.platform !== "win32") return undefined;
+  const query = output("reg", ["query", "HKCU\\Environment", "/v", "NDK_HOME"]);
+  const value = query?.match(/NDK_HOME\s+REG_(?:EXPAND_)?SZ\s+(.+)/)?.[1]?.trim();
+  return value?.replace(/%([^%]+)%/g, (whole, name) => process.env[name] ?? whole);
+}
+
 // SQLite is C, compiled for WebAssembly by cc-rs: it needs clang and llvm-ar.
 const env = { ...process.env };
 if (!env.CC_wasm32_unknown_unknown) {
-  const ndk = env.NDK_HOME;
+  const ndk = ndkHome();
   const ndkBin = ndk ? join(ndk, "toolchains", "llvm", "prebuilt", "windows-x86_64", "bin") : "";
   const clang = findTool(["clang"], ndk ? [join(ndkBin, "clang.exe")] : []);
   if (!clang) fail("no clang found: install clang (LLVM), or set NDK_HOME to an Android NDK");

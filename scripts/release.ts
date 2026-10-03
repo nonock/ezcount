@@ -58,12 +58,29 @@ if (run("git", "tag", "--list", tag).trim()) fail(`${tag} already exists.`);
 for (const [path, pattern] of files) {
   writeFileSync(new URL(path, root), read(path).replace(pattern, `$1${version}$3`));
 }
-// Record the crates' new versions in their lock files (and nothing else).
+// Record the crates' new versions in their lock files (and nothing else). The core's lists the
+// relay too: its tests run one.
 for (const manifest of ["src-tauri/Cargo.toml", "sync-server/Cargo.toml"]) {
   run("cargo", "update", "--quiet", "--workspace", "--manifest-path", manifest);
 }
+run(
+  "cargo",
+  "update",
+  "--quiet",
+  "-p",
+  "ezcount-sync-server",
+  "--manifest-path",
+  "core/Cargo.toml"
+);
 
-run("git", "add", ...files.map(([path]) => path), "src-tauri/Cargo.lock", "sync-server/Cargo.lock");
+run(
+  "git",
+  "add",
+  ...files.map(([path]) => path),
+  "src-tauri/Cargo.lock",
+  "sync-server/Cargo.lock",
+  "core/Cargo.lock"
+);
 execFileSync("git", ["commit", "-m", `chore(release): ${tag}`], { cwd: root, stdio: "inherit" });
 run("git", "tag", "-a", tag, "-m", `ezcount ${version}`);
 console.log(`\nTagged ${tag}. Publish it with:\n  git push --follow-tags`);
