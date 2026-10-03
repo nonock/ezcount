@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-ezcount splits group expenses (Tricount-style) on Windows, Linux and Android: a Rust core crate without UI (`core/`) wrapped in a Tauri 2 app (`src-tauri/`), a Svelte 5 + Tailwind v4 + shadcn-svelte frontend (`src/`), and a separate sync relay crate (`sync-server/`). Package manager and script runner is **Bun**. README.md covers deployment, the Android toolchain and the security model in detail.
+ezcount splits group expenses (Tricount-style) on Windows, Linux, Android and the web: a Rust core crate without UI (`core/`) wrapped in a Tauri 2 app (`src-tauri/`) and, for the browser, a WebAssembly crate (`web/`), a Svelte 5 + Tailwind v4 + shadcn-svelte frontend (`src/`), and a separate sync relay crate (`sync-server/`). Package manager and script runner is **Bun**. README.md covers deployment, the Android toolchain and the security model in detail.
 
 Project skills (`.claude/skills/`): `add-command` (a Tauri command end to end, with its traps), `phone-test` (build, install and drive the app on the USB-connected Android phone), `deploy-relay` (manual Fly.io deploy and checks).
 
@@ -15,6 +15,10 @@ bun run relay               # local sync relay on :8787
 bun run verify              # everything CI runs
 bun run test:rust           # cargo test for core and sync-server
 bun run test:e2e            # Playwright against Vite with a mocked Tauri backend
+bun run dev:web             # web version on :1420 (needs `bun run relay`)
+bun run build:web           # web version into sync-server/web (WebAssembly + Vite --mode web)
+bun run test:web            # Playwright against the built web version served by a real relay
+bun run lint:wasm           # clippy for wasm32 on core and web (the cfg(wasm) code)
 bun run lint:rust           # clippy -D warnings, all three crates
 bun run check               # biome check --write (format + lint)
 bun run typecheck
@@ -31,7 +35,7 @@ bunx playwright test e2e/group-journey.spec.ts -g "<test title>"
 ```
 
 - `tauri::generate_context!` embeds `dist/`, so on a fresh checkout run `bun run build` before `cargo` commands on `src-tauri` (CI does this).
-- Three independent Cargo projects (no workspace), so always pass `--manifest-path`: `core` (all the logic and its tests, no Tauri), `src-tauri` (the commands, background sync loop and native bits; depends on `core` by path) and `sync-server`. `core` has `sync-server` as a dev-dependency, so relay changes can break core tests. Keep Tauri out of `core`: it is meant to back a web build too (rusqlite compiles to WebAssembly through sqlite-wasm-rs).
+- Four independent Cargo projects (no workspace), so always pass `--manifest-path`: `core` (all the logic and its tests, no Tauri), `src-tauri` (the commands, background sync loop and native bits; depends on `core` by path), `web` (the browser build, wasm32 only: natively it is an empty crate) and `sync-server`. `core` has `sync-server` as a dev-dependency, so relay changes can break core tests. Keep Tauri out of `core`: `web` builds it for `wasm32-unknown-unknown` too, where native-only code (blocking threads, reqwest's client options) sits behind `#[cfg(target_family = "wasm")]` (check with `bun run lint:wasm`). Building for wasm compiles SQLite's C with clang (`scripts/build-wasm.ts` finds it, or the NDK's through `NDK_HOME`) and needs the wasm-bindgen CLI at `web/Cargo.lock`'s version.
 
 ## Conventions enforced by hooks and CI
 
@@ -54,9 +58,11 @@ bunx playwright test e2e/group-journey.spec.ts -g "<test title>"
 
 **Data model: every group is a Loro CRDT document** (`core/src/doc.rs`, schema in its module doc). The `LoroDoc` is the source of truth; `models::Group` is a read-only projection produced by `doc::read_group`. Every field is its own LWW register; `splits` is stored as one plain value so an allocation is replaced atomically. Plain values are built by hand, not via serde. Money is `i64` cents; splits are integer `shares`. Members are soft-deleted (`removed`) and keep their history and balances.
 
-**Command flow:** Svelte component (or an action in `src/lib/actions.ts`) → `src/services/api.ts` (unwraps specta `Result` into thrown errors) → `commands.*` in `bindings.ts` → `#[tauri::command]` in `src-tauri/src/lib.rs` → `AppState::mutate` (`core/src/lib.rs`), which applies a closure to the group's `LoroDoc` via `Store::update`, persists, and wakes background sync if the group is shared. Commands return the updated `Group`. `engine.rs` computes balances and settlement transfers from a `Group`.
+**Command flow:** Svelte component (or an action in `src/lib/actions.ts`) → `src/services/api.ts` (unwraps specta `Result` into thrown errors) → `commands.*` in `bindings.ts` → `#[tauri::command]` in `src-tauri/src/lib.rs`, a one-line wrapper around the same-named function in `core/src/api.rs` → `AppState::mutate` (`core/src/lib.rs`), which applies a closure to the group's `LoroDoc` via `Store::update`, persists, and wakes background sync if the group is shared. Commands return the updated `Group`. `engine.rs` computes balances and settlement transfers from a `Group`.
 
 **Frontend** (`src/`): `App.svelte` wires startup, backend events and the layout. App state lives in rune modules under `src/lib/state/` (`session`, `groups` for the list and the open group, `navigation` for the open group as a history entry so Back leaves it, `dialogs`, `confirm`), and actions that ask for confirmation or cross screens are in `src/lib/actions.ts`; components read and write that state directly rather than through props. bits-ui differs from Radix in ways that matter: it keeps inactive tab panels in the DOM (so `GroupPage` renders only the open tab), it doesn't hide the page behind a modal (so `App` sets `aria-hidden` on `#root` while one is open; dialogs and the toaster live outside it), and select triggers are buttons, not comboboxes. The look follows daisyUI 5's default themes without the daisyUI package: colors and its three radii (`--radius-field`/`-box`/`-selector`) are tokens in `styles.css`, and the button, field, checkbox, dialog, card, item and menu components in `src/components/ui/` are edited to match (raised semibold buttons, 2.5rem controls, no dialog footer band). Re-adding one of those with `--overwrite` drops that styling. Members get a color by their position in the group (`memberTone` in `src/lib/tones.ts`, `.tone-N` in `styles.css`), used on their avatars and name badges.
+
+**Web version** (`web/`, `src/web/`): the same Svelte app, built with `vite --mode web` (only that mode imports `src/web/`). `src/web/install.ts` installs a stand-in `window.__TAURI_INTERNALS__` (like the Playwright mock): commands go to a Web Worker (`worker.ts`) running the `web` crate, whose `invoke` calls `core::api::invoke` (command name + camelCase JSON args, as Tauri sends them; `api::tests` checks every command in `bindings.ts` is routed); `native_features`/`share_text` and plugin calls are answered in JS. The database is SQLite in OPFS (sqlite-wasm-vfs's sahpool, dedicated workers only), so one tab runs at a time (a Web Lock); a second tab forwards its invite over a BroadcastChannel. Invites arrive as `/#v=2&g=…&k=…` (the relay's join page links there) and are removed from the URL once read. The relay serves the build from `EZCOUNT_WEB_DIR` under a strict CSP, which is why the theme script is `public/theme.js` rather than inline. The web version's default relay is the page's origin (`bun run dev:web` proxies `/v1` to `:8787`).
 
 **Storage** (`storage.rs`): SQLite holding one Loro snapshot per group plus sync metadata and the session. Every write commits to SQLite before in-memory state changes. Unreadable data is surfaced as warnings (`get_storage_warnings`) and left on disk, never dropped. A legacy `ezcount_data.json` is migrated once.
 
@@ -68,4 +74,5 @@ bunx playwright test e2e/group-journey.spec.ts -g "<test title>"
 
 **Tests:**
 - Rust tests live in `core`, in `#[cfg(test)]` modules; `sync.rs` tests spin up a real `ezcount_sync_server` relay in-process for end-to-end sync.
+- `e2e-web/` (`bun run test:web`, `playwright.web.config.ts`) runs the built web version served by a real relay on a fresh database: each browser context is a device, and console errors (CSP violations included) fail the test.
 - Playwright tests don't run Tauri. `e2e/fixtures/tauri-mock.ts` installs an in-memory fake `__TAURI_INTERNALS__` that reimplements the commands (including balance/settlement logic mirroring `engine.rs`) and is seeded through `window.__SEED_GROUPS__` etc. **When changing a command's signature or behaviour, update the mock too.**

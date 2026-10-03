@@ -1,0 +1,33 @@
+[package]
+name = "ezcount-web"
+description = "ezcount in the browser: the core as WebAssembly, run in a Web Worker"
+authors = ["nonock"]
+edition = "2021"
+rust-version = "1.87"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+# Only builds for the browser; a native build is an empty crate.
+[target.'cfg(target_family = "wasm")'.dependencies]
+ezcount-core = { path = "../core" }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+# OPFS storage for SQLite. 0.2 is the series for the sqlite-wasm-rs 0.5 that rusqlite uses.
+sqlite-wasm-rs = "0.5"
+sqlite-wasm-vfs = "0.2"
+gloo-timers = { version = "0.4", features = ["futures"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+console_error_panic_hook = "0.1"
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+# Smaller WebAssembly: it is downloaded on every first visit.
+opt-level = "s"
+lto = true
+codegen-units = 1

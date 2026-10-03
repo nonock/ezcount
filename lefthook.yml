@@ -41,6 +41,10 @@ pre-commit:
                   glob: "src-tauri/**/*.rs"
                   run: cargo fmt --manifest-path src-tauri/Cargo.toml
                   stage_fixed: true
+                - name: web-fmt
+                  glob: "web/**/*.rs"
+                  run: cargo fmt --manifest-path web/Cargo.toml
+                  stage_fixed: true
                 - name: core-clippy
                   # The core's tests link the relay crate, so relay changes can break them too.
                   glob:
@@ -55,6 +59,15 @@ pre-commit:
                     - "core/**/*.rs"
                     - "core/Cargo.toml"
                   run: cargo clippy --quiet --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+                - name: wasm-clippy
+                  # The web version's code behind cfg(target_family = "wasm"). Needs clang (or
+                  # NDK_HOME), as `bun run build:wasm` does.
+                  glob:
+                    - "core/**/*.rs"
+                    - "core/Cargo.{toml,lock}"
+                    - "web/**/*.rs"
+                    - "web/Cargo.{toml,lock}"
+                  run: bun run lint:wasm
 
           - name: relay-rust
             group:

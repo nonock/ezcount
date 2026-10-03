@@ -9,23 +9,7 @@
       content="Tricount-like expense sharing and debt simplification app with zero-loss integer cents arithmetic."
     >
     <link rel="icon" type="image/x-icon" href="/src-tauri/icons/icon.ico">
-    <script>
-    // Apply the saved theme (mode-watcher, "theme" key) before the first paint, so the
-    // splash and the app never flash the wrong background.
-    (() => {
-      try {
-        const t = localStorage.getItem("theme");
-        const dark =
-          t === "dark" ||
-          ((!t || t === "system") && matchMedia("(prefers-color-scheme: dark)").matches);
-        const root = document.documentElement;
-        root.classList.add(dark ? "dark" : "light");
-        root.style.colorScheme = dark ? "dark" : "light";
-      } catch {
-        // No saved theme: the app's default (light) shows until it starts.
-      }
-    })();
-    </script>
+    <script src="/theme.js"></script>
     <style>
     /* Splash, shown until the app knows the account. Also rendered by src/components/common/Splash.svelte. */
     html {
@@ -60,6 +44,16 @@
       color: #9b8cff;
     }
     /* Only a slow start gets motion: the green share pulses after 0.8 s. */
+    /* The web version, when ezcount already runs in another tab (src/web/install.ts). */
+    .ez-splash-note {
+      max-width: 22rem;
+      margin: 0 24px;
+      text-align: center;
+      color: #686871;
+    }
+    html.dark .ez-splash-note {
+      color: #9ba6b5;
+    }
     .ez-splash-part {
       animation: ez-splash-pulse 1.2s ease-in-out 0.8s infinite;
     }

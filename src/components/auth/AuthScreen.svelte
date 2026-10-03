@@ -29,7 +29,12 @@
   /** The relay accounts live on unless the user picks another. */
   const DEFAULT_SERVER =
     import.meta.env.VITE_EZCOUNT_SERVER ||
-    (import.meta.env.DEV ? "http://localhost:8787" : "https://ezcount-relay.fly.dev");
+    // The web version is served by its relay (proxied to it in development).
+    (import.meta.env.MODE === "web"
+      ? location.origin
+      : import.meta.env.DEV
+        ? "http://localhost:8787"
+        : "https://ezcount-relay.fly.dev");
 
   function rememberedServer(): string {
     try {

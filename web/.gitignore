@@ -1,0 +1,3 @@
+/target/
+# wasm-bindgen output (bun run build:wasm)
+/pkg/

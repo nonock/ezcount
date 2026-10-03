@@ -33,7 +33,12 @@ than rebuilding tables, never drop data. A migration that fails keeps the relay 
 `flyctl` is installed at `%USERPROFILE%\.fly\bin\flyctl.exe` (in Git Bash:
 `"$USERPROFILE/.fly/bin/flyctl.exe"`), and may not be on `PATH`.
 
+The relay also serves the web version, from `sync-server/web`, which the image copies in only
+if it was built. Build it first, or the deployed relay serves none (run it from PowerShell on
+Windows, where `NDK_HOME` gives the clang SQLite needs):
+
 ```sh
+bun run build:web
 cd sync-server
 "$USERPROFILE/.fly/bin/flyctl.exe" auth whoami
 "$USERPROFILE/.fly/bin/flyctl.exe" deploy --remote-only --ha=false --yes
@@ -50,6 +55,7 @@ cd sync-server
 
 ```sh
 curl -sS https://ezcount-relay.fly.dev/health                  # → ok
+curl -sSI https://ezcount-relay.fly.dev/ | grep -i "200\|content-security"   # the web version
 # Each new endpoint must exist: a 4xx from the handler, not a 404.
 curl -sS -o /dev/null -w "%{http_code}\n" -H 'content-type: application/json' \
   -d '{"username":"nobody-here"}' https://ezcount-relay.fly.dev/v1/<new-endpoint>

@@ -75,6 +75,7 @@ jobs:
           cargo fmt --manifest-path core/Cargo.toml --check
           cargo fmt --manifest-path src-tauri/Cargo.toml --check
           cargo fmt --manifest-path sync-server/Cargo.toml --check
+          cargo fmt --manifest-path web/Cargo.toml --check
       - name: Clippy
         if: matrix.task == 'lint'
         run: |
@@ -96,6 +97,22 @@ jobs:
         run: |
           cargo run --locked --manifest-path src-tauri/Cargo.toml --bin export_bindings
           git diff --exit-code src/bindings.ts
+
+  # The web version: its WebAssembly-only code linted, then the build tested end to end,
+  # served by a real relay.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/build-web
+      - run: bun run lint:wasm
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:web
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-web-report
+          path: test-results/
 
   e2e:
     runs-on: ubuntu-latest

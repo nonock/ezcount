@@ -12,7 +12,8 @@
   "rust-analyzer.linkedProjects": [
     "core/Cargo.toml",
     "src-tauri/Cargo.toml",
-    "sync-server/Cargo.toml"
+    "sync-server/Cargo.toml",
+    "web/Cargo.toml"
   ],
   "rust-analyzer.check.command": "clippy",
   "files.associations": {

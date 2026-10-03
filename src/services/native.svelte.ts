@@ -25,7 +25,8 @@ export function closeTopLayer(): boolean {
   return true;
 }
 
-const isAndroid = /Android/i.test(navigator.userAgent);
+// The Android app. In a browser, even on Android, Back is the history's (see `navigation`).
+const isAndroid = import.meta.env.MODE !== "web" && /Android/i.test(navigator.userAgent);
 
 /**
  * Android's Back button first closes the dialog or menu on top, then calls what `onBack`

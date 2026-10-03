@@ -2,7 +2,8 @@
 #   bun run release 0.2.0 && git push --follow-tags
 #
 # 1. checks the tag matches the version in every manifest,
-# 2. builds the APK and Linux packages (packages.yml) and deploys the relay to Fly.io,
+# 2. builds the APK and Linux packages (packages.yml) and deploys the relay, with the web
+#    version it serves, to Fly.io,
 # 3. once both succeeded, creates the GitHub release with the packages attached.
 #
 # The deploy needs the FLY_API_TOKEN secret in the "production" environment
@@ -45,6 +46,8 @@ jobs:
       url: https://${{ steps.deploy.outputs.app }}.fly.dev
     steps:
       - uses: actions/checkout@v7
+      # Into sync-server/web, which the relay's image serves.
+      - uses: ./.github/actions/build-web
       - uses: superfly/flyctl-actions/setup-flyctl@v1
       - name: Deploy
         id: deploy

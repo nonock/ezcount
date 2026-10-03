@@ -1,0 +1,30 @@
+# Builds the web version into sync-server/web (`bun run build:web`): the Rust core for
+# WebAssembly, its wasm-bindgen glue, then the frontend in web mode. Run after checkout.
+name: Build the web version
+description: Rust core to WebAssembly plus the frontend, into sync-server/web
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.4.2
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+        components: clippy
+    - uses: Swatinem/rust-cache@v2
+      with:
+        key: web
+        workspaces: web -> target
+    # The CLI must match the wasm-bindgen crate in web/Cargo.lock exactly.
+    - id: wasm-bindgen
+      shell: bash
+      run: echo "version=$(grep -A1 '^name = "wasm-bindgen"$' web/Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')" >> "$GITHUB_OUTPUT"
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
+    - shell: bash
+      run: bun install --frozen-lockfile
+    # SQLite is compiled for WebAssembly with the runner's clang (scripts/build-wasm.ts).
+    - shell: bash
+      run: bun run build:web
