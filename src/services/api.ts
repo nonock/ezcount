@@ -1,6 +1,7 @@
 import { commands, type Result } from "../bindings";
 import type {
   AccountInfo,
+  ExpensePayer,
   ExpenseSplit,
   Group,
   LoginLink,
@@ -78,6 +79,7 @@ export const api = {
     title: string,
     amountCents: number,
     paidBy: string,
+    payers: ExpensePayer[],
     splits: ExpenseSplit[],
     createdAt?: string | null,
     original?: OriginalAmount | null
@@ -88,6 +90,7 @@ export const api = {
         title,
         amountCents,
         paidBy,
+        payers,
         splits,
         createdAt || null,
         original ?? null
@@ -101,6 +104,7 @@ export const api = {
     title: string,
     amountCents: number,
     paidBy: string,
+    payers: ExpensePayer[],
     splits: ExpenseSplit[],
     createdAt?: string | null,
     original?: OriginalAmount | null
@@ -112,6 +116,7 @@ export const api = {
         title,
         amountCents,
         paidBy,
+        payers,
         splits,
         createdAt || null,
         original ?? null
@@ -232,6 +237,11 @@ export const api = {
 
   async nativeFeatures(): Promise<NativeFeatures> {
     return commands.nativeFeatures();
+  },
+
+  /** Writes a file into the Downloads folder and returns its path; only where `nativeFeatures().save`. */
+  async saveDownload(fileName: string, text: string): Promise<string> {
+    return unwrap(await commands.saveDownload(fileName, text));
   },
 
   /** Opens the system share sheet; only where `nativeFeatures().share`. */

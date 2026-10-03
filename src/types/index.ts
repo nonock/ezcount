@@ -2,6 +2,7 @@ export type {
   AccountInfo,
   Expense,
   ExpenseHistoryEntry,
+  ExpensePayer,
   ExpenseSplit,
   Group,
   LoginLink,

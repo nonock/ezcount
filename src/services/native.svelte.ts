@@ -76,7 +76,7 @@ export function handleAndroidBack(onBack: () => (() => void) | null): void {
 }
 
 /** What this device offers beyond the web view. Nothing until known (see `loadNativeFeatures`). */
-export const nativeFeatures = $state<NativeFeatures>({ share: false, scan: false });
+export const nativeFeatures = $state<NativeFeatures>({ share: false, scan: false, save: false });
 
 export function loadNativeFeatures() {
   api

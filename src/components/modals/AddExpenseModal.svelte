@@ -20,10 +20,10 @@
   import { openGroup } from "@/lib/state/groups.svelte";
   import { cn } from "@/lib/utils";
   import { api } from "@/services/api";
-  import type { ExpenseSplit, Group, OriginalAmount } from "@/types";
+  import type { ExpensePayer, ExpenseSplit, Group, OriginalAmount } from "@/types";
   import { CURRENCIES } from "@/utils/currencies";
   import { errorMessage } from "@/utils/errors";
-  import { formatDateInput, formatMoney } from "@/utils/formatters";
+  import { amountInput, formatDateInput, formatMoney } from "@/utils/formatters";
 
   /** Adds an expense, or edits `dialogs.expense.editing`. */
   let { group }: { group: Group } = $props();
@@ -38,6 +38,15 @@
     fixed: boolean;
     amount: NumberField;
   }
+
+  /** One of the people who may have paid part of the expense. */
+  interface PayerState {
+    included: boolean;
+    amount: NumberField;
+  }
+
+  /** In the "Paid by" list, after the people. */
+  const SEVERAL = "several";
 
   const toCents = (value: NumberField) => {
     const decimal = Number.parseFloat(String(value ?? ""));
@@ -57,6 +66,9 @@
   // Only the last lookup's answer is used.
   let rateLookup = 0;
   let paidBy = $state("");
+  // Several people paid: who, and how much each, in `currency`.
+  let severalPayers = $state(false);
+  let payersState = $state<Record<string, PayerState>>({});
   let expenseDate = $state(formatDateInput());
   let splitsState = $state<Record<string, SplitItemState>>({});
   let submitting = $state(false);
@@ -68,7 +80,13 @@
   // Removed members stay selectable on expenses they are already part of.
   const participants = $derived.by(() => {
     const involved = new Set(
-      editing ? [editing.paid_by, ...editing.splits.map((s) => s.participant_id)] : []
+      editing
+        ? [
+            editing.paid_by,
+            ...(editing.payers ?? []).map((p) => p.participant_id),
+            ...editing.splits.map((s) => s.participant_id),
+          ]
+        : []
     );
     return group.participants.filter((p) => !p.removed || involved.has(p.id));
   });
@@ -98,9 +116,20 @@
       rateLookup += 1;
       lookingUpRate = false;
       const next: Record<string, SplitItemState> = {};
+      const nextPayers: Record<string, PayerState> = {};
+      const paidTogether = editing?.payers ?? [];
+      severalPayers = paidTogether.length > 1;
+      for (const p of participants) {
+        const paid = paidTogether.find((x) => x.participant_id === p.id);
+        nextPayers[p.id] = {
+          included: !!paid,
+          amount: paid ? amountInput(paid.amount_cents) : "",
+        };
+      }
+      payersState = nextPayers;
       if (editing) {
         title = editing.title;
-        amountStr = ((editing.original?.amount_cents ?? editing.amount_cents) / 100).toFixed(2);
+        amountStr = amountInput(editing.original?.amount_cents ?? editing.amount_cents);
         currency = editing.original?.currency ?? group.currency;
         rateStr = editing.original?.rate ?? "";
         rateIsOwn = !!editing.original;
@@ -113,7 +142,7 @@
             included: !!match,
             shares: match?.shares || 1,
             fixed: fixed !== null,
-            amount: fixed !== null ? (fixed / 100).toFixed(2) : "",
+            amount: fixed !== null ? amountInput(fixed) : "",
           };
         }
       } else {
@@ -172,6 +201,41 @@
     suggestRate();
   }
 
+  function payerOf(id: string): PayerState {
+    payersState[id] ??= { included: false, amount: "" };
+    return payersState[id];
+  }
+
+  function choosePayer(value: string) {
+    if (value !== SEVERAL) {
+      severalPayers = false;
+      paidBy = value;
+      return;
+    }
+    severalPayers = true;
+    // Starts from who was paying alone, with the whole amount.
+    if (!participants.some((p) => payersState[p.id]?.included) && paidBy) {
+      const state = payerOf(paidBy);
+      state.included = true;
+      state.amount = paidCents > 0 ? amountInput(paidCents) : "";
+    }
+  }
+
+  function togglePayer(id: string) {
+    const state = payerOf(id);
+    state.included = !state.included;
+    state.amount = "";
+    totalPayers();
+  }
+
+  /** With several payers, the expense's amount is what they paid between them. */
+  function totalPayers() {
+    const total = participants
+      .filter((p) => payersState[p.id]?.included)
+      .reduce((sum, p) => sum + toCents(payersState[p.id].amount), 0);
+    amountStr = total > 0 ? amountInput(total) : "";
+  }
+
   /** Also for someone who joined the group while the dialog is open. */
   function stateOf(id: string): SplitItemState {
     splitsState[id] ??= { included: false, shares: 1, fixed: false, amount: "" };
@@ -201,6 +265,12 @@
   const rate = $derived(Number.parseFloat(String(rateStr ?? "").replace(",", ".")));
   /** The same in the group's currency. */
   const amountCents = $derived(foreign ? (rate > 0 ? Math.round(paidCents * rate) : 0) : paidCents);
+
+  const payers = $derived<ExpensePayer[]>(
+    participants
+      .filter((p) => payersState[p.id]?.included)
+      .map((p) => ({ participant_id: p.id, amount_cents: toCents(payersState[p.id].amount) }))
+  );
 
   const splits = $derived<ExpenseSplit[]>(
     includedParticipants.map((p) => {
@@ -240,6 +310,16 @@
       error = t("expense.needDescription");
       return;
     }
+    if (severalPayers && payers.length === 0) {
+      error = t("expense.needPayers");
+      return;
+    }
+    // One person ticked among "several" paid it all.
+    const together = severalPayers && payers.length > 1 ? payers : [];
+    if (together.some((p) => p.amount_cents <= 0)) {
+      error = t("expense.needPayerAmounts");
+      return;
+    }
     if (paidCents <= 0) {
       error = t("expense.needAmount");
       return;
@@ -252,6 +332,7 @@
       error = t("expense.lessThanCent", group.currency);
       return;
     }
+    const payer = severalPayers ? payers[0].participant_id : paidBy;
     if (includedParticipants.length === 0) {
       error = t("expense.needPeople");
       return;
@@ -288,12 +369,22 @@
               expense.id,
               trimmedTitle,
               amountCents,
-              paidBy,
+              payer,
+              together,
               splits,
               createdAt,
               original
             )
-          : api.addExpense(groupId, trimmedTitle, amountCents, paidBy, splits, createdAt, original)
+          : api.addExpense(
+              groupId,
+              trimmedTitle,
+              amountCents,
+              payer,
+              together,
+              splits,
+              createdAt,
+              original
+            )
       );
       dialogs.expense.open = false;
     } catch (err) {
@@ -307,6 +398,7 @@
     p.id === currentUserId ? t("common.withYou", p.name) : p.name;
 
   const payerName = $derived.by(() => {
+    if (severalPayers) return t("expense.several");
     const p = participants.find((x) => x.id === paidBy);
     return p ? nameWithYou(p) : t("common.choose");
   });
@@ -343,9 +435,11 @@
               step="0.01"
               min="0.01"
               required
+              readonly={severalPayers}
               bind:value={amountStr}
               placeholder="0.00"
-              class="tabular-nums"
+              aria-describedby={severalPayers ? "expense-amount-is-total" : undefined}
+              class="tabular-nums read-only:bg-muted"
             />
           </Field.Field>
 
@@ -412,16 +506,71 @@
 
           <Field.Field>
             <Field.Label for="select-expense-payer">{t("common.paidBy")}</Field.Label>
-            <Select.Root type="single" bind:value={paidBy}>
-              <Select.Trigger id="select-expense-payer" class="w-full">{payerName}</Select.Trigger>
+            <Select.Root
+              type="single"
+              value={severalPayers ? SEVERAL : paidBy}
+              onValueChange={choosePayer}
+            >
+              <Select.Trigger id="select-expense-payer" class="w-full min-w-0">
+                <span class="truncate">{payerName}</span>
+              </Select.Trigger>
               <Select.Content>
                 {#each participants as p (p.id)}
                   <Select.Item value={p.id} label={nameWithYou(p)} />
                 {/each}
+                {#if participants.length > 1}
+                  <Select.Separator />
+                  <Select.Item value={SEVERAL} label={t("expense.severalPayers")} />
+                {/if}
               </Select.Content>
             </Select.Root>
           </Field.Field>
         </div>
+
+        {#if severalPayers}
+          <Field.Set>
+            <Field.Legend variant="label" class="mb-0">{t("expense.whoPaid")}</Field.Legend>
+            <Field.Description id="expense-amount-is-total">
+              {t("expense.whoPaidHelp")}
+            </Field.Description>
+            <ul class="divide-y rounded-xl border" aria-label={t("expense.whoPaid")}>
+              {#each participants as p (p.id)}
+                {@const state = payersState[p.id] || { included: false, amount: "" }}
+                <li
+                  class={cn(
+                    "flex min-h-11 items-center justify-between gap-2 py-1.5 pr-1.5 pl-3 sm:pr-3",
+                    !state.included && "text-muted-foreground"
+                  )}
+                >
+                  <div class="flex min-w-0 items-center gap-2.5">
+                    <Checkbox
+                      id={`payer-${p.id}`}
+                      checked={state.included}
+                      onCheckedChange={() => togglePayer(p.id)}
+                      aria-label={t("expense.paidPart", p.name)}
+                    />
+                    <Label for={`payer-${p.id}`} class="block min-w-0 truncate font-normal">
+                      {p.name}
+                    </Label>
+                  </div>
+                  {#if state.included}
+                    <Input
+                      type="number"
+                      inputmode="decimal"
+                      step="0.01"
+                      min="0.01"
+                      bind:value={payersState[p.id].amount}
+                      oninput={totalPayers}
+                      placeholder="0.00"
+                      aria-label={t("expense.paidByAmount", p.name)}
+                      class="h-8 w-24 text-right tabular-nums"
+                    />
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          </Field.Set>
+        {/if}
 
         <Field.Set>
           <div class="flex items-center justify-between">

@@ -15,6 +15,7 @@
   import { exportGroup, leaveGroup } from "@/lib/actions";
   import { backendText } from "@/lib/i18n/backend";
   import { t } from "@/lib/i18n/index.svelte";
+  import { paidAmounts } from "@/lib/split";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { memberTone } from "@/lib/tones";
@@ -31,8 +32,10 @@
   );
   const userPaidCents = $derived(
     group.expenses
-      .filter((e) => e.paid_by === currentUserId && !e.is_reimbursement)
-      .reduce((sum, e) => sum + e.amount_cents, 0)
+      .filter((e) => !e.is_reimbursement)
+      .flatMap(paidAmounts)
+      .filter((paid) => paid.id === currentUserId)
+      .reduce((sum, paid) => sum + paid.cents, 0)
   );
   const me = $derived(group.participants.find((p) => p.id === currentUserId));
   const syncError = $derived(openGroup.syncInfo?.last_error ?? null);

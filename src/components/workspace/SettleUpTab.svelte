@@ -12,6 +12,7 @@
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import type { Group } from "@/types";
+  import { amountInput } from "@/utils/formatters";
 
   let { group }: { group: Group } = $props();
 
@@ -69,7 +70,7 @@
                   dialogs.openReimburse({
                     fromId: s.from_id,
                     toId: s.to_id,
-                    amount: (s.amount_cents / 100).toFixed(2),
+                    amount: amountInput(s.amount_cents),
                   })}
               >
                 <CheckIcon data-icon="inline-start" />

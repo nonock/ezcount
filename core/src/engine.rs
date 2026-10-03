@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::models::{ExpenseSplit, Group, Participant, ParticipantBalance, SettlementTransfer};
+use crate::models::{
+    Expense, ExpenseSplit, Group, Participant, ParticipantBalance, SettlementTransfer,
+};
 
 /// Totals are summed in `i128`, which no realistic number of expenses can overflow, and
 /// saturate into `i64` (symmetrically, so negating one is always safe).
@@ -75,6 +77,26 @@ pub fn owed(amount_cents: i64, original_cents: Option<i64>, splits: &[ExpenseSpl
     }
 }
 
+/// Who paid an expense and how much, in the group's currency: `paid_by` all of it, or each of
+/// the `payers` their amount. Those are in the currency paid, so for an expense paid in another
+/// one `amount_cents` is divided in the same proportions.
+pub fn paid(expense: &Expense) -> Vec<(&str, i64)> {
+    if expense.payers.is_empty() {
+        return vec![(expense.paid_by.as_str(), expense.amount_cents)];
+    }
+    let there: Vec<i64> = expense.payers.iter().map(|p| p.amount_cents).collect();
+    let here = match expense.original {
+        Some(_) => split_weighted(expense.amount_cents, &there),
+        None => there,
+    };
+    expense
+        .payers
+        .iter()
+        .map(|p| p.participant_id.as_str())
+        .zip(here)
+        .collect()
+}
+
 /// Calculates the detailed balance (paid, owed, net) for each participant in a group.
 pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
     let mut paid_map: HashMap<String, i128> = HashMap::new();
@@ -87,8 +109,10 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
     }
 
     for expense in &group.expenses {
-        // Payer is credited the full expense amount
-        *paid_map.entry(expense.paid_by.clone()).or_default() += i128::from(expense.amount_cents);
+        // Payers are credited what they paid, the full amount between them
+        for (payer, amount) in paid(expense) {
+            *paid_map.entry(payer.to_string()).or_default() += i128::from(amount);
+        }
 
         let owed = owed(
             expense.amount_cents,
@@ -109,6 +133,7 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
         .map(|p| p.id.as_str())
         .chain(group.expenses.iter().flat_map(|e| {
             std::iter::once(e.paid_by.as_str())
+                .chain(e.payers.iter().map(|p| p.participant_id.as_str()))
                 .chain(e.splits.iter().map(|s| s.participant_id.as_str()))
         }))
         .filter(|id| seen.insert(*id))
@@ -211,7 +236,7 @@ pub fn calculate_settlements(group: &Group) -> Vec<SettlementTransfer> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Expense, ExpenseSplit, Participant};
+    use crate::models::{Expense, ExpensePayer, ExpenseSplit, OriginalAmount, Participant};
     use chrono::Utc;
 
     fn setup_test_group() -> Group {
@@ -256,6 +281,7 @@ mod tests {
             title: "Dinner".to_string(),
             amount_cents: 6000,
             paid_by: "p1".to_string(),
+            payers: Vec::new(),
             splits: vec![
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
@@ -286,6 +312,7 @@ mod tests {
             title: "Taxi".to_string(),
             amount_cents: 3000,
             paid_by: "p2".to_string(),
+            payers: Vec::new(),
             splits: vec![
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
@@ -340,6 +367,7 @@ mod tests {
             title: "Snacks".to_string(),
             amount_cents: 1000,
             paid_by: "p1".to_string(),
+            payers: Vec::new(),
             splits: vec![
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
@@ -382,6 +410,7 @@ mod tests {
             title: "Groceries".to_string(),
             amount_cents: 1000,
             paid_by: "p1".to_string(),
+            payers: Vec::new(),
             splits: vec![
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
@@ -433,6 +462,7 @@ mod tests {
             title: "Dinner".to_string(),
             amount_cents: 6000,
             paid_by: "p1".to_string(),
+            payers: Vec::new(),
             splits: vec![
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
@@ -464,6 +494,7 @@ mod tests {
             title: "Payment: Bob -> Alice".to_string(),
             amount_cents: 2000,
             paid_by: "p2".to_string(),
+            payers: Vec::new(),
             splits: vec![ExpenseSplit {
                 participant_id: "p1".to_string(),
                 shares: 1,
@@ -493,6 +524,38 @@ mod tests {
         assert_eq!(settlements[0].amount_cents, 2000);
     }
 
+    #[test]
+    fn several_payers_are_each_credited_what_they_paid() {
+        let mut group = setup_test_group();
+        let payer = |id: &str, amount_cents: i64| ExpensePayer {
+            participant_id: id.to_string(),
+            amount_cents,
+        };
+        // 90.00 paid 60 / 30 by Alice and Bob, shared by the three.
+        let mut dinner = expense("e1", 9000, "p1", &["p1", "p2", "p3"]);
+        dinner.payers = vec![payer("p1", 6000), payer("p2", 3000)];
+        // 100.00 USD paid 75 / 25 by Bob and Charlie, worth 91.01 here.
+        let mut taxi = expense("e2", 9101, "p2", &["p1", "p2"]);
+        taxi.original = Some(OriginalAmount {
+            currency: "USD".to_string(),
+            amount_cents: 10000,
+            rate: "0.9101".to_string(),
+        });
+        taxi.payers = vec![payer("p2", 7500), payer("p3", 2500)];
+        assert_eq!(paid(&taxi), vec![("p2", 6826), ("p3", 2275)]);
+        group.expenses = vec![dinner, taxi];
+
+        let balances = calculate_balances(&group);
+        let of = |id: &str| {
+            let b = balances.iter().find(|b| b.participant_id == id).unwrap();
+            (b.paid_cents, b.owed_cents)
+        };
+        assert_eq!(of("p1"), (6000, 3000 + 4551));
+        assert_eq!(of("p2"), (3000 + 6826, 3000 + 4550));
+        assert_eq!(of("p3"), (2275, 3000));
+        assert_eq!(balances.iter().map(|b| b.net_cents).sum::<i64>(), 0);
+    }
+
     fn expense(id: &str, amount_cents: i64, paid_by: &str, split_ids: &[&str]) -> Expense {
         Expense {
             id: id.to_string(),
@@ -500,6 +563,7 @@ mod tests {
             title: id.to_string(),
             amount_cents,
             paid_by: paid_by.to_string(),
+            payers: Vec::new(),
             splits: split_ids
                 .iter()
                 .map(|p| ExpenseSplit {

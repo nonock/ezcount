@@ -18,6 +18,7 @@ export interface MockExpenseHistoryEntry {
   previous_title: string;
   previous_amount_cents: number;
   previous_paid_by: string;
+  previous_payers?: { participant_id: string; amount_cents: number }[];
   previous_splits: MockExpenseSplit[];
   previous_original?: MockOriginalAmount | null;
   summary: string;
@@ -30,6 +31,7 @@ export interface MockExpense {
   amount_cents: number;
   original?: MockOriginalAmount | null;
   paid_by: string;
+  payers?: { participant_id: string; amount_cents: number }[];
   splits: MockExpenseSplit[];
   created_at: string;
   updated_at: string;
@@ -61,8 +63,8 @@ export const MOCK_SERVER = "http://localhost:8787";
  * - `__OPENED_WITH__`: the link the app was opened with (deep link)
  * - `__RECOVERY_KEY__`: the account's recovery key; new ones are `MOCK-KEY<n>-AAAA-…`
  * - `__OLD_RELAY__`: sign-up gets no recovery key, like on a relay from before them
- * - `__NATIVE__`: `{ share, scan }` features, none by default; shared texts land in
- *   `window.__shared`
+ * - `__NATIVE__`: `{ share, scan, save }` features, none by default; shared texts land in
+ *   `window.__shared`, saved files in `window.__saved`
  * - `__SCANNED__`: what the camera "scans"
  * - `__LINK_SECONDS__`: how long a login link works, 120 by default
  * - `__RATES__`: exchange rates the relay suggests, as `{ "USD/EUR": "0.9234" }`
@@ -249,6 +251,26 @@ export function installTauriMock() {
     }
   }
 
+  /** Who paid, as `PaidBy::new` and `check_payers` in doc.rs: who paid the most first. */
+  function paidBy(args: any) {
+    const payers = [...(args.payers ?? [])].sort((a, b) => b.amount_cents - a.amount_cents);
+    if (payers.length < 2) {
+      return { paid_by: payers[0]?.participant_id ?? args.paidBy, payers: [] };
+    }
+    if (payers.some((p) => p.amount_cents <= 0)) {
+      throw new Error("What each payer paid must be above zero");
+    }
+    const total = payers.reduce((sum, p) => sum + p.amount_cents, 0);
+    const paid = args.original?.amount_cents ?? args.amountCents;
+    const money = (cents: number) => (cents / 100).toFixed(2);
+    if (total !== paid) {
+      throw new Error(
+        `The payers paid ${money(total)} between them, not the expense's ${money(paid)}`
+      );
+    }
+    return { paid_by: payers[0].participant_id, payers };
+  }
+
   function computeBalances(group: MockGroup) {
     const map = new Map<string, { paid: number; owed: number }>();
     for (const p of group.participants) {
@@ -256,8 +278,17 @@ export function installTauriMock() {
     }
 
     for (const exp of group.expenses) {
-      const payer = map.get(exp.paid_by);
-      if (payer) payer.paid += exp.amount_cents;
+      // Like `engine::paid`: several payers' amounts are in the currency paid.
+      const payers = exp.payers ?? [];
+      const there = payers.map((p) => p.amount_cents);
+      const here = exp.original ? splitWeighted(exp.amount_cents, there) : there;
+      const paid = payers.length
+        ? payers.map((p, i) => ({ id: p.participant_id, cents: here[i] }))
+        : [{ id: exp.paid_by, cents: exp.amount_cents }];
+      for (const { id, cents } of paid) {
+        const payer = map.get(id);
+        if (payer) payer.paid += cents;
+      }
 
       for (const item of splitAmount(exp)) {
         const debtor = map.get(item.pid);
@@ -386,13 +417,17 @@ export function installTauriMock() {
           return passwordStrength(args.password, args.username);
 
         case "native_features":
-          return { share: false, scan: false, ...w.__NATIVE__ };
+          return { share: false, scan: false, save: false, ...w.__NATIVE__ };
 
         case "plugin:barcode-scanner|check_permissions":
           return { camera: "granted" };
 
         case "plugin:barcode-scanner|scan":
           return { content: w.__SCANNED__, format: "QR_CODE", bounds: null };
+
+        case "save_download":
+          w.__saved = [...(w.__saved || []), { name: args.fileName, text: args.text }];
+          return `C:\\Users\\alice\\Downloads\\${args.fileName}`;
 
         case "share_text":
           w.__shared = [...(w.__shared || []), args.text];
@@ -809,6 +844,7 @@ export function installTauriMock() {
           const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
           checkSplits(args.amountCents, args.original, args.splits);
+          const who = paidBy(args);
           const now = new Date().toISOString();
           const createdAt = args?.createdAt || now;
           const exp: MockExpense = {
@@ -817,7 +853,8 @@ export function installTauriMock() {
             title: args.title,
             amount_cents: args.amountCents,
             original: args.original ?? null,
-            paid_by: args.paidBy,
+            paid_by: who.paid_by,
+            payers: who.payers,
             splits: args.splits,
             created_at: createdAt,
             updated_at: now,
@@ -835,6 +872,7 @@ export function installTauriMock() {
           if (!exp) throw new Error("Expense not found");
 
           checkSplits(args.amountCents, args.original, args.splits);
+          const who = paidBy(args);
           const prevTitle = exp.title;
           const prevAmount = exp.amount_cents;
           const prevPayer = exp.paid_by;
@@ -846,6 +884,7 @@ export function installTauriMock() {
             previous_title: prevTitle,
             previous_amount_cents: prevAmount,
             previous_paid_by: prevPayer,
+            previous_payers: exp.payers ?? [],
             previous_splits: prevSplits,
             previous_original: exp.original ?? null,
             summary: `Amount changed to ${args.amountCents / 100} • Title updated to ${args.title}`,
@@ -854,7 +893,8 @@ export function installTauriMock() {
           exp.title = args.title;
           exp.amount_cents = args.amountCents;
           exp.original = args.original ?? null;
-          exp.paid_by = args.paidBy;
+          exp.paid_by = who.paid_by;
+          exp.payers = who.payers;
           exp.splits = args.splits;
           if (args?.createdAt) {
             exp.created_at = args.createdAt;

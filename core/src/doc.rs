@@ -5,13 +5,18 @@
 //! - `meta` (map): `id`, `name`, `currency`, `created_at`, `description`, `image`
 //! - `participants` (map): participant id -> map { `name`, `removed`, `position`, `avatar` }
 //! - `expenses` (map): expense id -> map { `title`, `amount_cents`, `paid_by`, `splits`,
-//!   `created_at`, `updated_at`, `is_reimbursement`, `history` (list), `original` }
+//!   `created_at`, `updated_at`, `is_reimbursement`, `history` (list), `original`, `payers` }
 //!
 //! `amount_cents` is always in the group's currency. An expense paid in another one also has
 //! `original` (a plain value: `currency`, `amount_cents`, `rate`). A split is a number of
 //! `shares`, or a fixed amount in the currency paid, the shares dividing what the fixed
 //! amounts leave. App versions from before fixed amounts read only `shares`, so with fixed
 //! amounts that field holds shares giving everyone the same amount (see `splits_value`).
+//!
+//! An expense several people paid also has `payers` (a plain value: who and how much, in the
+//! currency paid), with the one who paid the most in `paid_by`. App versions from before that
+//! read only `paid_by` and credit them the whole amount; when one of them edits the expense
+//! so that `payers` no longer fits it, `paid_by` alone counts (see `check_payers`).
 //!
 //! Pictures (`image`, `avatar`) are `data:` URLs of small images, which the app shrinks before
 //! saving them.
@@ -31,7 +36,7 @@ use uuid::Uuid;
 
 use crate::engine;
 use crate::models::{
-    Expense, ExpenseHistoryEntry, ExpenseSplit, Group, OriginalAmount, Participant,
+    Expense, ExpenseHistoryEntry, ExpensePayer, ExpenseSplit, Group, OriginalAmount, Participant,
 };
 
 const META: &str = "meta";
@@ -136,6 +141,19 @@ fn splits_value(
     LoroValue::List(list.into())
 }
 
+fn payers_value(payers: &[ExpensePayer]) -> LoroValue {
+    let list: Vec<LoroValue> = payers
+        .iter()
+        .map(|p| {
+            map_value([
+                ("participant_id", p.participant_id.as_str().into()),
+                ("amount_cents", p.amount_cents.into()),
+            ])
+        })
+        .collect();
+    LoroValue::List(list.into())
+}
+
 fn original_value(original: &OriginalAmount) -> LoroValue {
     map_value([
         ("currency", original.currency.as_str().into()),
@@ -151,6 +169,7 @@ fn history_value(entry: &ExpenseHistoryEntry) -> LoroValue {
         ("previous_title", entry.previous_title.as_str().into()),
         ("previous_amount_cents", entry.previous_amount_cents.into()),
         ("previous_paid_by", entry.previous_paid_by.as_str().into()),
+        ("previous_payers", payers_value(&entry.previous_payers)),
         (
             "previous_splits",
             splits_value(
@@ -248,6 +267,8 @@ struct DocHistoryEntry {
     previous_title: String,
     previous_amount_cents: i64,
     previous_paid_by: String,
+    #[serde(default)]
+    previous_payers: Vec<ExpensePayer>,
     previous_splits: Vec<DocSplit>,
     #[serde(default)]
     previous_original: Option<OriginalAmount>,
@@ -261,6 +282,8 @@ struct DocExpense {
     #[serde(default)]
     original: Option<OriginalAmount>,
     paid_by: String,
+    #[serde(default)]
+    payers: Vec<ExpensePayer>,
     splits: Vec<DocSplit>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -271,6 +294,21 @@ struct DocExpense {
 }
 
 impl DocExpense {
+    /// The several payers, when they still fit the expense: an older app version changes the
+    /// amount or `paid_by` without them, and then `paid_by` paid it all.
+    fn checked_payers(&self) -> Vec<ExpensePayer> {
+        let fits = check_payers(
+            self.amount_cents,
+            self.original.as_ref(),
+            &self.paid_by,
+            &self.payers,
+        );
+        match fits {
+            Ok(()) => self.payers.clone(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// The splits, checked. An older app version changes the amount without the splits; if
     /// the fixed amounts no longer fit it, the shares that version reads are used.
     fn checked_splits(&self) -> Res<Vec<ExpenseSplit>> {
@@ -405,6 +443,7 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
                     return None;
                 }
             };
+            let payers = e.checked_payers();
             Some(Expense {
                 id,
                 group_id: meta.id.clone(),
@@ -412,6 +451,7 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
                 amount_cents: e.amount_cents,
                 original: e.original,
                 paid_by: e.paid_by,
+                payers,
                 splits,
                 created_at: e.created_at,
                 updated_at: e.updated_at,
@@ -423,6 +463,7 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
                         previous_title: h.previous_title,
                         previous_amount_cents: h.previous_amount_cents,
                         previous_paid_by: h.previous_paid_by,
+                        previous_payers: h.previous_payers,
                         previous_splits: read_splits(&h.previous_splits, false),
                         previous_original: h.previous_original,
                         summary: h.summary,
@@ -496,6 +537,10 @@ fn insert_expense(doc: &LoroDoc, expense: &Expense) -> Res<()> {
         .map_err(doc_err)?;
     e.insert("paid_by", expense.paid_by.as_str())
         .map_err(doc_err)?;
+    if !expense.payers.is_empty() {
+        e.insert("payers", payers_value(&expense.payers))
+            .map_err(doc_err)?;
+    }
     let original = expense.original.as_ref();
     if let Some(original) = original {
         e.insert(ORIGINAL, original_value(original))
@@ -591,6 +636,8 @@ pub struct ImportedExpense {
     pub title: String,
     pub amount_cents: i64,
     pub paid_by: usize,
+    // (person, amount) for each of several payers, as in `ExpensePayer`
+    pub payers: Vec<(usize, i64)>,
     pub original: Option<OriginalAmount>,
     // (person, shares, fixed amount), as in `ExpenseSplit`
     pub splits: Vec<(usize, u32, Option<i64>)>,
@@ -631,13 +678,24 @@ pub fn imported_group_doc(
                 })
             })
             .collect::<Res<Vec<_>>>()?;
-        let paid_by = id(e.paid_by)?;
+        let payers = e
+            .payers
+            .iter()
+            .map(|(position, amount_cents)| {
+                Ok(ExpensePayer {
+                    participant_id: id(*position)?,
+                    amount_cents: *amount_cents,
+                })
+            })
+            .collect::<Res<Vec<_>>>()?;
+        let PaidBy { paid_by, payers } = PaidBy::new(id(e.paid_by)?, payers);
         let original = normal_original(&group, e.original.clone())?;
         validate_expense(
             &group,
             e.amount_cents,
             original.as_ref(),
             &paid_by,
+            &payers,
             &splits,
             &HashSet::new(),
         )?;
@@ -650,6 +708,7 @@ pub fn imported_group_doc(
                 amount_cents: e.amount_cents,
                 original,
                 paid_by,
+                payers,
                 splits,
                 created_at: e.created_at,
                 updated_at: now,
@@ -925,6 +984,77 @@ pub(crate) fn check_amounts(
     Ok(())
 }
 
+/// Who paid an expense: one person, or several with what each paid, in the currency paid.
+pub struct PaidBy {
+    paid_by: String,
+    payers: Vec<ExpensePayer>,
+}
+
+impl PaidBy {
+    /// Without `payers`, `paid_by` paid it all; so did a lone payer.
+    pub fn new(paid_by: String, mut payers: Vec<ExpensePayer>) -> Self {
+        if payers.len() < 2 {
+            let paid_by = payers.pop().map_or(paid_by, |p| p.participant_id);
+            return Self {
+                paid_by,
+                payers: Vec::new(),
+            };
+        }
+        // Who paid the most comes first and is `paid_by`, the only payer older app versions
+        // know.
+        payers.sort_by_key(|p| std::cmp::Reverse(p.amount_cents));
+        Self {
+            paid_by: payers[0].participant_id.clone(),
+            payers,
+        }
+    }
+}
+
+impl From<String> for PaidBy {
+    fn from(paid_by: String) -> Self {
+        Self::new(paid_by, Vec::new())
+    }
+}
+
+/// Several payers are at least two different people, `paid_by` first, whose amounts add up to
+/// what was paid (`original`'s amount for an expense in another currency).
+fn check_payers(
+    amount_cents: i64,
+    original: Option<&OriginalAmount>,
+    paid_by: &str,
+    payers: &[ExpensePayer],
+) -> Res<()> {
+    let Some(first) = payers.first() else {
+        return Ok(());
+    };
+    if payers.len() < 2 || first.participant_id != paid_by {
+        return Err("The payers of this expense are not valid".to_string());
+    }
+    let mut seen = HashSet::new();
+    if !payers
+        .iter()
+        .all(|p| seen.insert(p.participant_id.as_str()))
+    {
+        return Err("A participant appears twice among the payers".to_string());
+    }
+    if !payers
+        .iter()
+        .all(|p| p.amount_cents > 0 && p.amount_cents <= MAX_AMOUNT_CENTS)
+    {
+        return Err("What each payer paid must be above zero".to_string());
+    }
+    let total: i128 = payers.iter().map(|p| i128::from(p.amount_cents)).sum();
+    let paid = i128::from(original.map_or(amount_cents, |o| o.amount_cents));
+    if total != paid {
+        return Err(format!(
+            "The payers paid {} between them, not the expense's {}",
+            money(total),
+            money(paid)
+        ));
+    }
+    Ok(())
+}
+
 /// `grandfathered` lists IDs that may be used even if removed: the people already on an
 /// expense being edited, so editing an old expense doesn't force dropping them.
 fn validate_expense(
@@ -932,10 +1062,12 @@ fn validate_expense(
     amount_cents: i64,
     original: Option<&OriginalAmount>,
     paid_by: &str,
+    payers: &[ExpensePayer],
     splits: &[ExpenseSplit],
     grandfathered: &HashSet<&str>,
 ) -> Res<()> {
     check_amounts(amount_cents, original, splits)?;
+    check_payers(amount_cents, original, paid_by, payers)?;
     let mut seen = HashSet::new();
     if !splits
         .iter()
@@ -949,7 +1081,7 @@ fn validate_expense(
             .iter()
             .any(|p| p.id == id && (!p.removed || grandfathered.contains(id)))
     };
-    if !usable(paid_by) {
+    if !usable(paid_by) || !payers.iter().all(|p| usable(&p.participant_id)) {
         return Err("The payer is not an active member of this group".to_string());
     }
     if !splits.iter().all(|s| usable(&s.participant_id)) {
@@ -964,11 +1096,12 @@ pub fn add_expense(
     doc: &LoroDoc,
     title: &str,
     amount_cents: i64,
-    paid_by: String,
+    paid_by: impl Into<PaidBy>,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
     original: Option<OriginalAmount>,
 ) -> Res<()> {
+    let PaidBy { paid_by, payers } = paid_by.into();
     let group = read_group(doc)?;
     let original = normal_original(&group, original)?;
     validate_expense(
@@ -976,6 +1109,7 @@ pub fn add_expense(
         amount_cents,
         original.as_ref(),
         &paid_by,
+        &payers,
         &splits,
         &HashSet::new(),
     )?;
@@ -989,6 +1123,7 @@ pub fn add_expense(
             amount_cents,
             original,
             paid_by,
+            payers,
             splits,
             created_at: created_at.unwrap_or(now),
             updated_at: now,
@@ -1004,11 +1139,12 @@ pub fn update_expense(
     expense_id: &str,
     title: &str,
     amount_cents: i64,
-    paid_by: String,
+    paid_by: impl Into<PaidBy>,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
     original: Option<OriginalAmount>,
 ) -> Res<()> {
+    let PaidBy { paid_by, payers } = paid_by.into();
     let group = read_group(doc)?;
     let expense = group
         .expenses
@@ -1016,6 +1152,7 @@ pub fn update_expense(
         .find(|e| e.id == expense_id)
         .ok_or_else(|| "Expense not found".to_string())?;
     let grandfathered: HashSet<&str> = std::iter::once(expense.paid_by.as_str())
+        .chain(expense.payers.iter().map(|p| p.participant_id.as_str()))
         .chain(expense.splits.iter().map(|s| s.participant_id.as_str()))
         .collect();
     let original = normal_original(&group, original)?;
@@ -1024,6 +1161,7 @@ pub fn update_expense(
         amount_cents,
         original.as_ref(),
         &paid_by,
+        &payers,
         &splits,
         &grandfathered,
     )?;
@@ -1060,15 +1198,42 @@ pub fn update_expense(
             .insert("amount_cents", amount_cents)
             .map_err(doc_err)?;
     }
-    if expense.paid_by != paid_by {
+    if expense.paid_by != paid_by || expense.payers != payers {
+        // One payer by name, several with what each paid.
+        let describe = |paid_by: &str, payers: &[ExpensePayer]| {
+            if payers.is_empty() {
+                return name_of(paid_by).to_string();
+            }
+            payers
+                .iter()
+                .map(|p| {
+                    format!(
+                        "{} ({})",
+                        name_of(&p.participant_id),
+                        money(i128::from(p.amount_cents))
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
         changes.push(format!(
             "Payer changed from {} to {}",
-            name_of(&expense.paid_by),
-            name_of(&paid_by)
+            describe(&expense.paid_by, &expense.payers),
+            describe(&paid_by, &payers)
         ));
-        target
-            .insert("paid_by", paid_by.as_str())
+        if expense.paid_by != paid_by {
+            target
+                .insert("paid_by", paid_by.as_str())
+                .map_err(doc_err)?;
+        }
+        if expense.payers != payers {
+            if payers.is_empty() {
+                target.delete("payers")
+            } else {
+                target.insert("payers", payers_value(&payers))
+            }
             .map_err(doc_err)?;
+        }
     }
     if expense.original != original {
         let describe = |o: &Option<OriginalAmount>| match o {
@@ -1131,6 +1296,7 @@ pub fn update_expense(
         previous_title: expense.title.clone(),
         previous_amount_cents: expense.amount_cents,
         previous_paid_by: expense.paid_by.clone(),
+        previous_payers: expense.payers.clone(),
         previous_splits: expense.splits.clone(),
         previous_original: expense.original.clone(),
         summary,
@@ -1196,6 +1362,7 @@ pub fn record_reimbursement(
             title,
             amount_cents,
             paid_by: from_id,
+            payers: Vec::new(),
             splits: vec![ExpenseSplit {
                 participant_id: to_id,
                 shares: 1,
@@ -1450,7 +1617,7 @@ mod tests {
             &doc,
             "X",
             100,
-            "ghost".into(),
+            "ghost".to_string(),
             vec![split(alice, 1)],
             None,
             None,
@@ -1608,6 +1775,109 @@ mod tests {
             );
         }
         assert!(new_group_doc("Trip", "euro", &[]).is_err());
+    }
+
+    #[test]
+    fn several_people_pay_one_expense() {
+        let (doc, group) = sample();
+        let (alice, bob) = (&group.participants[0].id, &group.participants[1].id);
+        let payer = |id: &str, amount_cents: i64| ExpensePayer {
+            participant_id: id.to_string(),
+            amount_cents,
+        };
+        let everyone = || vec![split(alice, 1), split(bob, 1)];
+        let add = |payers: Vec<ExpensePayer>| {
+            add_expense(
+                &doc,
+                "Dinner",
+                9000,
+                PaidBy::new(alice.clone(), payers),
+                everyone(),
+                None,
+                None,
+            )
+        };
+
+        // Who paid the most is `paid_by`, whatever the order given.
+        add(vec![payer(alice, 3000), payer(bob, 6000)]).unwrap();
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+        assert_eq!(e.paid_by, *bob);
+        assert_eq!(e.payers, vec![payer(bob, 6000), payer(alice, 3000)]);
+        assert_eq!(net(&doc, bob), 1500);
+        assert_eq!(net(&doc, alice), -1500);
+
+        // A lone payer paid it all.
+        add(vec![payer(bob, 1)]).unwrap();
+        let lone = read_group(&doc).unwrap().expenses.remove(1);
+        assert_eq!(
+            (lone.paid_by.as_str(), lone.payers.len()),
+            (bob.as_str(), 0)
+        );
+        delete_expense(&doc, &lone.id).unwrap();
+
+        for (bad, why) in [
+            (vec![payer(alice, 3000), payer(bob, 5000)], "not the total"),
+            (vec![payer(alice, 9000), payer(bob, 0)], "nothing paid"),
+            (vec![payer(alice, 4500), payer(alice, 4500)], "twice"),
+            (
+                vec![payer(alice, 4500), payer("ghost", 4500)],
+                "not a member",
+            ),
+        ] {
+            assert!(add(bad).is_err(), "{why}");
+        }
+
+        // Editing the payers is recorded with what each paid, and going back to one payer
+        // removes them.
+        let update = |paid_by: PaidBy, amount_cents: i64| {
+            update_expense(
+                &doc,
+                &e.id,
+                "Dinner",
+                amount_cents,
+                paid_by,
+                everyone(),
+                None,
+                None,
+            )
+        };
+        update(
+            PaidBy::new(alice.clone(), vec![payer(alice, 7000), payer(bob, 2000)]),
+            9000,
+        )
+        .unwrap();
+        let edited = read_group(&doc).unwrap().expenses.remove(0);
+        assert_eq!(edited.paid_by, *alice);
+        assert_eq!(
+            edited.history[0].summary,
+            "Payer changed from Bob (60.00), Alice (30.00) to Alice (70.00), Bob (20.00)"
+        );
+        assert_eq!(edited.history[0].previous_payers, e.payers);
+        // The amount can't change without the payers' amounts.
+        assert!(update(PaidBy::new(alice.clone(), edited.payers.clone()), 8000).is_err());
+        update(bob.clone().into(), 8000).unwrap();
+        let single = read_group(&doc).unwrap().expenses.remove(0);
+        assert_eq!(
+            (single.paid_by.as_str(), single.payers.len()),
+            (bob.as_str(), 0)
+        );
+        assert_eq!(net(&doc, bob), 4000);
+
+        // An older app version changes the amount, or who paid, and knows nothing of the
+        // payers: they no longer fit, so `paid_by` paid it all.
+        add(vec![payer(alice, 3000), payer(bob, 6000)]).unwrap();
+        let shared = read_group(&doc).unwrap().expenses.remove(1);
+        let stored = child_map(&doc.get_map(EXPENSES), &shared.id).unwrap();
+        stored.insert("amount_cents", 5000).unwrap();
+        assert!(read_group(&doc).unwrap().expenses[1].payers.is_empty());
+        stored.insert("amount_cents", 9000).unwrap();
+        assert_eq!(read_group(&doc).unwrap().expenses[1].payers.len(), 2);
+        stored.insert("paid_by", alice.as_str()).unwrap();
+        let read = read_group(&doc).unwrap().expenses.remove(1);
+        assert_eq!(
+            (read.paid_by.as_str(), read.payers.len()),
+            (alice.as_str(), 0)
+        );
     }
 
     #[test]
@@ -1771,6 +2041,7 @@ mod tests {
                 title: title.to_string(),
                 amount_cents,
                 paid_by: alice.clone(),
+                payers: Vec::new(),
                 splits,
                 created_at: now,
                 updated_at: now,

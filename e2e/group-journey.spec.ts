@@ -130,18 +130,18 @@ test.describe("Expense & Settlement Lifecycle", () => {
     const expenseCard = page.locator("[data-testid='expense-item']").first();
     await expect(expenseCard).toBeVisible();
     await expect(expenseCard.getByRole("heading", { name: "Chalet Rental" })).toBeVisible();
-    await expect(expenseCard.getByText("€200.00")).toBeVisible();
+    await expect(expenseCard.getByText("€200")).toBeVisible();
     await expect(expenseCard.getByText("Paid by Alice", { exact: false })).toBeVisible();
 
     // The creator is Alice, so the summary is hers.
     await expect(page.getByText("Your balance", { exact: true })).toBeVisible();
     await expect(page.getByText("Paid by you")).toBeVisible();
-    await expect(page.getByText("€200.00").first()).toBeVisible();
-    await expect(page.getByText("+€100.00")).toBeVisible();
+    await expect(page.getByText("€200").first()).toBeVisible();
+    await expect(page.getByText("+€100")).toBeVisible();
 
     // Saying you're Bob instead updates the summary
     await chooseIdentity(page, "Bob");
-    await expect(page.getByText("-€100.00")).toBeVisible();
+    await expect(page.getByText("-€100")).toBeVisible();
     await chooseIdentity(page, "Alice");
 
     // Add a second expense with a past date (yesterday)
@@ -175,7 +175,7 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await expect(
       expenseCard.getByRole("heading", { name: "Chalet Rental & Firewood" })
     ).toBeVisible();
-    await expect(expenseCard.getByText("€250.00")).toBeVisible();
+    await expect(expenseCard.getByText("€250")).toBeVisible();
 
     // Verify "Edited (1)" badge is visible and clickable
     const editedBadge = expenseCard.getByRole("button", { name: /Edited/i });
@@ -186,7 +186,7 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await expect(page.getByRole("heading", { name: "Expense Revision History" })).toBeVisible();
     const historyModal = page.getByRole("dialog");
     await expect(historyModal.getByText("Chalet Rental", { exact: true })).toBeVisible();
-    await expect(historyModal.getByText("€200.00")).toBeVisible();
+    await expect(historyModal.getByText("€200")).toBeVisible();
 
     // Close history modal
     await page.getByRole("button", { name: "Close" }).click();
@@ -195,13 +195,13 @@ test.describe("Expense & Settlement Lifecycle", () => {
     await page.getByRole("tab", { name: "Balances" }).click();
     await expect(page.getByText("Gets back")).toBeVisible();
     await expect(page.getByText("Owes", { exact: true })).toBeVisible();
-    await expect(page.getByText("-€150.00")).toBeVisible();
+    await expect(page.getByText("-€150")).toBeVisible();
 
     // Check Settle Up tab
     await page.getByRole("tab", { name: "Settle Up" }).click();
     const settleCard = page.locator("li").filter({ hasText: "Bob pays Alice" });
     await expect(settleCard).toBeVisible();
-    await expect(settleCard.getByText("€150.00")).toBeVisible();
+    await expect(settleCard.getByText("€150")).toBeVisible();
     await expect(settleCard.getByRole("button", { name: "Mark as Paid" })).toBeVisible();
   });
 

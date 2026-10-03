@@ -5,8 +5,8 @@
   import { summaryText } from "@/lib/i18n/backend";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
-  import type { ExpenseSplit, Group, OriginalAmount } from "@/types";
-  import { expenseTitle, formatDateTime, formatMoney } from "@/utils/formatters";
+  import type { ExpensePayer, ExpenseSplit, Group, OriginalAmount } from "@/types";
+  import { expenseTitle, formatDateTime, formatList, formatMoney } from "@/utils/formatters";
 
   let { group }: { group: Group } = $props();
 
@@ -18,6 +18,18 @@
 
   const nameOf = (id: string) =>
     group.participants.find((p) => p.id === id)?.name || t("common.unknown");
+  /** One payer by name; several with what each paid, in the currency paid. */
+  function payersText(
+    paidBy: string,
+    payers: ExpensePayer[] | undefined,
+    original: OriginalAmount | null | undefined
+  ) {
+    if (!payers?.length) return nameOf(paidBy);
+    const currency = original?.currency ?? group.currency;
+    return formatList(
+      payers.map((p) => `${nameOf(p.participant_id)} (${formatMoney(p.amount_cents, currency)})`)
+    );
+  }
   /** "2 parts", or the amount someone owes whatever the others do. */
   function splitLabel(split: ExpenseSplit, original: OriginalAmount | null | undefined) {
     if (split.fixed_cents != null) {
@@ -53,7 +65,7 @@
             <Badge variant="secondary" class="mb-1.5">{t("history.current")}</Badge>
             <p class="font-medium">{expenseTitle(expense)}</p>
             <p class="text-sm text-muted-foreground">
-              {t("history.paidBy", nameOf(expense.paid_by))}
+              {t("history.paidBy", payersText(expense.paid_by, expense.payers, expense.original))}
             </p>
           </div>
           <div class="text-right">
@@ -125,7 +137,13 @@
                       {/if}
                     </dd>
                     <dt class="text-muted-foreground">{t("history.payer")}</dt>
-                    <dd class="text-right">{nameOf(entry.previous_paid_by)}</dd>
+                    <dd class="text-right">
+                      {payersText(
+                        entry.previous_paid_by,
+                        entry.previous_payers,
+                        entry.previous_original
+                      )}
+                    </dd>
                     <dt class="text-muted-foreground">{t("history.split")}</dt>
                     <dd class="text-right">
                       {entry.previous_splits

@@ -86,7 +86,7 @@ export async function installWebBackend(): Promise<boolean> {
           return invite ? [invite] : null;
         case "native_features":
           // No camera scanning: the browser's would need its own QR decoder.
-          return { share: typeof navigator.share === "function", scan: false };
+          return { share: typeof navigator.share === "function", scan: false, save: false };
         case "share_text":
           try {
             await navigator.share({ text: args.text as string, title: args.title as string });

@@ -68,7 +68,7 @@ test.describe("Removing members", () => {
     await page.getByRole("tab", { name: "Balances" }).click();
     const bobCard = page.getByTestId("balance-card").filter({ hasText: "Bob" });
     await expect(bobCard.getByText("Removed")).toBeVisible();
-    await expect(bobCard.getByText("-€30.00")).toBeVisible();
+    await expect(bobCard.getByText("-€30")).toBeVisible();
   });
 });
 
@@ -198,7 +198,7 @@ test.describe("Sharing and joining", () => {
     await who.getByRole("button", { name: "Bob", exact: true }).click();
     await expect(who).not.toBeVisible();
     await expect(page.getByText("Your balance", { exact: true })).toBeVisible();
-    await expect(page.getByText("-€30.00")).toBeVisible();
+    await expect(page.getByText("-€30")).toBeVisible();
   });
 
   test("adds yourself when you're not in the list", async ({ page }) => {

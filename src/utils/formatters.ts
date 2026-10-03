@@ -2,20 +2,30 @@ import { i18n, t } from "@/lib/i18n/index.svelte";
 
 const moneyFormats = new Map<string, Intl.NumberFormat>();
 
-/** The number format for a currency in the app's language, `signed` with a + on what's above zero. */
-function moneyFormat(currency: string, signed: boolean): Intl.NumberFormat {
-  const key = `${i18n.locale} ${currency} ${signed}`;
+/**
+ * The number format for a currency in the app's language, `signed` with a + on what's above
+ * zero, `whole` without decimals (for an amount that has no cents).
+ */
+function moneyFormat(currency: string, signed: boolean, whole: boolean): Intl.NumberFormat {
+  const key = `${i18n.locale} ${currency} ${signed} ${whole}`;
   let format = moneyFormats.get(key);
   if (!format) {
-    const options = { signDisplay: signed ? "exceptZero" : "auto" } as const;
+    const sign = { signDisplay: signed ? "exceptZero" : "auto" } as const;
+    const noDecimals = { minimumFractionDigits: 0, maximumFractionDigits: 0 };
     try {
-      format = new Intl.NumberFormat(i18n.locale, { style: "currency", currency, ...options });
+      format = new Intl.NumberFormat(i18n.locale, {
+        style: "currency",
+        currency,
+        ...sign,
+        ...(whole ? noDecimals : {}),
+      });
     } catch {
       // Not a currency code: the amount alone, the code is added by `moneyParts`.
       format = new Intl.NumberFormat(i18n.locale, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
-        ...options,
+        ...sign,
+        ...(whole ? noDecimals : {}),
       });
     }
     moneyFormats.set(key, format);
@@ -26,14 +36,14 @@ function moneyFormat(currency: string, signed: boolean): Intl.NumberFormat {
 /**
  * An amount as the user's language writes it (`€1,234.50`, `1 234,50 €`), in three pieces so
  * the cents can be shown smaller: what comes before them, the cents with their separator, and
- * what follows.
+ * what follows. A round amount has no cents: `€90`, not `€90.00`.
  */
 export function moneyParts(
   cents: number,
   currency = "EUR",
   signed = false
 ): { before: string; cents: string; after: string } {
-  const format = moneyFormat(currency, signed);
+  const format = moneyFormat(currency, signed, cents % 100 === 0);
   const parts = format.formatToParts(cents / 100);
   const decimal = parts.findIndex((p) => p.type === "decimal");
   const text = (from: number, to?: number) =>
@@ -50,9 +60,23 @@ export function moneyParts(
   };
 }
 
+/** An amount as typed in a form: "12.50", and "90" for a round one. */
+export function amountInput(cents: number): string {
+  return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2);
+}
+
 export function formatMoney(cents: number, currency = "EUR"): string {
   const parts = moneyParts(cents, currency);
   return parts.before + parts.cents + parts.after;
+}
+
+/** "Alice, Bob and Carol", the way the app's language lists things. */
+export function formatList(items: string[]): string {
+  try {
+    return new Intl.ListFormat(i18n.locale, { style: "long", type: "conjunction" }).format(items);
+  } catch {
+    return items.join(", ");
+  }
 }
 
 export function formatDate(isoString: string): string {

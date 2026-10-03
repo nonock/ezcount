@@ -27,6 +27,14 @@ pub struct ExpenseSplit {
     pub fixed_cents: Option<i64>,
 }
 
+/// What one of the several people who paid an expense put in.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct ExpensePayer {
+    pub participant_id: String,
+    // In the currency the expense was paid in.
+    pub amount_cents: i64,
+}
+
 /// What an expense paid in another currency than the group's cost there.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct OriginalAmount {
@@ -42,6 +50,8 @@ pub struct ExpenseHistoryEntry {
     pub previous_title: String,
     pub previous_amount_cents: i64,
     pub previous_paid_by: String,
+    #[serde(default)]
+    pub previous_payers: Vec<ExpensePayer>,
     pub previous_splits: Vec<ExpenseSplit>,
     #[serde(default)]
     pub previous_original: Option<OriginalAmount>,
@@ -58,6 +68,10 @@ pub struct Expense {
     #[serde(default)]
     pub original: Option<OriginalAmount>,
     pub paid_by: String, // Participant ID
+    // Empty when `paid_by` paid it all. Otherwise at least two people, `paid_by` first (who
+    // paid the most), whose amounts add up to what was paid.
+    #[serde(default)]
+    pub payers: Vec<ExpensePayer>,
     pub splits: Vec<ExpenseSplit>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -139,6 +153,9 @@ pub struct NativeFeatures {
     pub share: bool,
     // QR code scanning with the camera (barcode-scanner plugin).
     pub scan: bool,
+    // Writing a file into the Downloads folder (`save_download`).
+    #[serde(default)]
+    pub save: bool,
 }
 
 /// After signing up or recovering an account.

@@ -1,12 +1,16 @@
 <script lang="ts">
   import ArrowRightIcon from "@lucide/svelte/icons/arrow-right";
   import CheckIcon from "@lucide/svelte/icons/check";
+  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import EllipsisIcon from "@lucide/svelte/icons/ellipsis";
   import HandCoinsIcon from "@lucide/svelte/icons/hand-coins";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import ReceiptTextIcon from "@lucide/svelte/icons/receipt-text";
   import HistoryIcon from "@lucide/svelte/icons/rotate-ccw-clock";
+  import SearchIcon from "@lucide/svelte/icons/search";
+  import SearchXIcon from "@lucide/svelte/icons/search-x";
+  import SlidersHorizontalIcon from "@lucide/svelte/icons/sliders-horizontal";
   import TrashIcon from "@lucide/svelte/icons/trash";
   import Amount from "@/components/common/Amount.svelte";
   import * as Avatar from "@/components/ui/avatar";
@@ -14,17 +18,20 @@
   import { Button } from "@/components/ui/button";
   import * as DropdownMenu from "@/components/ui/dropdown-menu";
   import * as Empty from "@/components/ui/empty";
+  import * as InputGroup from "@/components/ui/input-group";
   import * as Item from "@/components/ui/item";
   import { deleteExpense } from "@/lib/actions";
   import { t } from "@/lib/i18n/index.svelte";
-  import { paidCurrency } from "@/lib/split";
+  import { paidAmounts, paidCurrency } from "@/lib/split";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { memberTone } from "@/lib/tones";
+  import { cn } from "@/lib/utils";
   import type { Expense, Group } from "@/types";
   import {
     expenseTitle,
     formatDateGroupHeader,
+    formatList,
     formatMoney,
     getLocalDateKey,
   } from "@/utils/formatters";
@@ -47,18 +54,126 @@
     group.expenses.length > 0 && openGroup.settlements.length > 0
   );
 
-  // Newest first
-  const sortedExpenses = $derived(
-    [...group.expenses].sort((a, b) => {
-      const timeA = new Date(a.created_at).getTime() || 0;
-      const timeB = new Date(b.created_at).getTime() || 0;
-      return timeB - timeA;
-    })
+  /** "Alice", or "Alice and Bob" when several people paid. */
+  const payersOf = (e: Expense) => formatList(paidAmounts(e).map((paid) => nameOf(paid.id)));
+
+  // What is shown: a search, a kind, a person, and an order. Kept while the group is open.
+  type Kind = "all" | "expenses" | "payments";
+  type Sort = "newest" | "oldest" | "highest" | "lowest" | "title";
+  const KINDS = [
+    { value: "all", label: "expenses.all" },
+    { value: "expenses", label: "expenses.onlyExpenses" },
+    { value: "payments", label: "expenses.onlyPayments" },
+  ] as const;
+  const SORTS = [
+    { value: "newest", label: "expenses.newest" },
+    { value: "oldest", label: "expenses.oldest" },
+    { value: "highest", label: "expenses.highest" },
+    { value: "lowest", label: "expenses.lowest" },
+    { value: "title", label: "expenses.byTitle" },
+  ] as const;
+  const ANYONE = "";
+
+  let query = $state("");
+  let kind = $state<Kind>("all");
+  let person = $state(ANYONE);
+  let sort = $state<Sort>("newest");
+
+  const filtering = $derived(query.trim() !== "" || kind !== "all" || person !== ANYONE);
+  /** By day only makes sense in date order. */
+  const byDay = $derived(sort === "newest" || sort === "oldest");
+
+  // The menu shows each choice as its current value; opening one lists the others.
+  type Section = "sort" | "kind" | "person";
+  let openSection = $state<Section | null>(null);
+  const sections = $derived([
+    {
+      id: "sort" as const,
+      label: t("expenses.sort"),
+      value: sort as string,
+      options: SORTS.map((o) => ({ value: o.value as string, label: t(o.label) })),
+    },
+    {
+      id: "kind" as const,
+      label: t("expenses.show"),
+      value: kind as string,
+      options: KINDS.map((o) => ({ value: o.value as string, label: t(o.label) })),
+    },
+    {
+      id: "person" as const,
+      label: t("expenses.involving"),
+      value: person,
+      options: [
+        { value: ANYONE, label: t("expenses.anyone") },
+        ...group.participants.map((p) => ({ value: p.id, label: p.name })),
+      ],
+    },
+  ]);
+
+  function pick(section: Section, value: string) {
+    if (section === "sort") sort = value as Sort;
+    else if (section === "kind") kind = value as Kind;
+    else person = value;
+    openSection = null;
+  }
+
+  function clearFilters() {
+    query = "";
+    kind = "all";
+    person = ANYONE;
+  }
+
+  /** Lower case without accents, so "cafe" finds "Café". */
+  const plain = (text: string) =>
+    text
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .toLowerCase();
+
+  // The search looks at the title, at who paid and at the amount as it is shown.
+  const matching = $derived.by(() => {
+    const words = plain(query).split(/\s+/).filter(Boolean);
+    return group.expenses.filter((e) => {
+      if (kind !== "all" && (kind === "payments") !== Boolean(e.is_reimbursement)) return false;
+      if (
+        person !== ANYONE &&
+        !paidAmounts(e).some((paid) => paid.id === person) &&
+        !e.splits.some((s) => s.participant_id === person)
+      ) {
+        return false;
+      }
+      if (words.length === 0) return true;
+      const text = plain(
+        `${expenseTitle(e)} ${payersOf(e)} ${formatMoney(e.amount_cents, group.currency)} ${(e.amount_cents / 100).toFixed(2)}`
+      );
+      return words.every((word) => text.includes(word));
+    });
+  });
+
+  const sortedExpenses = $derived.by(() => {
+    const time = (e: Expense) => new Date(e.created_at).getTime() || 0;
+    const newest = (a: Expense, b: Expense) => time(b) - time(a);
+    const order: Record<Sort, (a: Expense, b: Expense) => number> = {
+      newest,
+      oldest: (a, b) => -newest(a, b),
+      highest: (a, b) => b.amount_cents - a.amount_cents || newest(a, b),
+      lowest: (a, b) => a.amount_cents - b.amount_cents || newest(a, b),
+      title: (a, b) => expenseTitle(a).localeCompare(expenseTitle(b)) || newest(a, b),
+    };
+    return [...matching].sort(order[sort]);
+  });
+  const matchingCents = $derived(
+    matching.filter((e) => !e.is_reimbursement).reduce((sum, e) => sum + e.amount_cents, 0)
   );
 
   // Infinite loading, PAGE_SIZE at a time. GroupPage remakes this tab for each group, so
   // another group starts again at the first page.
   let visibleCount = $state(PAGE_SIZE);
+  // Another search or order starts again at the first page.
+  $effect(() => {
+    void [query, kind, person, sort];
+    visibleCount = PAGE_SIZE;
+  });
 
   const visibleExpenses = $derived(sortedExpenses.slice(0, visibleCount));
   const hasMore = $derived(visibleCount < sortedExpenses.length);
@@ -81,11 +196,11 @@
     return () => observer.disconnect();
   });
 
-  // Visible expenses by local calendar day
+  // Visible expenses by local calendar day, or all in one list when sorted another way
   const dateGroups = $derived.by(() => {
     const map = new Map<string, DateGroup>();
     for (const exp of visibleExpenses) {
-      const key = getLocalDateKey(exp.created_at);
+      const key = byDay ? getLocalDateKey(exp.created_at) : "all";
       const existing = map.get(key);
       if (existing) {
         existing.items.push(exp);
@@ -137,6 +252,111 @@
     </div>
   </div>
 
+  {#if group.expenses.length > 0}
+    <div class="space-y-2">
+      <div class="flex items-center gap-2">
+        <InputGroup.Root class="flex-1">
+          <InputGroup.Addon>
+            <SearchIcon aria-hidden="true" />
+          </InputGroup.Addon>
+          <InputGroup.Input
+            type="search"
+            bind:value={query}
+            placeholder={t("expenses.search")}
+            aria-label={t("expenses.search")}
+          />
+        </InputGroup.Root>
+        <DropdownMenu.Root onOpenChange={() => (openSection = null)}>
+          <DropdownMenu.Trigger>
+            {#snippet child({ props })}
+              <Button
+                {...props}
+                variant="outline"
+                size="icon"
+                aria-label={t("expenses.filterSort")}
+                title={t("expenses.filterSort")}
+                class="relative"
+              >
+                <SlidersHorizontalIcon />
+                {#if kind !== "all" || person !== ANYONE || sort !== "newest"}
+                  <span
+                    class="absolute -top-1 -right-1 size-2.5 rounded-full bg-primary ring-2 ring-background"
+                  >
+                    <span class="sr-only">{t("expenses.filtersOn")}</span>
+                  </span>
+                {/if}
+              </Button>
+            {/snippet}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="end" class="max-h-[70dvh] w-64 overflow-y-auto">
+            {#each sections as section, i (section.id)}
+              {@const open = openSection === section.id}
+              {#if i > 0}
+                <DropdownMenu.Separator />
+              {/if}
+              <!-- Like a <details>: the summary says what is chosen, and opens the choices. -->
+              <DropdownMenu.Item
+                closeOnSelect={false}
+                onSelect={() => (openSection = open ? null : section.id)}
+                aria-expanded={open}
+                class="justify-between gap-3"
+              >
+                <span class="text-muted-foreground">{section.label}</span>
+                <span class="flex min-w-0 items-center gap-1">
+                  <span class="truncate">
+                    {section.options.find((o) => o.value === section.value)?.label}
+                  </span>
+                  <ChevronDownIcon
+                    class={cn("transition-transform", open && "rotate-180")}
+                    aria-hidden="true"
+                  />
+                </span>
+              </DropdownMenu.Item>
+              {#if open}
+                <DropdownMenu.RadioGroup
+                  aria-label={section.label}
+                  bind:value={() => section.value, (value) => pick(section.id, value)}
+                >
+                  {#each section.options as option (option.value)}
+                    <DropdownMenu.RadioItem value={option.value} closeOnSelect={false} class="pl-5">
+                      {option.label}
+                    </DropdownMenu.RadioItem>
+                  {/each}
+                </DropdownMenu.RadioGroup>
+              {/if}
+            {/each}
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      </div>
+      {#if filtering}
+        <p class="flex flex-wrap items-center gap-x-2 px-1 text-sm text-muted-foreground">
+          <span aria-live="polite">
+            {t("expenses.count", matching.length)}
+            {#if matchingCents > 0}
+              · <Amount cents={matchingCents} currency={group.currency} />
+            {/if}
+          </span>
+          <Button variant="link" size="sm" onclick={clearFilters} class="h-auto px-0">
+            {t("expenses.clear")}
+          </Button>
+        </p>
+      {/if}
+    </div>
+  {/if}
+
+  {#if group.expenses.length > 0 && matching.length === 0}
+    <Empty.Root class="border border-dashed">
+      <Empty.Header>
+        <Empty.Media variant="icon"><SearchXIcon /></Empty.Media>
+        <Empty.Title>{t("expenses.noMatch")}</Empty.Title>
+        <Empty.Description>{t("expenses.noMatchHelp")}</Empty.Description>
+      </Empty.Header>
+      <Empty.Content>
+        <Button variant="outline" onclick={clearFilters}>{t("expenses.clear")}</Button>
+      </Empty.Content>
+    </Empty.Root>
+  {/if}
+
   {#if group.expenses.length === 0}
     <Empty.Root class="border border-dashed">
       <Empty.Header>
@@ -159,7 +379,11 @@
     <section aria-labelledby={`date-header-${dg.dateKey}`} class="space-y-2">
       <div id={`date-header-${dg.dateKey}`} class="flex items-center justify-between px-1 text-sm">
         <span>
-          <span class="font-semibold">{dg.displayDate}</span>
+          <span class="font-semibold">
+            {byDay
+              ? dg.displayDate
+              : t(SORTS.find((s) => s.value === sort)?.label ?? SORTS[0].label)}
+          </span>
           <span class="text-muted-foreground">
             · {t("expenses.count", dg.items.length)}
           </span>
@@ -215,7 +439,10 @@
                 </Item.Title>
 
                 {#if isReimbursement}
-                  <Item.Description class="flex items-center gap-1">
+                  <Item.Description class="flex flex-wrap items-center gap-1">
+                    {#if !byDay}
+                      <span>{formatDateGroupHeader(e.created_at)} ·</span>
+                    {/if}
                     <span>{t("common.paidBy")}</span>
                     <span class="text-foreground">{nameOf(e.paid_by)}</span>
                     <ArrowRightIcon class="size-3.5" aria-hidden="true" />
@@ -226,8 +453,11 @@
                   </Item.Description>
                 {:else}
                   <Item.Description>
+                    {#if !byDay}
+                      {formatDateGroupHeader(e.created_at)} ·
+                    {/if}
                     {t("common.paidBy")}
-                    <span class="text-foreground">{nameOf(e.paid_by)}</span>
+                    <span class="text-foreground">{payersOf(e)}</span>
                     {#if isForEveryone(e)}
                       · {t("expenses.forEveryone")}
                     {/if}

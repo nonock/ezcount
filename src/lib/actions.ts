@@ -1,9 +1,10 @@
 // What the user does that crosses screens or asks for confirmation first. Simple changes to
 // the open group go through `openGroup.change` from the components instead.
 
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { toast } from "svelte-sonner";
 import { api } from "@/services/api";
-import { isAndroid, ScanCancelled, scanQrCode } from "@/services/native.svelte";
+import { isAndroid, nativeFeatures, ScanCancelled, scanQrCode } from "@/services/native.svelte";
 import { errorMessage } from "@/utils/errors";
 import { expenseTitle } from "@/utils/formatters";
 import { t } from "./i18n/index.svelte";
@@ -84,7 +85,10 @@ export async function importGroup(file: File) {
   }
 }
 
-/** Saves the open group as a CSV file; on Android, hands it to the share sheet. */
+/**
+ * Saves the open group as a CSV file and says where it went: the Downloads folder on a
+ * computer, the browser's downloads in the web version. On Android it goes to the share sheet.
+ */
 export async function exportGroup() {
   const group = openGroup.group;
   if (!group) return;
@@ -97,12 +101,23 @@ export async function exportGroup() {
       return;
     }
     // The byte order mark makes Excel read the accents right.
-    const url = URL.createObjectURL(new Blob(["﻿", csv], { type: "text/csv" }));
+    const text = `\uFEFF${csv}`;
+    if (nativeFeatures.save) {
+      const path = await api.saveDownload(fileName, text);
+      toast.success(t("groups.exported"), {
+        description: path,
+        duration: 10_000,
+        action: { label: t("groups.showFile"), onClick: () => revealItemInDir(path) },
+      });
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
     const link = document.createElement("a");
     link.href = url;
     link.download = fileName;
     link.click();
     URL.revokeObjectURL(url);
+    toast.success(t("groups.exported"), { description: t("groups.exportedBrowser", fileName) });
   } catch (err) {
     toast.error(t("groups.exportFailed"), { description: errorMessage(err) });
   }

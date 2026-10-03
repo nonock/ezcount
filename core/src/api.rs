@@ -2,7 +2,8 @@
 //! `#[tauri::command]` (which is what generates `src/bindings.ts`), and the web build calls
 //! them through `invoke`, by command name with JSON arguments, like Tauri's own IPC.
 //!
-//! Commands that only make sense natively (`native_features`, `share_text`) stay in each shell.
+//! Commands that only make sense natively (`native_features`, `share_text`, `save_download`)
+//! stay in each shell.
 
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
@@ -10,7 +11,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::models::{
-    AccountInfo, ExpenseSplit, Group, LoginLink, OriginalAmount, ParticipantBalance,
+    AccountInfo, ExpensePayer, ExpenseSplit, Group, LoginLink, OriginalAmount, ParticipantBalance,
     PasswordStrength, SettlementTransfer, SignedIn, SyncInfo,
 };
 use crate::{csv_file, doc, engine, sync, AppState};
@@ -103,6 +104,7 @@ pub fn add_expense(
     title: &str,
     amount_cents: i64,
     paid_by: String,
+    payers: Vec<ExpensePayer>,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
     original: Option<OriginalAmount>,
@@ -112,7 +114,7 @@ pub fn add_expense(
             d,
             title,
             amount_cents,
-            paid_by,
+            doc::PaidBy::new(paid_by, payers),
             splits,
             created_at,
             original,
@@ -128,6 +130,7 @@ pub fn update_expense(
     title: &str,
     amount_cents: i64,
     paid_by: String,
+    payers: Vec<ExpensePayer>,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
     original: Option<OriginalAmount>,
@@ -138,7 +141,7 @@ pub fn update_expense(
             expense_id,
             title,
             amount_cents,
-            paid_by,
+            doc::PaidBy::new(paid_by, payers),
             splits,
             created_at,
             original,
@@ -349,6 +352,7 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             &s("title")?,
             arg(&args, "amountCents")?,
             s("paidBy")?,
+            arg::<Option<Vec<ExpensePayer>>>(&args, "payers")?.unwrap_or_default(),
             arg(&args, "splits")?,
             arg(&args, "createdAt")?,
             arg(&args, "original")?,
@@ -360,6 +364,7 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             &s("title")?,
             arg(&args, "amountCents")?,
             s("paidBy")?,
+            arg::<Option<Vec<ExpensePayer>>>(&args, "payers")?.unwrap_or_default(),
             arg(&args, "splits")?,
             arg(&args, "createdAt")?,
             arg(&args, "original")?,
@@ -449,7 +454,7 @@ mod tests {
     #[tokio::test]
     async fn every_bound_command_is_dispatched() {
         let (state, dir) = state();
-        let native_only = ["native_features", "share_text"];
+        let native_only = ["native_features", "share_text", "save_download"];
         let commands = bound_commands();
         assert!(commands.len() > 20, "found {commands:?}");
         for command in commands

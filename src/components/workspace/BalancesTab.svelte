@@ -11,6 +11,7 @@
   import { openGroup } from "@/lib/state/groups.svelte";
   import { cn } from "@/lib/utils";
   import type { Group } from "@/types";
+  import { amountInput } from "@/utils/formatters";
 
   let { group }: { group: Group } = $props();
 
@@ -95,7 +96,7 @@
                 onclick={() =>
                   dialogs.openReimburse({
                     fromId: b.participant_id,
-                    amount: (Math.abs(b.net_cents) / 100).toFixed(2),
+                    amount: amountInput(Math.abs(b.net_cents)),
                   })}
               >
                 {t("balances.reimburse")}

@@ -7,7 +7,7 @@ mod share;
 
 use chrono::{DateTime, Utc};
 use ezcount_core::models::{
-    AccountInfo, ExpenseSplit, Group, LoginLink, NativeFeatures, OriginalAmount,
+    AccountInfo, ExpensePayer, ExpenseSplit, Group, LoginLink, NativeFeatures, OriginalAmount,
     ParticipantBalance, PasswordStrength, SettlementTransfer, SignedIn, SyncInfo,
 };
 use ezcount_core::storage::Store;
@@ -141,6 +141,7 @@ fn add_expense(
     title: String,
     amount_cents: i64,
     paid_by: String,
+    payers: Vec<ExpensePayer>,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
     original: Option<OriginalAmount>,
@@ -151,6 +152,7 @@ fn add_expense(
         &title,
         amount_cents,
         paid_by,
+        payers,
         splits,
         created_at,
         original,
@@ -167,6 +169,7 @@ fn update_expense(
     title: String,
     amount_cents: i64,
     paid_by: String,
+    payers: Vec<ExpensePayer>,
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
     original: Option<OriginalAmount>,
@@ -178,6 +181,7 @@ fn update_expense(
         &title,
         amount_cents,
         paid_by,
+        payers,
         splits,
         created_at,
         original,
@@ -382,7 +386,46 @@ fn native_features() -> NativeFeatures {
     NativeFeatures {
         share: cfg!(target_os = "android"),
         scan: cfg!(mobile),
+        save: cfg!(desktop),
     }
+}
+
+/// Saves `text` as a file named `file_name` in the Downloads folder, next to any file of that
+/// name already there, and returns where it is. Only where `native_features().save` is true.
+#[tauri::command]
+#[specta::specta]
+async fn save_download(
+    app: tauri::AppHandle,
+    file_name: String,
+    text: String,
+) -> Result<String, String> {
+    // The name only: nothing in it may lead out of the folder.
+    let name = std::path::Path::new(&file_name)
+        .file_name()
+        .filter(|name| *name == std::ffi::OsStr::new(&file_name))
+        .ok_or_else(|| "This file name can't be used".to_string())?;
+    let folder = app
+        .path()
+        .download_dir()
+        .map_err(|_| "Could not find the Downloads folder".to_string())?;
+    let (stem, extension) = (
+        std::path::Path::new(name).file_stem().unwrap_or(name),
+        std::path::Path::new(name).extension(),
+    );
+    let mut path = folder.join(name);
+    let mut copy = 2;
+    while path.exists() {
+        let mut numbered = stem.to_os_string();
+        numbered.push(format!(" ({copy})"));
+        if let Some(extension) = extension {
+            numbered.push(".");
+            numbered.push(extension);
+        }
+        path = folder.join(numbered);
+        copy += 1;
+    }
+    std::fs::write(&path, text).map_err(|e| format!("Could not save the file: {e}"))?;
+    Ok(path.display().to_string())
 }
 
 /// Opens the system share sheet with `text`. Only where `native_features().share` is true.
@@ -428,6 +471,7 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         add_self,
         native_features,
         share_text,
+        save_download,
         password_strength,
         recover_account,
         change_password,

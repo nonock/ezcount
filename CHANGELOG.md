@@ -11,10 +11,13 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 - An Account window, with the password, the recovery key, the language and logging out.
 - A profile: a name and a picture, shown on you in all your groups, for the other members too.
 - A picture and a description for each group ("Edit group").
+- Search the expenses of a group (title, who paid, amount), show only expenses or reimbursements or what involves one person, and sort by date, amount or title.
+- An expense can be paid by several people: "Several people…" under "Paid by", with what each one paid; the amount is their total. Devices still on an older version count the whole expense for whoever paid the most, until they update.
 
 ### Changed
 
-- Amounts and dates are written the way the language does (`€1,234.50`, `1 234,50 €`), with smaller cents.
+- Amounts and dates are written the way the language does (`€1,234.50`, `1 234,50 €`), with smaller cents. Round amounts have no decimals (`€90`).
+- Exporting a group on a computer saves the file in the Downloads folder and says so, with a button to show it.
 - One menu on every screen size, with a three-way theme switch (system, light, dark).
 - Expenses are listed by day, and a group shows your balance first. On wide screens the group stays beside its expenses.
 - Calmer look: fewer greys and font weights, flat secondary buttons, roomier menus.

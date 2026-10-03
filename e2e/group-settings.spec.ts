@@ -69,9 +69,7 @@ test("renaming the group and changing its currency", async ({ page }) => {
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole("heading", { name: "Porto Trip" })).toBeVisible();
   // Amounts keep their value in the new currency.
-  await expect(page.getByTestId("expense-item").filter({ hasText: "Dinner" })).toContainText(
-    "$90.00"
-  );
+  await expect(page.getByTestId("expense-item").filter({ hasText: "Dinner" })).toContainText("$90");
 
   await page.getByRole("button", { name: "Back to All Groups" }).click();
   await expect(page.getByRole("button", { name: /Porto Trip/ })).toBeVisible();
@@ -212,9 +210,7 @@ test("importing a group from a CSV file", async ({ page }) => {
   await who.getByRole("button", { name: "Ben", exact: true }).click();
   await expect(who).not.toBeVisible();
   await expect(page.getByRole("heading", { name: "Christmas gifts" })).toBeVisible();
-  await expect(page.getByTestId("expense-item").filter({ hasText: "Gift" })).toContainText(
-    "$30.00"
-  );
+  await expect(page.getByTestId("expense-item").filter({ hasText: "Gift" })).toContainText("$30");
   await expect(page.getByTestId("expense-item")).toHaveCount(2);
 
   // A file that isn't one says so, and nothing is created.
@@ -260,16 +256,16 @@ test("an expense in another currency, with a set amount for someone", async ({ p
   // Bob owes 20 dollars of it; Alice, on parts, the rest.
   await dialog.getByRole("button", { name: "Set an amount for Bob" }).click();
   await dialog.getByLabel("Amount for Bob").fill("70");
-  await expect(dialog.getByText("The amounts are $20.00 more than the expense.")).toBeVisible();
+  await expect(dialog.getByText("The amounts are $20 more than the expense.")).toBeVisible();
   await dialog.getByLabel("Amount for Bob").fill("20");
-  await expect(dialog.getByText("$30.00", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("$30", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Save Expense" }).click();
   await expect(dialog).not.toBeVisible();
 
   const taxi = page.getByTestId("expense-item").filter({ hasText: "Taxi" });
   await expect(taxi).toContainText("€46.17");
-  await expect(taxi).toContainText("$50.00");
-  await expect(taxi.getByLabel("Split between")).toContainText("Bob $20.00");
+  await expect(taxi).toContainText("$50");
+  await expect(taxi.getByLabel("Split between")).toContainText("Bob $20");
 
   // 20 of the 50 dollars is 18.47 of the 46.17 euros, on top of the 25.00 Bob owed.
   await page.getByRole("tab", { name: "Balances" }).click();
@@ -280,9 +276,9 @@ test("an expense in another currency, with a set amount for someone", async ({ p
   await taxi.getByRole("button", { name: /Actions for/ }).click();
   await page.getByRole("menuitem", { name: "Edit" }).click();
   const editing = page.getByRole("dialog", { name: "Edit Expense" });
-  await expect(editing.getByLabel("Amount", { exact: true })).toHaveValue("50.00");
+  await expect(editing.getByLabel("Amount", { exact: true })).toHaveValue("50");
   await expect(editing.getByLabel("Exchange rate")).toHaveValue("0.9234");
   // A saved rate is the expense's own: no longer a suggestion.
   await expect(editing.getByText("Suggested rate")).not.toBeVisible();
-  await expect(editing.getByLabel("Amount for Bob")).toHaveValue("20.00");
+  await expect(editing.getByLabel("Amount for Bob")).toHaveValue("20");
 });

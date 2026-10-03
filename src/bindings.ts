@@ -110,17 +110,17 @@ async removeParticipant(groupId: string, participantId: string) : Promise<Result
     else return { status: "error", error: e  as any };
 }
 },
-async addExpense(groupId: string, title: string, amountCents: number, paidBy: string, splits: ExpenseSplit[], createdAt: string | null, original: OriginalAmount | null) : Promise<Result<Group, string>> {
+async addExpense(groupId: string, title: string, amountCents: number, paidBy: string, payers: ExpensePayer[], splits: ExpenseSplit[], createdAt: string | null, original: OriginalAmount | null) : Promise<Result<Group, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("add_expense", { groupId, title, amountCents, paidBy, splits, createdAt, original }) };
+    return { status: "ok", data: await TAURI_INVOKE("add_expense", { groupId, title, amountCents, paidBy, payers, splits, createdAt, original }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async updateExpense(groupId: string, expenseId: string, title: string, amountCents: number, paidBy: string, splits: ExpenseSplit[], createdAt: string | null, original: OriginalAmount | null) : Promise<Result<Group, string>> {
+async updateExpense(groupId: string, expenseId: string, title: string, amountCents: number, paidBy: string, payers: ExpensePayer[], splits: ExpenseSplit[], createdAt: string | null, original: OriginalAmount | null) : Promise<Result<Group, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("update_expense", { groupId, expenseId, title, amountCents, paidBy, splits, createdAt, original }) };
+    return { status: "ok", data: await TAURI_INVOKE("update_expense", { groupId, expenseId, title, amountCents, paidBy, payers, splits, createdAt, original }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -276,6 +276,18 @@ async shareText(text: string, title: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Saves `text` as a file named `file_name` in the Downloads folder, next to any file of that
+ * name already there, and returns where it is. Only where `native_features().save` is true.
+ */
+async saveDownload(fileName: string, text: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_download", { fileName, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * How hard a password is to guess. Signing up requires `acceptable`.
  */
 async passwordStrength(password: string, username: string) : Promise<PasswordStrength> {
@@ -348,15 +360,19 @@ async logInWithLink(link: string) : Promise<Result<AccountInfo, string>> {
 /** user-defined types **/
 
 export type AccountInfo = { username: string; server_url: string; display_name: string | null; avatar: string | null; identities: { [key in string]: string } }
-export type Expense = { id: string; group_id: string; title: string; amount_cents: number; original?: OriginalAmount | null; paid_by: string; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean }
-export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; summary: string }
+export type Expense = { id: string; group_id: string; title: string; amount_cents: number; original?: OriginalAmount | null; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean }
+export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_payers?: ExpensePayer[]; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; summary: string }
+/**
+ * What one of the several people who paid an expense put in.
+ */
+export type ExpensePayer = { participant_id: string; amount_cents: number }
 export type ExpenseSplit = { participant_id: string; shares: number; fixed_cents?: number | null }
 export type Group = { id: string; name: string; description?: string; image?: string | null; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string }
 /**
  * A link that logs another device into the account, shown as a QR code.
  */
 export type LoginLink = { link: string; expires_in: number }
-export type NativeFeatures = { share: boolean; scan: boolean }
+export type NativeFeatures = { share: boolean; scan: boolean; save?: boolean }
 /**
  * What an expense paid in another currency than the group's cost there.
  */

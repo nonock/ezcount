@@ -2,6 +2,8 @@
 
 import type { Expense, ExpenseSplit } from "@/types";
 
+type Paid = Pick<Expense, "paid_by" | "payers" | "amount_cents" | "original">;
+
 /** `amountCents` in proportion to `weights`, the leftover cents going to the largest remainders. */
 function splitWeighted(amountCents: number, weights: number[]): number[] {
   const total = weights.reduce((sum, w) => sum + w, 0);
@@ -32,6 +34,19 @@ export function owedAmounts(
   const rest = splitWeighted(Math.max((originalCents ?? amountCents) - fixed, 0), shares);
   const there = splits.map((s, i) => s.fixed_cents ?? rest[i]);
   return originalCents == null ? there : splitWeighted(amountCents, there);
+}
+
+/**
+ * Who paid an expense and how much, in the group's currency, who paid the most first: one
+ * person all of it, or several their amounts. Those are in the currency paid, so an expense
+ * paid in another one has its amount divided in the same proportions (as `engine::paid`).
+ */
+export function paidAmounts(expense: Paid): { id: string; cents: number }[] {
+  const payers = expense.payers ?? [];
+  if (payers.length === 0) return [{ id: expense.paid_by, cents: expense.amount_cents }];
+  const there = payers.map((p) => p.amount_cents);
+  const here = expense.original ? splitWeighted(expense.amount_cents, there) : there;
+  return payers.map((p, i) => ({ id: p.participant_id, cents: here[i] }));
 }
 
 /** The currency an expense's fixed amounts are in: the one it was paid in. */

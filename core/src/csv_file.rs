@@ -19,6 +19,9 @@
 //! it doesn't give the people's amounts (someone edited them), the split is worked out from
 //! the amounts. `Exchange rate` is optional too.
 //!
+//! `Paid by` names one of the people. An expense several people paid lists them with what each
+//! paid, in the currency the expense was paid in: `Alice=30.00 + Bob=20.00`.
+//!
 //! Reading is lenient about what spreadsheets do to such a file: `;` or tabs as separators,
 //! decimal commas, dates without a time or as `31/12/2026`.
 
@@ -46,6 +49,8 @@ const COLUMNS: [&str; 10] = [
 const EXPENSE: &str = "expense";
 const PAYMENT: &str = "payment";
 const NOT_IN: &str = "-";
+/// Between the payers of an expense several people paid.
+const SEVERAL_PAYERS: &str = " + ";
 
 /// A group read from a file. Its name is not in the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +97,7 @@ pub fn export(group: &Group) -> Res<String> {
         .map(|p| p.id.as_str())
         .chain(group.expenses.iter().flat_map(|e| {
             std::iter::once(e.paid_by.as_str())
+                .chain(e.payers.iter().map(|p| p.participant_id.as_str()))
                 .chain(e.splits.iter().map(|s| s.participant_id.as_str()))
         }))
         .filter(|id| seen.insert(*id))
@@ -142,9 +148,20 @@ pub fn export(group: &Group) -> Res<String> {
             guard(&e.title),
             cents(e.amount_cents),
             group.currency.clone(),
-            column(&e.paid_by)
-                .map(|i| names[i].clone())
-                .unwrap_or_default(),
+            if e.payers.is_empty() {
+                column(&e.paid_by)
+                    .map(|i| names[i].clone())
+                    .unwrap_or_default()
+            } else {
+                e.payers
+                    .iter()
+                    .filter_map(|p| {
+                        let name = &names[column(&p.participant_id)?];
+                        Some(format!("{name}={}", cents(p.amount_cents)))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(SEVERAL_PAYERS)
+            },
             if e.is_reimbursement { PAYMENT } else { EXPENSE }.to_string(),
             original.map(|o| cents(o.amount_cents)).unwrap_or_default(),
             original.map(|o| o.currency.clone()).unwrap_or_default(),
@@ -414,10 +431,26 @@ pub fn import(text: &str) -> Res<ImportedGroup> {
             }
         }
         let payer = unguard(cell(4));
-        let paid_by = participants
-            .iter()
-            .position(|name| name == payer)
-            .ok_or_else(|| format!("Line {line}: {payer} paid, but has no column"))?;
+        let column_of = |name: &str| participants.iter().position(|n| n == name);
+        let (paid_by, payers) = match column_of(payer) {
+            Some(paid_by) => (paid_by, Vec::new()),
+            // Not a name: several payers, each with their amount.
+            None => {
+                let payers = payer
+                    .split(SEVERAL_PAYERS)
+                    .map(|entry| {
+                        let (name, amount) = entry.rsplit_once('=')?;
+                        Some((
+                            column_of(unguard(name.trim()))?,
+                            parse_cents(amount.trim())?,
+                        ))
+                    })
+                    .collect::<Option<Vec<(usize, i64)>>>()
+                    .filter(|payers| payers.len() > 1)
+                    .ok_or_else(|| format!("Line {line}: {payer} paid, but has no column"))?;
+                (payers[0].0, payers)
+            }
+        };
         let is_reimbursement = match cell(5).to_lowercase().as_str() {
             "" | EXPENSE => false,
             PAYMENT => true,
@@ -547,6 +580,7 @@ pub fn import(text: &str) -> Res<ImportedGroup> {
             amount_cents,
             original,
             paid_by,
+            payers,
             splits,
             created_at,
             is_reimbursement,
@@ -580,6 +614,62 @@ mod tests {
         )
         .unwrap();
         doc::read_group(&doc).unwrap()
+    }
+
+    #[test]
+    fn several_payers_survive_export_and_import() {
+        let file = format!(
+            "{HEADER},Alice,Bob,Carol\n\
+             2026-08-29T10:00:00Z,Dinner,90.00,EUR,Alice=30.00 + Bob=60.00,expense,,,,1 1 1,30.00,30.00,30.00\n\
+             2026-08-30T10:00:00Z,Taxi,46.17,EUR,Bob=40.00 + Carol=10.00,expense,50.00,USD,0.9234,1 1 -,23.09,23.08,\n"
+        );
+        let group = group_of(&file);
+        let payers = |i: usize| -> Vec<(String, i64)> {
+            group.expenses[i]
+                .payers
+                .iter()
+                .map(|p| {
+                    let name = &group.participants.iter().find(|x| x.id == p.participant_id);
+                    (name.unwrap().name.clone(), p.amount_cents)
+                })
+                .collect()
+        };
+        // Who paid the most first.
+        assert_eq!(
+            payers(0),
+            vec![("Bob".to_string(), 6000), ("Alice".to_string(), 3000)]
+        );
+        assert_eq!(
+            payers(1),
+            vec![("Bob".to_string(), 4000), ("Carol".to_string(), 1000)]
+        );
+        assert_eq!(
+            nets(&group),
+            vec![
+                ("Alice".to_string(), 3000 - 3000 - 2309),
+                ("Bob".to_string(), 6000 + 3694 - 3000 - 2308),
+                ("Carol".to_string(), 923 - 3000),
+            ]
+        );
+
+        let again = group_of(&export(&group).unwrap());
+        assert_eq!(nets(&again), nets(&group));
+        assert!(export(&group).unwrap().contains("Bob=60.00 + Alice=30.00"));
+
+        // Amounts that aren't the expense's, or someone without a column.
+        for bad in [
+            "Alice=30.00 + Bob=50.00",
+            "Alice=30.00 + Dave=60.00",
+            "Alice + Bob",
+        ] {
+            let file = format!(
+                "{HEADER},Alice,Bob\n2026-08-29T10:00:00Z,Dinner,90.00,EUR,{bad},expense,,,,1 1,45.00,45.00\n"
+            );
+            let imported = import(&file).and_then(|g| {
+                doc::imported_group_doc("x", &g.currency, &g.participants, &g.expenses)
+            });
+            assert!(imported.is_err(), "{bad}");
+        }
     }
 
     /// (name, net balance), in the group's order.

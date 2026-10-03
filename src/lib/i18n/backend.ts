@@ -31,6 +31,22 @@ const FR: Pattern[] = [
     "Une personne apparaît deux fois dans la répartition",
   ],
   [/^Shares must be at least 1$/, "Il faut au moins 1 part"],
+  [
+    /^The payers of this expense are not valid$/,
+    "Les payeurs de cette dépense ne sont pas valides",
+  ],
+  [
+    /^A participant appears twice among the payers$/,
+    "Une personne apparaît deux fois parmi les payeurs",
+  ],
+  [
+    /^What each payer paid must be above zero$/,
+    "Ce que chaque payeur a payé doit être supérieur à zéro",
+  ],
+  [
+    /^The payers paid (.*) between them, not the expense's (.*)$/,
+    (paid, amount) => `Les payeurs ont payé ${paid} à eux tous, et non les ${amount} de la dépense`,
+  ],
   [/^A fixed amount must be above zero$/, "Un montant fixe doit être supérieur à zéro"],
   [
     /^The payer is not an active member of this group$/,
@@ -50,6 +66,9 @@ const FR: Pattern[] = [
   ],
   [/^This person is not a member of the group$/, "Cette personne n'est pas membre du groupe"],
   [/^Add yourself to the group$/, "Ajoutez-vous au groupe"],
+  [/^This file name can't be used$/, "Ce nom de fichier ne peut pas être utilisé"],
+  [/^Could not find the Downloads folder$/, "Dossier Téléchargements introuvable"],
+  [/^Could not save the file: (.*)$/, (why) => `Impossible d'enregistrer le fichier : ${why}`],
   [
     /^This picture can't be used: pick a JPEG, PNG or WebP image$/,
     "Cette image ne peut pas être utilisée : choisissez une image JPEG, PNG ou WebP",
