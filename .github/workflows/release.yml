@@ -82,7 +82,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          mv dist/*.apk "dist/ezcount-${version}-arm64.apk"
+          find dist -type f
+          # Artifacts keep the folders under their upload pattern's first wildcard
+          # (universal/release/ for the APK), so the files aren't at the top of dist.
+          mv "$(find dist -name '*.apk')" "dist/ezcount-${version}-arm64.apk"
           find dist -type f
           gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
             --title "ezcount $version" $(find dist -type f)
