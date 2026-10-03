@@ -1,9 +1,13 @@
 // Text that comes from the Rust core in English (errors, sync failures, password advice, edit
 // summaries), translated here by pattern. What isn't listed shows in English.
 
+import { categoryName } from "../categories";
 import { i18n, type Language } from "./index.svelte";
 
 type Pattern = [RegExp, string | ((...groups: string[]) => string)];
+
+/** A category's key ("food", or "none") as edit summaries write it, named. */
+const category = (key: string) => categoryName(key === "none" ? null : key);
 
 const FR: Pattern[] = [
   // Groups, members and expenses
@@ -31,6 +35,7 @@ const FR: Pattern[] = [
     "Une personne apparaît deux fois dans la répartition",
   ],
   [/^Shares must be at least 1$/, "Il faut au moins 1 part"],
+  [/^This category can't be used$/, "Cette catégorie ne peut pas être utilisée"],
   [
     /^The payers of this expense are not valid$/,
     "Les payeurs de cette dépense ne sont pas valides",
@@ -302,6 +307,10 @@ const FR: Pattern[] = [
   [/^Title changed from '(.*)' to '(.*)'$/, (a, b) => `Titre changé de « ${a} » à « ${b} »`],
   [/^Amount changed from (.*) to (.*)$/, (a, b) => `Montant changé de ${a} à ${b}`],
   [/^Payer changed from (.*) to (.*)$/, (a, b) => `Payeur changé de ${a} à ${b}`],
+  [
+    /^Category changed from (.*) to (.*)$/,
+    (a, b) => `Catégorie changée de « ${category(a)} » à « ${category(b)} »`,
+  ],
   [/^Paid in (.*) instead of (.*)$/, (a, b) => `Payé en ${a} au lieu de ${b}`],
   [/^Participants \/ parts allocation updated$/, "Répartition entre les participants modifiée"],
   [/^Date changed from (.*) to (.*)$/, (a, b) => `Date changée du ${a} au ${b}`],

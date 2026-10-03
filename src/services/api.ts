@@ -1,12 +1,10 @@
 import { commands, type Result } from "../bindings";
 import type {
   AccountInfo,
-  ExpensePayer,
-  ExpenseSplit,
+  ExpenseInput,
   Group,
   LoginLink,
   NativeFeatures,
-  OriginalAmount,
   ParticipantBalance,
   PasswordStrength,
   SettlementTransfer,
@@ -87,54 +85,12 @@ export const api = {
     return unwrap(await commands.renameParticipant(groupId, participantId, name));
   },
 
-  async addExpense(
-    groupId: string,
-    title: string,
-    amountCents: number,
-    paidBy: string,
-    payers: ExpensePayer[],
-    splits: ExpenseSplit[],
-    createdAt?: string | null,
-    original?: OriginalAmount | null
-  ): Promise<Group> {
-    return unwrap(
-      await commands.addExpense(
-        groupId,
-        title,
-        amountCents,
-        paidBy,
-        payers,
-        splits,
-        createdAt || null,
-        original ?? null
-      )
-    );
+  async addExpense(groupId: string, expense: ExpenseInput): Promise<Group> {
+    return unwrap(await commands.addExpense(groupId, expense));
   },
 
-  async updateExpense(
-    groupId: string,
-    expenseId: string,
-    title: string,
-    amountCents: number,
-    paidBy: string,
-    payers: ExpensePayer[],
-    splits: ExpenseSplit[],
-    createdAt?: string | null,
-    original?: OriginalAmount | null
-  ): Promise<Group> {
-    return unwrap(
-      await commands.updateExpense(
-        groupId,
-        expenseId,
-        title,
-        amountCents,
-        paidBy,
-        payers,
-        splits,
-        createdAt || null,
-        original ?? null
-      )
-    );
+  async updateExpense(groupId: string, expenseId: string, expense: ExpenseInput): Promise<Group> {
+    return unwrap(await commands.updateExpense(groupId, expenseId, expense));
   },
 
   async deleteExpense(groupId: string, expenseId: string): Promise<Group> {

@@ -14,6 +14,17 @@ pub struct Participant {
     // "this is me".
     #[serde(default)]
     pub avatar: Option<String>,
+    // When they were added after the group was made, and by which member (themselves when
+    // they joined). Not known for the members the group started with.
+    #[serde(default)]
+    pub added_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub added_by: Option<String>,
+    // When they were removed, and by which member.
+    #[serde(default)]
+    pub removed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub removed_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -55,6 +66,8 @@ pub struct ExpenseHistoryEntry {
     pub previous_splits: Vec<ExpenseSplit>,
     #[serde(default)]
     pub previous_original: Option<OriginalAmount>,
+    #[serde(default)]
+    pub previous_category: Option<String>,
     pub summary: String,
 }
 
@@ -63,6 +76,9 @@ pub struct Expense {
     pub id: String,
     pub group_id: String,
     pub title: String,
+    // What kind of spending it is: a short key such as "food", which the interface names.
+    #[serde(default)]
+    pub category: Option<String>,
     // In the group's currency, also when `original` is set.
     pub amount_cents: i64,
     #[serde(default)]
@@ -79,6 +95,26 @@ pub struct Expense {
     pub history: Vec<ExpenseHistoryEntry>,
     #[serde(default)]
     pub is_reimbursement: bool,
+}
+
+/// An expense as the form sends it, to add one or to replace one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct ExpenseInput {
+    pub title: String,
+    #[serde(default)]
+    pub category: Option<String>,
+    // In the group's currency, also when `original` is set.
+    pub amount_cents: i64,
+    pub paid_by: String,
+    // Several payers, with what each paid; empty when `paid_by` paid it all.
+    #[serde(default)]
+    pub payers: Vec<ExpensePayer>,
+    pub splits: Vec<ExpenseSplit>,
+    // The day it was paid; now when left out.
+    #[serde(default)]
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub original: Option<OriginalAmount>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]

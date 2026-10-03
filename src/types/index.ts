@@ -2,6 +2,7 @@ export type {
   AccountInfo,
   Expense,
   ExpenseHistoryEntry,
+  ExpenseInput,
   ExpensePayer,
   ExpenseSplit,
   Group,
@@ -16,4 +17,4 @@ export type {
   SyncInfo,
 } from "../bindings";
 
-export type TabType = "expenses" | "balances" | "settle";
+export type TabType = "expenses" | "balances" | "settle" | "stats";

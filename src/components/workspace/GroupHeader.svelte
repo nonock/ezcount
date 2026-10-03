@@ -5,6 +5,7 @@
   import EllipsisVerticalIcon from "@lucide/svelte/icons/ellipsis-vertical";
   import LogOutIcon from "@lucide/svelte/icons/log-out";
   import PencilIcon from "@lucide/svelte/icons/pencil";
+  import HistoryIcon from "@lucide/svelte/icons/rotate-ccw-clock";
   import TrashIcon from "@lucide/svelte/icons/trash-2";
   import UserPlusIcon from "@lucide/svelte/icons/user-plus";
   import UserRoundIcon from "@lucide/svelte/icons/user-round";
@@ -108,6 +109,10 @@
           <DropdownMenu.Item onSelect={() => (dialogs.addMember = true)}>
             <UserPlusIcon />
             {t("group.addMember")}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => (dialogs.memberHistory = true)}>
+            <HistoryIcon />
+            {t("members.historyMenu")}
           </DropdownMenu.Item>
           <DropdownMenu.Item onSelect={() => (dialogs.who = true)}>
             <UserRoundIcon />

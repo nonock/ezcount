@@ -14,13 +14,14 @@
   import { Label } from "@/components/ui/label";
   import * as Select from "@/components/ui/select";
   import { Spinner } from "@/components/ui/spinner";
+  import { CATEGORIES, categoryName, categoryOf } from "@/lib/categories";
   import { t } from "@/lib/i18n/index.svelte";
   import { owedAmounts } from "@/lib/split";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { cn } from "@/lib/utils";
   import { api } from "@/services/api";
-  import type { ExpensePayer, ExpenseSplit, Group, OriginalAmount } from "@/types";
+  import type { ExpenseInput, ExpensePayer, ExpenseSplit, Group, OriginalAmount } from "@/types";
   import { CURRENCIES } from "@/utils/currencies";
   import { errorMessage } from "@/utils/errors";
   import { amountInput, formatDateInput, formatMoney } from "@/utils/formatters";
@@ -53,7 +54,11 @@
     return Number.isNaN(decimal) ? 0 : Math.round(decimal * 100);
   };
 
+  /** In the category list: filed under nothing. */
+  const NO_CATEGORY = "";
+
   let title = $state("");
+  let category = $state(NO_CATEGORY);
   // In `currency`.
   let amountStr = $state<NumberField>("");
   // svelte-ignore state_referenced_locally
@@ -128,6 +133,7 @@
       }
       payersState = nextPayers;
       if (editing) {
+        category = editing.category ?? NO_CATEGORY;
         title = editing.title;
         amountStr = amountInput(editing.original?.amount_cents ?? editing.amount_cents);
         currency = editing.original?.currency ?? group.currency;
@@ -146,6 +152,7 @@
           };
         }
       } else {
+        category = NO_CATEGORY;
         title = "";
         amountStr = "";
         currency = group.currency;
@@ -361,30 +368,19 @@
     submitting = true;
     error = null;
     const expense = editing;
+    const input: ExpenseInput = {
+      title: trimmedTitle,
+      category: category || null,
+      amount_cents: amountCents,
+      paid_by: payer,
+      payers: together,
+      splits,
+      created_at: createdAt,
+      original,
+    };
     try {
       await openGroup.change((groupId) =>
-        expense
-          ? api.updateExpense(
-              groupId,
-              expense.id,
-              trimmedTitle,
-              amountCents,
-              payer,
-              together,
-              splits,
-              createdAt,
-              original
-            )
-          : api.addExpense(
-              groupId,
-              trimmedTitle,
-              amountCents,
-              payer,
-              together,
-              splits,
-              createdAt,
-              original
-            )
+        expense ? api.updateExpense(groupId, expense.id, input) : api.addExpense(groupId, input)
       );
       dialogs.expense.open = false;
     } catch (err) {
@@ -423,6 +419,31 @@
             bind:value={title}
             placeholder={t("expense.descriptionPlaceholder")}
           />
+        </Field.Field>
+
+        <Field.Field>
+          <Field.Label for="select-expense-category">{t("category.label")}</Field.Label>
+          <Select.Root type="single" bind:value={category}>
+            <Select.Trigger id="select-expense-category" class="w-full">
+              {@const chosen = categoryOf(category)}
+              <span class="flex items-center gap-2">
+                {#if chosen}
+                  <chosen.icon class="size-4 text-muted-foreground" aria-hidden="true" />
+                {/if}
+                {categoryName(category)}
+              </span>
+            </Select.Trigger>
+            <Select.Content>
+              <Select.Item value={NO_CATEGORY} label={t("category.none")} />
+              <Select.Separator />
+              {#each CATEGORIES as option (option.key)}
+                <Select.Item value={option.key} label={t(option.label)}>
+                  <option.icon class="text-muted-foreground" aria-hidden="true" />
+                  {t(option.label)}
+                </Select.Item>
+              {/each}
+            </Select.Content>
+          </Select.Root>
         </Field.Field>
 
         <div class="grid grid-cols-2 gap-4">

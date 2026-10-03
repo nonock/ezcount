@@ -5,10 +5,9 @@ mod background;
 #[cfg(target_os = "android")]
 mod share;
 
-use chrono::{DateTime, Utc};
 use ezcount_core::models::{
-    AccountInfo, ExpensePayer, ExpenseSplit, Group, LoginLink, NativeFeatures, OriginalAmount,
-    ParticipantBalance, PasswordStrength, SettlementTransfer, SignedIn, SyncInfo,
+    AccountInfo, ExpenseInput, Group, LoginLink, NativeFeatures, ParticipantBalance,
+    PasswordStrength, SettlementTransfer, SignedIn, SyncInfo,
 };
 use ezcount_core::storage::Store;
 use ezcount_core::{api, AppState};
@@ -161,58 +160,24 @@ fn rename_participant(
 
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
 fn add_expense(
     state: State<AppState>,
     group_id: String,
-    title: String,
-    amount_cents: i64,
-    paid_by: String,
-    payers: Vec<ExpensePayer>,
-    splits: Vec<ExpenseSplit>,
-    created_at: Option<DateTime<Utc>>,
-    original: Option<OriginalAmount>,
+    expense: ExpenseInput,
 ) -> Result<Group, String> {
-    api::add_expense(
-        &state,
-        &group_id,
-        &title,
-        amount_cents,
-        paid_by,
-        payers,
-        splits,
-        created_at,
-        original,
-    )
+    api::add_expense(&state, &group_id, expense)
 }
 
+/// Replaces an expense with what the form holds, recording what changed in its history.
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
 fn update_expense(
     state: State<AppState>,
     group_id: String,
     expense_id: String,
-    title: String,
-    amount_cents: i64,
-    paid_by: String,
-    payers: Vec<ExpensePayer>,
-    splits: Vec<ExpenseSplit>,
-    created_at: Option<DateTime<Utc>>,
-    original: Option<OriginalAmount>,
+    expense: ExpenseInput,
 ) -> Result<Group, String> {
-    api::update_expense(
-        &state,
-        &group_id,
-        &expense_id,
-        &title,
-        amount_cents,
-        paid_by,
-        payers,
-        splits,
-        created_at,
-        original,
-    )
+    api::update_expense(&state, &group_id, &expense_id, expense)
 }
 
 #[tauri::command]

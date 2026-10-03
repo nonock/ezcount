@@ -716,7 +716,9 @@ mod tests {
                 )
                 .unwrap();
             store
-                .update(&group.id, |d| doc::add_participant(d, "Bob").map(|_| ()))
+                .update(&group.id, |d| {
+                    doc::add_participant(d, "Bob", doc::AddedBy::Member(None)).map(|_| ())
+                })
                 .unwrap();
             group.id
         };

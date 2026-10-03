@@ -1,6 +1,7 @@
 <script lang="ts">
   import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
   import ArrowLeftRightIcon from "@lucide/svelte/icons/arrow-left-right";
+  import ChartColumnIcon from "@lucide/svelte/icons/chart-column";
   import ReceiptTextIcon from "@lucide/svelte/icons/receipt-text";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
   import ScaleIcon from "@lucide/svelte/icons/scale";
@@ -19,6 +20,7 @@
   import ExpensesTab from "./ExpensesTab.svelte";
   import GroupHeader from "./GroupHeader.svelte";
   import SettleUpTab from "./SettleUpTab.svelte";
+  import StatsTab from "./StatsTab.svelte";
 
   let { group }: { group: Group } = $props();
 
@@ -71,6 +73,10 @@
               </Badge>
             {/if}
           </Tabs.Trigger>
+          <Tabs.Trigger value="stats" class={BOTTOM_TAB}>
+            <ChartColumnIcon />
+            {t("tabs.stats")}
+          </Tabs.Trigger>
         </Tabs.List>
       </BottomBar>
 
@@ -104,6 +110,11 @@
       <Tabs.Content value="settle" class="pt-4">
         {#if navigation.tab === "settle"}
           <SettleUpTab {group} />
+        {/if}
+      </Tabs.Content>
+      <Tabs.Content value="stats" class="pt-4">
+        {#if navigation.tab === "stats"}
+          <StatsTab {group} />
         {/if}
       </Tabs.Content>
     </Tabs.Root>

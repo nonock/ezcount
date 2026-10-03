@@ -4,8 +4,9 @@
 //!
 //! - `meta` (map): `id`, `name`, `currency`, `created_at`, `description`, `image`, `deleted`
 //! - `deletion` (map): participant id -> true, for the members who agreed to delete the group
-//! - `participants` (map): participant id -> map { `name`, `removed`, `position`, `avatar` }
-//! - `expenses` (map): expense id -> map { `title`, `amount_cents`, `paid_by`, `splits`,
+//! - `participants` (map): participant id -> map { `name`, `removed`, `position`, `avatar`,
+//!   `added_at`, `added_by`, `removed_at`, `removed_by` }
+//! - `expenses` (map): expense id -> map { `title`, `category`, `amount_cents`, `paid_by`, `splits`,
 //!   `created_at`, `updated_at`, `is_reimbursement`, `history` (list), `original`, `payers` }
 //!
 //! `amount_cents` is always in the group's currency. An expense paid in another one also has
@@ -174,6 +175,13 @@ fn history_value(entry: &ExpenseHistoryEntry) -> LoroValue {
         ("edited_at", timestamp(entry.edited_at).into()),
         ("previous_title", entry.previous_title.as_str().into()),
         ("previous_amount_cents", entry.previous_amount_cents.into()),
+        (
+            "previous_category",
+            entry
+                .previous_category
+                .as_deref()
+                .map_or(LoroValue::Null, Into::into),
+        ),
         ("previous_paid_by", entry.previous_paid_by.as_str().into()),
         ("previous_payers", payers_value(&entry.previous_payers)),
         (
@@ -235,6 +243,21 @@ struct DocParticipant {
     position: i64,
     #[serde(default)]
     avatar: Option<String>,
+    // Read as text: a date that isn't one is left out rather than taking the member with it.
+    #[serde(default)]
+    added_at: Option<String>,
+    #[serde(default)]
+    added_by: Option<String>,
+    #[serde(default)]
+    removed_at: Option<String>,
+    #[serde(default)]
+    removed_by: Option<String>,
+}
+
+fn read_time(text: Option<String>) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(&text?)
+        .ok()
+        .map(|time| time.with_timezone(&Utc))
 }
 
 /// A picture read from a document, or nothing when it isn't one the app would have saved.
@@ -280,12 +303,16 @@ struct DocHistoryEntry {
     previous_splits: Vec<DocSplit>,
     #[serde(default)]
     previous_original: Option<OriginalAmount>,
+    #[serde(default)]
+    previous_category: Option<String>,
     summary: String,
 }
 
 #[derive(Deserialize)]
 struct DocExpense {
     title: String,
+    #[serde(default)]
+    category: Option<String>,
     amount_cents: i64,
     #[serde(default)]
     original: Option<OriginalAmount>,
@@ -430,6 +457,10 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
                         name: p.name,
                         removed: p.removed,
                         avatar: read_image(p.avatar),
+                        added_at: read_time(p.added_at),
+                        added_by: p.added_by,
+                        removed_at: read_time(p.removed_at),
+                        removed_by: p.removed_by,
                     },
                 )
             })
@@ -456,6 +487,7 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
                 id,
                 group_id: meta.id.clone(),
                 title: e.title,
+                category: e.category.filter(|c| check_category(c).is_ok()),
                 amount_cents: e.amount_cents,
                 original: e.original,
                 paid_by: e.paid_by,
@@ -474,6 +506,7 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
                         previous_payers: h.previous_payers,
                         previous_splits: read_splits(&h.previous_splits, false),
                         previous_original: h.previous_original,
+                        previous_category: h.previous_category,
                         summary: h.summary,
                     })
                     .collect(),
@@ -554,6 +587,9 @@ fn insert_expense(doc: &LoroDoc, expense: &Expense) -> Res<()> {
         .insert_container(&expense.id, LoroMap::new())
         .map_err(doc_err)?;
     e.insert("title", expense.title.as_str()).map_err(doc_err)?;
+    if let Some(category) = &expense.category {
+        e.insert("category", category.as_str()).map_err(doc_err)?;
+    }
     e.insert("amount_cents", expense.amount_cents)
         .map_err(doc_err)?;
     e.insert("paid_by", expense.paid_by.as_str())
@@ -655,6 +691,7 @@ pub fn new_group_doc(name: &str, currency: &str, participant_names: &[String]) -
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedExpense {
     pub title: String,
+    pub category: Option<String>,
     pub amount_cents: i64,
     pub paid_by: usize,
     // (person, amount) for each of several payers, as in `ExpensePayer`
@@ -726,6 +763,7 @@ pub fn imported_group_doc(
                 id: Uuid::new_v4().to_string(),
                 group_id: group.id.clone(),
                 title: e.title.trim().to_string(),
+                category: e.category.clone().filter(|c| check_category(c).is_ok()),
                 amount_cents: e.amount_cents,
                 original,
                 paid_by,
@@ -924,22 +962,49 @@ pub fn rename_participant(doc: &LoroDoc, participant_id: &str, name: &str) -> Re
     participant.insert("name", name).map_err(doc_err)
 }
 
-/// Adds a participant and returns their id.
-pub fn add_participant(doc: &LoroDoc, name: &str) -> Res<String> {
+/// Who adds someone to a group.
+pub enum AddedBy<'a> {
+    /// A member, when the app knows who the user is in the group.
+    Member(Option<&'a str>),
+    /// The person themselves, joining.
+    Themselves,
+}
+
+/// Adds a participant, noting when and by whom, and returns their id.
+pub fn add_participant(doc: &LoroDoc, name: &str, by: AddedBy) -> Res<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
         return Err("Participant name cannot be empty".to_string());
     }
     let id = Uuid::new_v4().to_string();
     insert_participant(doc, &id, trimmed, false)?;
+    let added = child_map(&doc.get_map(PARTICIPANTS), &id)
+        .ok_or_else(|| "Participant not found".to_string())?;
+    added
+        .insert("added_at", timestamp(Utc::now()))
+        .map_err(doc_err)?;
+    let by = match by {
+        AddedBy::Member(member) => member,
+        AddedBy::Themselves => Some(id.as_str()),
+    };
+    if let Some(by) = by {
+        added.insert("added_by", by).map_err(doc_err)?;
+    }
     Ok(id)
 }
 
-/// Soft-deletes a participant. Their past expenses and balance stay intact.
-pub fn remove_participant(doc: &LoroDoc, participant_id: &str) -> Res<()> {
+/// Soft-deletes a participant, noting when and by which member (`by`, when the app knows who
+/// the user is). Their past expenses and balance stay intact.
+pub fn remove_participant(doc: &LoroDoc, participant_id: &str, by: Option<&str>) -> Res<()> {
     let p = child_map(&doc.get_map(PARTICIPANTS), participant_id)
         .ok_or_else(|| "Participant not found".to_string())?;
-    p.insert("removed", true).map_err(doc_err)
+    p.insert("removed", true).map_err(doc_err)?;
+    p.insert("removed_at", timestamp(Utc::now()))
+        .map_err(doc_err)?;
+    match by {
+        Some(by) => p.insert("removed_by", by).map_err(doc_err),
+        None => p.delete("removed_by").map_err(doc_err),
+    }
 }
 
 fn check_amount(amount_cents: i64) -> Res<()> {
@@ -1039,6 +1104,49 @@ pub(crate) fn check_amounts(
         ));
     }
     Ok(())
+}
+
+/// Longest category key.
+const MAX_CATEGORY_LEN: usize = 30;
+
+/// A category is a short key ("food", "transport"): lower-case letters, digits, `-` and `_`.
+/// The interface names the ones it knows, so that each language has its own words.
+fn check_category(category: &str) -> Res<()> {
+    let valid = !category.is_empty()
+        && category.len() <= MAX_CATEGORY_LEN
+        && category
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_'));
+    if valid {
+        Ok(())
+    } else {
+        Err("This category can't be used".to_string())
+    }
+}
+
+/// What an expense is: its title, and the category it counts under.
+pub struct Label {
+    title: String,
+    category: Option<String>,
+}
+
+impl Label {
+    /// An empty category is none.
+    pub fn new(title: &str, category: Option<&str>) -> Self {
+        Self {
+            title: title.to_string(),
+            category: category
+                .map(str::trim)
+                .filter(|c| !c.is_empty())
+                .map(str::to_string),
+        }
+    }
+}
+
+impl From<&str> for Label {
+    fn from(title: &str) -> Self {
+        Self::new(title, None)
+    }
 }
 
 /// Who paid an expense: one person, or several with what each paid, in the currency paid.
@@ -1151,7 +1259,7 @@ fn validate_expense(
 
 pub fn add_expense(
     doc: &LoroDoc,
-    title: &str,
+    title: impl Into<Label>,
     amount_cents: i64,
     paid_by: impl Into<PaidBy>,
     splits: Vec<ExpenseSplit>,
@@ -1159,6 +1267,10 @@ pub fn add_expense(
     original: Option<OriginalAmount>,
 ) -> Res<()> {
     let PaidBy { paid_by, payers } = paid_by.into();
+    let Label { title, category } = title.into();
+    if let Some(category) = &category {
+        check_category(category)?;
+    }
     let group = read_group(doc)?;
     let original = normal_original(&group, original)?;
     validate_expense(
@@ -1177,6 +1289,7 @@ pub fn add_expense(
             id: Uuid::new_v4().to_string(),
             group_id: group.id,
             title: title.trim().to_string(),
+            category,
             amount_cents,
             original,
             paid_by,
@@ -1194,7 +1307,7 @@ pub fn add_expense(
 pub fn update_expense(
     doc: &LoroDoc,
     expense_id: &str,
-    title: &str,
+    title: impl Into<Label>,
     amount_cents: i64,
     paid_by: impl Into<PaidBy>,
     splits: Vec<ExpenseSplit>,
@@ -1202,6 +1315,10 @@ pub fn update_expense(
     original: Option<OriginalAmount>,
 ) -> Res<()> {
     let PaidBy { paid_by, payers } = paid_by.into();
+    let Label { title, category } = title.into();
+    if let Some(category) = &category {
+        check_category(category)?;
+    }
     let group = read_group(doc)?;
     let expense = group
         .expenses
@@ -1244,6 +1361,19 @@ pub fn update_expense(
             expense.title, title
         ));
         target.insert("title", title).map_err(doc_err)?;
+    }
+    if expense.category != category {
+        let named = |category: &Option<String>| category.clone().unwrap_or_else(|| "none".into());
+        changes.push(format!(
+            "Category changed from {} to {}",
+            named(&expense.category),
+            named(&category)
+        ));
+        match &category {
+            Some(category) => target.insert("category", category.as_str()),
+            None => target.delete("category"),
+        }
+        .map_err(doc_err)?;
     }
     if expense.amount_cents != amount_cents {
         changes.push(format!(
@@ -1356,6 +1486,7 @@ pub fn update_expense(
         previous_payers: expense.payers.clone(),
         previous_splits: expense.splits.clone(),
         previous_original: expense.original.clone(),
+        previous_category: expense.category.clone(),
         summary,
     };
     child_list(&target, HISTORY)?
@@ -1417,6 +1548,7 @@ pub fn record_reimbursement(
             id: Uuid::new_v4().to_string(),
             group_id: group.id,
             title,
+            category: None,
             amount_cents,
             paid_by: from_id,
             payers: Vec::new(),
@@ -1692,7 +1824,7 @@ mod tests {
             None,
         )
         .unwrap();
-        remove_participant(&doc, bob).unwrap();
+        remove_participant(&doc, bob, None).unwrap();
         let err = add_expense(
             &doc,
             "New",
@@ -1790,7 +1922,7 @@ mod tests {
             None,
         )
         .unwrap();
-        add_participant(&b, "Charlie").unwrap();
+        add_participant(&b, "Charlie", AddedBy::Member(None)).unwrap();
         a.commit();
         b.commit();
         merge(&a, &b);
@@ -1883,10 +2015,116 @@ mod tests {
         refuse_deletion(&doc).unwrap();
         assert!(read_group(&doc).unwrap().deletion_votes.is_empty());
         for id in &ids[2..] {
-            remove_participant(&doc, id).unwrap();
+            remove_participant(&doc, id, None).unwrap();
         }
         assert!(!delete_or_vote(&doc, Some(&ids[0])).unwrap());
         assert!(delete_or_vote(&doc, Some(&ids[1])).unwrap());
+    }
+
+    #[test]
+    fn expenses_have_a_category() {
+        let (doc, group) = sample();
+        let alice = &group.participants[0].id;
+        let add = |category: Option<&str>| {
+            add_expense(
+                &doc,
+                Label::new("Dinner", category),
+                9000,
+                alice.clone(),
+                vec![split(alice, 1)],
+                None,
+                None,
+            )
+        };
+        add(Some("food")).unwrap();
+        // No category, and an empty one, are the same.
+        add(Some("  ")).unwrap();
+        for bad in ["Food", "a b", "<b>", &"a".repeat(31)] {
+            assert!(add(Some(bad)).is_err(), "{bad}");
+        }
+        let mut expenses = read_group(&doc).unwrap().expenses;
+        expenses.sort_by_key(|e| e.category.is_none());
+        assert_eq!(expenses[0].category.as_deref(), Some("food"));
+        assert_eq!(expenses[1].category, None);
+
+        let update = |category: Option<&str>| {
+            update_expense(
+                &doc,
+                &expenses[0].id,
+                Label::new("Dinner", category),
+                9000,
+                alice.clone(),
+                vec![split(alice, 1)],
+                None,
+                None,
+            )
+            .unwrap();
+            let group = read_group(&doc).unwrap();
+            group
+                .expenses
+                .into_iter()
+                .find(|e| e.id == expenses[0].id)
+                .unwrap()
+        };
+        let moved = update(Some("transport"));
+        assert_eq!(moved.category.as_deref(), Some("transport"));
+        assert_eq!(
+            moved.history[0].summary,
+            "Category changed from food to transport"
+        );
+        assert_eq!(moved.history[0].previous_category.as_deref(), Some("food"));
+        let cleared = update(None);
+        assert_eq!(cleared.category, None);
+        assert_eq!(
+            cleared.history[1].summary,
+            "Category changed from transport to none"
+        );
+
+        // A category written by something else than the app is left out.
+        let stored = child_map(&doc.get_map(EXPENSES), &expenses[0].id).unwrap();
+        stored.insert("category", "Not A Key").unwrap();
+        assert_eq!(read_group(&doc).unwrap().expenses[0].category, None);
+    }
+
+    #[test]
+    fn members_remember_who_added_and_removed_them() {
+        let (doc, group) = sample();
+        let (alice, bob) = (&group.participants[0].id, &group.participants[1].id);
+        // The members the group started with weren't added by anyone.
+        assert!(group
+            .participants
+            .iter()
+            .all(|p| p.added_at.is_none() && p.added_by.is_none()));
+
+        let carol = add_participant(&doc, "Carol", AddedBy::Member(Some(alice))).unwrap();
+        let dave = add_participant(&doc, "Dave", AddedBy::Themselves).unwrap();
+        let eve = add_participant(&doc, "Eve", AddedBy::Member(None)).unwrap();
+        remove_participant(&doc, &carol, Some(bob)).unwrap();
+        remove_participant(&doc, &eve, None).unwrap();
+
+        let read = read_group(&doc).unwrap();
+        let of = |id: &str| {
+            read.participants
+                .iter()
+                .find(|p| p.id == id)
+                .unwrap()
+                .clone()
+        };
+        let (carol, dave, eve) = (of(&carol), of(&dave), of(&eve));
+        assert!(carol.added_at.is_some() && carol.removed_at.is_some());
+        assert_eq!(carol.added_by.as_ref(), Some(alice));
+        assert_eq!(carol.removed_by.as_ref(), Some(bob));
+        assert_eq!(dave.added_by.as_ref(), Some(&dave.id), "joined");
+        assert_eq!((dave.removed_at, dave.removed_by), (None, None));
+        assert!(eve.added_at.is_some() && eve.removed_at.is_some());
+        assert_eq!((eve.added_by, eve.removed_by), (None, None));
+
+        // A date that isn't one doesn't take the member with it.
+        let stored = child_map(&doc.get_map(PARTICIPANTS), &dave.id).unwrap();
+        stored.insert("added_at", "yesterday").unwrap();
+        let read = read_group(&doc).unwrap();
+        let dave = read.participants.iter().find(|p| p.id == dave.id).unwrap();
+        assert_eq!(dave.added_at, None);
     }
 
     #[test]
@@ -2151,6 +2389,7 @@ mod tests {
                 id: Uuid::new_v4().to_string(),
                 group_id: g.id.clone(),
                 title: title.to_string(),
+                category: None,
                 amount_cents,
                 paid_by: alice.clone(),
                 payers: Vec::new(),

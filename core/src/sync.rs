@@ -1431,7 +1431,7 @@ pub fn add_self(state: &AppState, group_id: &str, name: &str) -> Res<Group> {
     require_session(state)?;
     let mut new_id = String::new();
     state.mutate(group_id, |d| {
-        new_id = doc::add_participant(d, name)?;
+        new_id = doc::add_participant(d, name, doc::AddedBy::Themselves)?;
         Ok(())
     })?;
     set_identity(state, group_id, &new_id)?;
@@ -2629,7 +2629,7 @@ mod end_to_end {
         assert_eq!(phone.state.store().session().unwrap().username, "alice");
         // It is a full login: the phone's edits reach the laptop.
         phone.edit(&trip.id, |doc| {
-            doc::add_participant(doc, "Carol").map(|_| ())
+            doc::add_participant(doc, "Carol", doc::AddedBy::Member(None)).map(|_| ())
         });
         phone.sync().await;
         laptop.sync().await;
@@ -2817,7 +2817,9 @@ mod end_to_end {
 
         // Both edit while "offline", then sync in any order.
         let hotel = joined.expenses[0].id.clone();
-        a.edit(&gid, |d| doc::add_participant(d, "Charlie").map(|_| ()));
+        a.edit(&gid, |d| {
+            doc::add_participant(d, "Charlie", doc::AddedBy::Member(None)).map(|_| ())
+        });
         a.edit(&gid, |d| {
             doc::update_expense(
                 d,
@@ -2853,7 +2855,7 @@ mod end_to_end {
                 None,
             )
         });
-        b.edit(&gid, |d| doc::remove_participant(d, &bob));
+        b.edit(&gid, |d| doc::remove_participant(d, &bob, None));
 
         assert!(
             !sync_group(&a.state, &gid).await.unwrap(),

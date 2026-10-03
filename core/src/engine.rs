@@ -253,18 +253,30 @@ mod tests {
                     name: "Alice".to_string(),
                     removed: false,
                     avatar: None,
+                    added_at: None,
+                    added_by: None,
+                    removed_at: None,
+                    removed_by: None,
                 },
                 Participant {
                     id: "p2".to_string(),
                     name: "Bob".to_string(),
                     removed: false,
                     avatar: None,
+                    added_at: None,
+                    added_by: None,
+                    removed_at: None,
+                    removed_by: None,
                 },
                 Participant {
                     id: "p3".to_string(),
                     name: "Charlie".to_string(),
                     removed: false,
                     avatar: None,
+                    added_at: None,
+                    added_by: None,
+                    removed_at: None,
+                    removed_by: None,
                 },
             ],
             expenses: vec![],
@@ -284,6 +296,7 @@ mod tests {
             amount_cents: 6000,
             paid_by: "p1".to_string(),
             payers: Vec::new(),
+            category: None,
             splits: vec![
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
@@ -315,6 +328,7 @@ mod tests {
             amount_cents: 3000,
             paid_by: "p2".to_string(),
             payers: Vec::new(),
+            category: None,
             splits: vec![
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
@@ -370,6 +384,7 @@ mod tests {
             amount_cents: 1000,
             paid_by: "p1".to_string(),
             payers: Vec::new(),
+            category: None,
             splits: vec![
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
@@ -413,6 +428,7 @@ mod tests {
             amount_cents: 1000,
             paid_by: "p1".to_string(),
             payers: Vec::new(),
+            category: None,
             splits: vec![
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
@@ -465,6 +481,7 @@ mod tests {
             amount_cents: 6000,
             paid_by: "p1".to_string(),
             payers: Vec::new(),
+            category: None,
             splits: vec![
                 ExpenseSplit {
                     participant_id: "p1".to_string(),
@@ -497,6 +514,7 @@ mod tests {
             amount_cents: 2000,
             paid_by: "p2".to_string(),
             payers: Vec::new(),
+            category: None,
             splits: vec![ExpenseSplit {
                 participant_id: "p1".to_string(),
                 shares: 1,
@@ -566,6 +584,7 @@ mod tests {
             amount_cents,
             paid_by: paid_by.to_string(),
             payers: Vec::new(),
+            category: None,
             splits: split_ids
                 .iter()
                 .map(|p| ExpenseSplit {

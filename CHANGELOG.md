@@ -14,6 +14,9 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 - Search the expenses of a group (title, who paid, amount), show only expenses or reimbursements or what involves one person, and sort by date, amount or title.
 - An expense can be paid by several people: "Several people…" under "Paid by", with what each one paid; the amount is their total. Devices still on an older version count the whole expense for whoever paid the most, until they update.
 
+- Categories for expenses (restaurants, groceries, transport…), shown in the list, in the search and as a filter, and kept in CSV files.
+- A "Stats" tab: what the group spent in all, by category, by person and by month.
+- Member history, in the group's menu: who was added or removed, when and by whom (from this version on).
 - Archive a group: it leaves your list for an "Archived" section, on your devices only, and can come back.
 - Delete a group for everyone. When someone still owes something, every member has to agree first; members on an older version keep the group.
 

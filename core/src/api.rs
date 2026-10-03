@@ -5,14 +5,13 @@
 //! Commands that only make sense natively (`native_features`, `share_text`, `save_download`)
 //! stay in each shell.
 
-use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::models::{
-    AccountInfo, ExpensePayer, ExpenseSplit, Group, LoginLink, OriginalAmount, ParticipantBalance,
-    PasswordStrength, SettlementTransfer, SignedIn, SyncInfo,
+    AccountInfo, ExpenseInput, Group, LoginLink, ParticipantBalance, PasswordStrength,
+    SettlementTransfer, SignedIn, SyncInfo,
 };
 use crate::{csv_file, doc, engine, sync, AppState};
 
@@ -96,12 +95,23 @@ pub fn update_group(
     })
 }
 
+/// The participant the user is in a group, when they said.
+fn me(state: &AppState, group_id: &str) -> Option<String> {
+    state.account_info().ok()??.identities.remove(group_id)
+}
+
 pub fn add_participant(state: &AppState, group_id: &str, name: &str) -> Res<Group> {
-    state.mutate(group_id, |d| doc::add_participant(d, name).map(|_| ()))
+    let by = me(state, group_id);
+    state.mutate(group_id, |d| {
+        doc::add_participant(d, name, doc::AddedBy::Member(by.as_deref())).map(|_| ())
+    })
 }
 
 pub fn remove_participant(state: &AppState, group_id: &str, participant_id: &str) -> Res<Group> {
-    state.mutate(group_id, |d| doc::remove_participant(d, participant_id))
+    let by = me(state, group_id);
+    state.mutate(group_id, |d| {
+        doc::remove_participant(d, participant_id, by.as_deref())
+    })
 }
 
 pub fn rename_participant(
@@ -115,54 +125,41 @@ pub fn rename_participant(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn add_expense(
-    state: &AppState,
-    group_id: &str,
-    title: &str,
-    amount_cents: i64,
-    paid_by: String,
-    payers: Vec<ExpensePayer>,
-    splits: Vec<ExpenseSplit>,
-    created_at: Option<DateTime<Utc>>,
-    original: Option<OriginalAmount>,
-) -> Res<Group> {
+fn label(expense: &ExpenseInput) -> doc::Label {
+    doc::Label::new(&expense.title, expense.category.as_deref())
+}
+
+pub fn add_expense(state: &AppState, group_id: &str, expense: ExpenseInput) -> Res<Group> {
     state.mutate(group_id, |d| {
         doc::add_expense(
             d,
-            title,
-            amount_cents,
-            doc::PaidBy::new(paid_by, payers),
-            splits,
-            created_at,
-            original,
+            label(&expense),
+            expense.amount_cents,
+            doc::PaidBy::new(expense.paid_by, expense.payers),
+            expense.splits,
+            expense.created_at,
+            expense.original,
         )
     })
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Replaces an expense with what the form holds, recording what changed in its history.
 pub fn update_expense(
     state: &AppState,
     group_id: &str,
     expense_id: &str,
-    title: &str,
-    amount_cents: i64,
-    paid_by: String,
-    payers: Vec<ExpensePayer>,
-    splits: Vec<ExpenseSplit>,
-    created_at: Option<DateTime<Utc>>,
-    original: Option<OriginalAmount>,
+    expense: ExpenseInput,
 ) -> Res<Group> {
     state.mutate(group_id, |d| {
         doc::update_expense(
             d,
             expense_id,
-            title,
-            amount_cents,
-            doc::PaidBy::new(paid_by, payers),
-            splits,
-            created_at,
-            original,
+            label(&expense),
+            expense.amount_cents,
+            doc::PaidBy::new(expense.paid_by, expense.payers),
+            expense.splits,
+            expense.created_at,
+            expense.original,
         )
     })
 }
@@ -371,28 +368,12 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             &s("participantId")?,
             &s("name")?,
         )?),
-        "add_expense" => json(add_expense(
-            state,
-            &s("groupId")?,
-            &s("title")?,
-            arg(&args, "amountCents")?,
-            s("paidBy")?,
-            arg::<Option<Vec<ExpensePayer>>>(&args, "payers")?.unwrap_or_default(),
-            arg(&args, "splits")?,
-            arg(&args, "createdAt")?,
-            arg(&args, "original")?,
-        )?),
+        "add_expense" => json(add_expense(state, &s("groupId")?, arg(&args, "expense")?)?),
         "update_expense" => json(update_expense(
             state,
             &s("groupId")?,
             &s("expenseId")?,
-            &s("title")?,
-            arg(&args, "amountCents")?,
-            s("paidBy")?,
-            arg::<Option<Vec<ExpensePayer>>>(&args, "payers")?.unwrap_or_default(),
-            arg(&args, "splits")?,
-            arg(&args, "createdAt")?,
-            arg(&args, "original")?,
+            arg(&args, "expense")?,
         )?),
         "delete_expense" => json(delete_expense(state, &s("groupId")?, &s("expenseId")?)?),
         "record_reimbursement" => json(record_reimbursement(
@@ -515,11 +496,12 @@ mod tests {
         let bob = &group.participants[1].id;
         let args = serde_json::json!({
             "groupId": group.id,
-            "title": "Dinner",
-            "amountCents": 3000,
-            "paidBy": alice,
-            "splits": [{"participant_id": alice, "shares": 1}, {"participant_id": bob, "shares": 2}],
-            "createdAt": null,
+            "expense": {
+                "title": "Dinner",
+                "amount_cents": 3000,
+                "paid_by": alice,
+                "splits": [{"participant_id": alice, "shares": 1}, {"participant_id": bob, "shares": 2}],
+            },
         });
         invoke(&state, "add_expense", &args.to_string())
             .await

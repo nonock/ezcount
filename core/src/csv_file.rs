@@ -19,6 +19,9 @@
 //! it doesn't give the people's amounts (someone edited them), the split is worked out from
 //! the amounts. `Exchange rate` is optional too.
 //!
+//! A `Category` column may follow `Split`, with the expense's category key (`food`,
+//! `transport`…); the app writes it, and reads files without it.
+//!
 //! `Paid by` names one of the people. An expense several people paid lists them with what each
 //! paid, in the currency the expense was paid in: `Alice=30.00 + Bob=20.00`.
 //!
@@ -46,6 +49,8 @@ const COLUMNS: [&str; 10] = [
     "Exchange rate",
     "Split",
 ];
+/// An optional column after the others, before the people.
+const CATEGORY: &str = "Category";
 const EXPENSE: &str = "expense";
 const PAYMENT: &str = "payment";
 const NOT_IN: &str = "-";
@@ -129,6 +134,7 @@ pub fn export(group: &Group) -> Res<String> {
         COLUMNS
             .iter()
             .copied()
+            .chain(std::iter::once(CATEGORY))
             .chain(names.iter().map(String::as_str)),
     )
     .map_err(write_err)?;
@@ -173,8 +179,14 @@ pub fn export(group: &Group) -> Res<String> {
                 split.join(" ")
             },
         ];
-        out.write_record(fixed.iter().chain(parts.iter()))
-            .map_err(write_err)?;
+        let category = e.category.clone().unwrap_or_default();
+        out.write_record(
+            fixed
+                .iter()
+                .chain(std::iter::once(&category))
+                .chain(parts.iter()),
+        )
+        .map_err(write_err)?;
     }
     let bytes = out
         .into_inner()
@@ -381,9 +393,17 @@ pub fn import(text: &str) -> Res<ImportedGroup> {
     {
         return Err(not_ours());
     }
+    // Files from before categories, or from elsewhere, have the people right after.
+    let has_category = header
+        .get(COLUMNS.len())
+        .is_some_and(|name| name.trim().eq_ignore_ascii_case(CATEGORY));
+    let first_person = COLUMNS.len() + usize::from(has_category);
+    if header.len() <= first_person {
+        return Err(not_ours());
+    }
     let participants: Vec<String> = header
         .iter()
-        .skip(COLUMNS.len())
+        .skip(first_person)
         .map(|name| unguard(name.trim()).to_string())
         .collect();
     let mut seen = HashSet::new();
@@ -487,7 +507,7 @@ pub fn import(text: &str) -> Res<ImportedGroup> {
         let mut people = Vec::new();
         let mut owes = Vec::new();
         for (person, name) in participants.iter().enumerate() {
-            let text = cell(COLUMNS.len() + person);
+            let text = cell(first_person + person);
             if text.is_empty() {
                 continue;
             }
@@ -575,8 +595,11 @@ pub fn import(text: &str) -> Res<ImportedGroup> {
                     .ok_or_else(|| format!("Line {line}: the parts are too uneven to import"))?,
             }
         };
+        let category = Some(cell(COLUMNS.len()).to_lowercase())
+            .filter(|category| has_category && !category.is_empty());
         expenses.push(ImportedExpense {
             title,
+            category,
             amount_cents,
             original,
             paid_by,
@@ -614,6 +637,33 @@ mod tests {
         )
         .unwrap();
         doc::read_group(&doc).unwrap()
+    }
+
+    #[test]
+    fn categories_survive_export_and_import() {
+        let file = format!(
+            "{HEADER},Category,Alice,Bob\n\
+             2026-08-29T10:00:00Z,Dinner,30.00,EUR,Alice,expense,,,,1 1,Food,15.00,15.00\n\
+             2026-08-30T10:00:00Z,Taxi,10.00,EUR,Bob,expense,,,,1 1,,5.00,5.00\n"
+        );
+        let group = group_of(&file);
+        let categories = |group: &Group| -> Vec<Option<String>> {
+            group.expenses.iter().map(|e| e.category.clone()).collect()
+        };
+        assert_eq!(group.participants.len(), 2, "Category is not a person");
+        assert_eq!(categories(&group), vec![Some("food".to_string()), None]);
+
+        let exported = export(&group).unwrap();
+        assert!(exported.starts_with(&format!("{HEADER},Category,Alice,Bob")));
+        assert_eq!(categories(&group_of(&exported)), categories(&group));
+
+        // A file from before categories has the people right after Split.
+        let old = format!(
+            "{HEADER},Alice,Bob\n2026-08-29T10:00:00Z,Dinner,30.00,EUR,Alice,expense,,,,1 1,15.00,15.00\n"
+        );
+        let group = group_of(&old);
+        assert_eq!(group.participants.len(), 2);
+        assert_eq!(categories(&group), vec![None]);
     }
 
     #[test]
@@ -767,11 +817,11 @@ mod tests {
 
         let file = export(&group).unwrap();
         let expected = format!(
-            "{HEADER},Alice,Bob,\"'=Carol, \"\"C\"\"\"\n\
-             2026-03-01T08:30:00Z,\"Dinner, with \"\"wine\"\"\",10.00,CHF,Alice,expense,,,,1 1 1,3.34,3.33,3.33\n\
-             2026-03-02T08:30:00Z,'-50% tickets,134.00,CHF,Bob,expense,,,,- 2 1,,89.33,44.67\n\
-             2026-03-03T08:30:00Z,Groceries,146.60,CHF,\"'=Carol, \"\"C\"\"\",expense,,,,44.36 55.50 5,44.36,55.50,46.74\n\
-             2026-03-04T08:30:00Z,Taxi,46.17,CHF,Bob,expense,50.00,USD,0.9234,20.00 1 -,18.47,27.70,\n"
+            "{HEADER},Category,Alice,Bob,\"'=Carol, \"\"C\"\"\"\n\
+             2026-03-01T08:30:00Z,\"Dinner, with \"\"wine\"\"\",10.00,CHF,Alice,expense,,,,1 1 1,,3.34,3.33,3.33\n\
+             2026-03-02T08:30:00Z,'-50% tickets,134.00,CHF,Bob,expense,,,,- 2 1,,,89.33,44.67\n\
+             2026-03-03T08:30:00Z,Groceries,146.60,CHF,\"'=Carol, \"\"C\"\"\",expense,,,,44.36 55.50 5,,44.36,55.50,46.74\n\
+             2026-03-04T08:30:00Z,Taxi,46.17,CHF,Bob,expense,50.00,USD,0.9234,20.00 1 -,,18.47,27.70,\n"
         );
         assert_eq!(&file[..expected.len()], expected);
 

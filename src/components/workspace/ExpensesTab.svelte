@@ -21,6 +21,7 @@
   import * as InputGroup from "@/components/ui/input-group";
   import * as Item from "@/components/ui/item";
   import { deleteExpense } from "@/lib/actions";
+  import { CATEGORIES, categoryName, categoryOf, categoryTone } from "@/lib/categories";
   import { t } from "@/lib/i18n/index.svelte";
   import { paidAmounts, paidCurrency } from "@/lib/split";
   import { dialogs } from "@/lib/state/dialogs.svelte";
@@ -77,14 +78,33 @@
   let query = $state("");
   let kind = $state<Kind>("all");
   let person = $state(ANYONE);
+  const ANY_CATEGORY = "any";
+  /** A category's key, "" for the expenses without one, or any. */
+  let category = $state(ANY_CATEGORY);
   let sort = $state<Sort>("newest");
 
-  const filtering = $derived(query.trim() !== "" || kind !== "all" || person !== ANYONE);
+  const filtering = $derived(
+    query.trim() !== "" || kind !== "all" || person !== ANYONE || category !== ANY_CATEGORY
+  );
+  /** The key the filter and the statistics know an expense's category by. */
+  const categoryKey = (e: Expense) =>
+    e.is_reimbursement ? null : (categoryOf(e.category)?.key ?? "");
+  // Only the categories the group uses are offered.
+  const usedCategories = $derived.by(() => {
+    const used = new Set(group.expenses.map(categoryKey));
+    return [
+      ...CATEGORIES.filter((c) => used.has(c.key)).map((c) => ({
+        value: c.key as string,
+        label: t(c.label),
+      })),
+      ...(used.has("") ? [{ value: "", label: t("category.none") }] : []),
+    ];
+  });
   /** By day only makes sense in date order. */
   const byDay = $derived(sort === "newest" || sort === "oldest");
 
   // The menu shows each choice as its current value; opening one lists the others.
-  type Section = "sort" | "kind" | "person";
+  type Section = "sort" | "kind" | "person" | "category";
   let openSection = $state<Section | null>(null);
   const sections = $derived([
     {
@@ -108,12 +128,19 @@
         ...group.participants.map((p) => ({ value: p.id, label: p.name })),
       ],
     },
+    {
+      id: "category" as const,
+      label: t("category.label"),
+      value: category,
+      options: [{ value: ANY_CATEGORY, label: t("category.any") }, ...usedCategories],
+    },
   ]);
 
   function pick(section: Section, value: string) {
     if (section === "sort") sort = value as Sort;
     else if (section === "kind") kind = value as Kind;
-    else person = value;
+    else if (section === "person") person = value;
+    else category = value;
     openSection = null;
   }
 
@@ -121,6 +148,7 @@
     query = "";
     kind = "all";
     person = ANYONE;
+    category = ANY_CATEGORY;
   }
 
   /** Lower case without accents, so "cafe" finds "Café". */
@@ -142,9 +170,10 @@
       ) {
         return false;
       }
+      if (category !== ANY_CATEGORY && categoryKey(e) !== category) return false;
       if (words.length === 0) return true;
       const text = plain(
-        `${expenseTitle(e)} ${payersOf(e)} ${formatMoney(e.amount_cents, group.currency)} ${(e.amount_cents / 100).toFixed(2)}`
+        `${expenseTitle(e)} ${e.category ? categoryName(e.category) : ""} ${payersOf(e)} ${formatMoney(e.amount_cents, group.currency)} ${(e.amount_cents / 100).toFixed(2)}`
       );
       return words.every((word) => text.includes(word));
     });
@@ -171,7 +200,7 @@
   let visibleCount = $state(PAGE_SIZE);
   // Another search or order starts again at the first page.
   $effect(() => {
-    void [query, kind, person, sort];
+    void [query, kind, person, category, sort];
     visibleCount = PAGE_SIZE;
   });
 
@@ -278,7 +307,7 @@
                 class="relative"
               >
                 <SlidersHorizontalIcon />
-                {#if kind !== "all" || person !== ANYONE || sort !== "newest"}
+                {#if kind !== "all" || person !== ANYONE || category !== ANY_CATEGORY || sort !== "newest"}
                   <span
                     class="absolute -top-1 -right-1 size-2.5 rounded-full bg-primary ring-2 ring-background"
                   >
@@ -399,6 +428,7 @@
           {@const editCount = e.history?.length ?? 0}
           {@const totalShares = e.splits.reduce((sum, s) => sum + s.shares, 0)}
           {@const anyFixed = e.splits.some((s) => s.fixed_cents != null)}
+          {@const filed = isReimbursement ? null : categoryOf(e.category)}
           <li data-testid="expense-item">
             <Item.Root class="items-start rounded-none sm:items-center">
               <Item.Media>
@@ -406,10 +436,16 @@
                   <Avatar.Fallback
                     class={isReimbursement
                       ? "bg-positive-soft text-positive"
-                      : memberTone(group, e.paid_by)}
+                      : filed
+                        ? categoryTone(e.category)
+                        : memberTone(group, e.paid_by)}
+                    title={filed ? t(filed.label) : undefined}
                   >
                     {#if isReimbursement}
                       <HandCoinsIcon class="size-4" aria-hidden="true" />
+                    {:else if filed}
+                      <filed.icon class="size-4" aria-hidden="true" />
+                      <span class="sr-only">{t(filed.label)}</span>
                     {:else}
                       {e.title.charAt(0).toUpperCase()}
                     {/if}

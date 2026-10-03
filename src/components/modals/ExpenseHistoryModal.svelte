@@ -2,6 +2,7 @@
   import Amount from "@/components/common/Amount.svelte";
   import { Badge } from "@/components/ui/badge";
   import * as Dialog from "@/components/ui/dialog";
+  import { categoryName } from "@/lib/categories";
   import { summaryText } from "@/lib/i18n/backend";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
@@ -122,6 +123,8 @@
                     <dt class="col-span-2 font-medium">{t("history.before")}</dt>
                     <dt class="text-muted-foreground">{t("history.titleField")}</dt>
                     <dd class="text-right">{entry.previous_title}</dd>
+                    <dt class="text-muted-foreground">{t("category.label")}</dt>
+                    <dd class="text-right">{categoryName(entry.previous_category)}</dd>
                     <dt class="text-muted-foreground">{t("common.amount")}</dt>
                     <dd class="text-right">
                       <Amount cents={entry.previous_amount_cents} currency={group.currency} />

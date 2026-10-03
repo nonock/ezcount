@@ -143,17 +143,20 @@ async removeParticipant(groupId: string, participantId: string) : Promise<Result
     else return { status: "error", error: e  as any };
 }
 },
-async addExpense(groupId: string, title: string, amountCents: number, paidBy: string, payers: ExpensePayer[], splits: ExpenseSplit[], createdAt: string | null, original: OriginalAmount | null) : Promise<Result<Group, string>> {
+async addExpense(groupId: string, expense: ExpenseInput) : Promise<Result<Group, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("add_expense", { groupId, title, amountCents, paidBy, payers, splits, createdAt, original }) };
+    return { status: "ok", data: await TAURI_INVOKE("add_expense", { groupId, expense }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async updateExpense(groupId: string, expenseId: string, title: string, amountCents: number, paidBy: string, payers: ExpensePayer[], splits: ExpenseSplit[], createdAt: string | null, original: OriginalAmount | null) : Promise<Result<Group, string>> {
+/**
+ * Replaces an expense with what the form holds, recording what changed in its history.
+ */
+async updateExpense(groupId: string, expenseId: string, expense: ExpenseInput) : Promise<Result<Group, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("update_expense", { groupId, expenseId, title, amountCents, paidBy, payers, splits, createdAt, original }) };
+    return { status: "ok", data: await TAURI_INVOKE("update_expense", { groupId, expenseId, expense }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -393,8 +396,12 @@ async logInWithLink(link: string) : Promise<Result<AccountInfo, string>> {
 /** user-defined types **/
 
 export type AccountInfo = { username: string; server_url: string; display_name: string | null; avatar: string | null; archived: string[]; identities: { [key in string]: string } }
-export type Expense = { id: string; group_id: string; title: string; amount_cents: number; original?: OriginalAmount | null; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean }
-export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_payers?: ExpensePayer[]; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; summary: string }
+export type Expense = { id: string; group_id: string; title: string; category?: string | null; amount_cents: number; original?: OriginalAmount | null; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean }
+export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_payers?: ExpensePayer[]; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; previous_category?: string | null; summary: string }
+/**
+ * An expense as the form sends it, to add one or to replace one.
+ */
+export type ExpenseInput = { title: string; category?: string | null; amount_cents: number; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at?: string | null; original?: OriginalAmount | null }
 /**
  * What one of the several people who paid an expense put in.
  */
@@ -410,7 +417,7 @@ export type NativeFeatures = { share: boolean; scan: boolean; save?: boolean }
  * What an expense paid in another currency than the group's cost there.
  */
 export type OriginalAmount = { currency: string; amount_cents: number; rate: string }
-export type Participant = { id: string; name: string; removed?: boolean; avatar?: string | null }
+export type Participant = { id: string; name: string; removed?: boolean; avatar?: string | null; added_at?: string | null; added_by?: string | null; removed_at?: string | null; removed_by?: string | null }
 export type ParticipantBalance = { participant_id: string; participant_name: string; paid_cents: number; owed_cents: number; net_cents: number; removed: boolean }
 export type PasswordStrength = { score: number; acceptable: boolean; warning: string | null; suggestions: string[] }
 export type SettlementTransfer = { from_id: string; from_name: string; to_id: string; to_name: string; amount_cents: number }

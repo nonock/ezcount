@@ -237,11 +237,12 @@ test.describe("Sharing and joining", () => {
       const w = window as any;
       await w.__TAURI_INTERNALS__.invoke("add_expense", {
         groupId: "group-trip",
-        title: "Museum",
-        amountCents: 3000,
-        paidBy: "p-bob",
-        splits: [{ participant_id: "p-bob", shares: 1 }],
-        createdAt: null,
+        expense: {
+          title: "Museum",
+          amount_cents: 3000,
+          paid_by: "p-bob",
+          splits: [{ participant_id: "p-bob", shares: 1 }],
+        },
       });
       w.__emitMockEvent("sync-updated", { group_id: "group-trip", changed: true });
     });

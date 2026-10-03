@@ -20,6 +20,7 @@
   import ExpenseHistoryModal from "@/components/modals/ExpenseHistoryModal.svelte";
   import JoinGroupModal from "@/components/modals/JoinGroupModal.svelte";
   import LinkDeviceDialog from "@/components/modals/LinkDeviceDialog.svelte";
+  import MemberHistoryDialog from "@/components/modals/MemberHistoryDialog.svelte";
   import MemberModal from "@/components/modals/MemberModal.svelte";
   import RecordReimbursementModal from "@/components/modals/RecordReimbursementModal.svelte";
   import RecoveryKeyDialog from "@/components/modals/RecoveryKeyDialog.svelte";
@@ -292,6 +293,7 @@
       <ShareGroupModal {group} />
       <WhoAreYouModal {group} />
       <EditGroupModal {group} />
+      <MemberHistoryDialog {group} />
       <AddExpenseModal {group} />
       <RecordReimbursementModal {group} />
       <ExpenseHistoryModal {group} />

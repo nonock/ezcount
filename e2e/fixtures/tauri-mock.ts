@@ -16,6 +16,7 @@ export interface MockOriginalAmount {
 export interface MockExpenseHistoryEntry {
   edited_at: string;
   previous_title: string;
+  previous_category?: string | null;
   previous_amount_cents: number;
   previous_paid_by: string;
   previous_payers?: { participant_id: string; amount_cents: number }[];
@@ -28,6 +29,7 @@ export interface MockExpense {
   id: string;
   group_id: string;
   title: string;
+  category?: string | null;
   amount_cents: number;
   original?: MockOriginalAmount | null;
   paid_by: string;
@@ -45,7 +47,16 @@ export interface MockGroup {
   description?: string;
   image?: string | null;
   currency: string;
-  participants: { id: string; name: string; removed?: boolean; avatar?: string | null }[];
+  participants: {
+    id: string;
+    name: string;
+    removed?: boolean;
+    avatar?: string | null;
+    added_at?: string | null;
+    added_by?: string | null;
+    removed_at?: string | null;
+    removed_by?: string | null;
+  }[];
   expenses: MockExpense[];
   created_at: string;
   deleted?: boolean;
@@ -274,6 +285,22 @@ export function installTauriMock() {
       );
     }
     return { paid_by: payers[0].participant_id, payers };
+  }
+
+  /** The commands take the expense as one `expense` argument; the cases below read its fields. */
+  function expenseArgs(args: any) {
+    const e = args.expense;
+    return {
+      ...args,
+      title: e.title,
+      category: e.category || null,
+      amountCents: e.amount_cents,
+      paidBy: e.paid_by,
+      payers: e.payers ?? [],
+      splits: e.splits,
+      createdAt: e.created_at ?? null,
+      original: e.original ?? null,
+    };
   }
 
   function computeBalances(group: MockGroup) {
@@ -596,7 +623,12 @@ export function installTauriMock() {
           const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
           const id = `p-self-${Date.now()}`;
-          g.participants.push({ id, name: args.name });
+          g.participants.push({
+            id,
+            name: args.name,
+            added_at: new Date().toISOString(),
+            added_by: id,
+          });
           acc.identities[args.groupId] = id;
           showProfile(args.groupId, id);
           return clone(g);
@@ -649,6 +681,8 @@ export function installTauriMock() {
           const p = g.participants.find((x) => x.id === args?.participantId);
           if (!p) throw new Error("Participant not found");
           p.removed = true;
+          p.removed_at = new Date().toISOString();
+          p.removed_by = getAccount()?.identities[g.id] ?? null;
           return clone(g);
         }
 
@@ -885,11 +919,17 @@ export function installTauriMock() {
         case "add_participant": {
           const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
-          g.participants.push({ id: `p-${Date.now()}`, name: args.name });
+          g.participants.push({
+            id: `p-${Date.now()}`,
+            name: args.name,
+            added_at: new Date().toISOString(),
+            added_by: getAccount()?.identities[g.id] ?? null,
+          });
           return clone(g);
         }
 
         case "add_expense": {
+          args = expenseArgs(args);
           const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
           checkSplits(args.amountCents, args.original, args.splits);
@@ -900,6 +940,7 @@ export function installTauriMock() {
             id: `exp-${Date.now()}`,
             group_id: args.groupId,
             title: args.title,
+            category: args.category,
             amount_cents: args.amountCents,
             original: args.original ?? null,
             paid_by: who.paid_by,
@@ -915,6 +956,7 @@ export function installTauriMock() {
         }
 
         case "update_expense": {
+          args = expenseArgs(args);
           const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
           const exp = g.expenses.find((x) => x.id === args?.expenseId);
@@ -931,6 +973,7 @@ export function installTauriMock() {
           exp.history.push({
             edited_at: new Date().toISOString(),
             previous_title: prevTitle,
+            previous_category: exp.category ?? null,
             previous_amount_cents: prevAmount,
             previous_paid_by: prevPayer,
             previous_payers: exp.payers ?? [],
@@ -940,6 +983,7 @@ export function installTauriMock() {
           });
 
           exp.title = args.title;
+          exp.category = args.category;
           exp.amount_cents = args.amountCents;
           exp.original = args.original ?? null;
           exp.paid_by = who.paid_by;
