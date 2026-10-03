@@ -17,6 +17,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+# Serves the web version (`Settings::web_dir`).
+tower-http = { version = "0.6", features = ["fs", "set-header"] }
 
 [profile.release]
 codegen-units = 1

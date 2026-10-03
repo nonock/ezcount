@@ -10,6 +10,8 @@
 //!   behind such a proxy: otherwise clients could pick their own address
 //! - `EZCOUNT_MAX_STORAGE_MB` (default 1024) and `EZCOUNT_MAX_DOCUMENT_MB` (default 50):
 //!   stored data in all, and per group or account. Keep the first under the disk's size
+//! - `EZCOUNT_WEB_DIR`: the web version to serve at `/` (`bun run build:web` writes it to
+//!   `sync-server/web`); none when unset or without an `index.html`
 
 use ezcount_sync_server::{AndroidApp, Limits, Settings};
 use std::path::PathBuf;
@@ -56,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             max_document_bytes: megabytes("EZCOUNT_MAX_DOCUMENT_MB", defaults.max_document_bytes)?,
             ..defaults
         },
+        web_dir: std::env::var_os("EZCOUNT_WEB_DIR").map(PathBuf::from),
     };
 
     println!(
@@ -67,6 +70,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .as_ref()
             .map_or("the connection", |h| h.as_str()),
     );
+    if let Some(dir) = &settings.web_dir {
+        match dir.join("index.html").is_file() {
+            true => println!("serving the web version from {}", dir.display()),
+            false => println!("no web version in {} (no index.html)", dir.display()),
+        }
+    }
     if let Some(app) = &settings.android_app {
         println!("invite links open the Android app {}", app.package);
     }

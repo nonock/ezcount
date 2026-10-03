@@ -108,6 +108,7 @@
         <h1>You're invited to a group on ezcount</h1>
         <p>Open the invite in the ezcount app, logged in to your account, to join the group.</p>
         <a id="open" class="button" href="#">Open in ezcount</a>
+        <a id="web" class="button secondary" href="#" hidden>Open in your browser</a>
 
         <h2>Doesn't open?</h2>
         <p>Install ezcount first, or join by hand: in the app, tap <b>Join with Code</b> and paste this invite.</p>
@@ -132,6 +133,12 @@
           v: invite.get("v") ?? "",
         }).toString();
         document.getElementById("open").href = app.href;
+        // The relay serves the web version too: it takes the invite from the same fragment.
+        if (document.body.hasAttribute("data-web")) {
+          const web = document.getElementById("web");
+          web.href = server + "/" + location.hash;
+          web.hidden = false;
+        }
         const code = document.getElementById("code");
         code.value = location.href;
         code.addEventListener("focus", () => code.select());

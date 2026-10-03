@@ -1,2 +1,4 @@
 /target/
+# The web version, built by `bun run build:web` and served by the relay
+/web/
 *.sqlite3*

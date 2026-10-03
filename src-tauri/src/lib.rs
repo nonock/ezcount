@@ -11,7 +11,7 @@ use ezcount_core::models::{
     SettlementTransfer, SignedIn, SyncInfo,
 };
 use ezcount_core::storage::Store;
-use ezcount_core::{doc, engine, sync, AppState};
+use ezcount_core::{api, AppState};
 use std::path::PathBuf;
 #[cfg(windows)]
 use std::sync::Mutex;
@@ -20,13 +20,13 @@ use tauri::{Manager, State};
 #[tauri::command]
 #[specta::specta]
 fn get_groups(state: State<AppState>) -> Vec<Group> {
-    state.store().groups()
+    api::get_groups(&state)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn get_group(state: State<AppState>, group_id: String) -> Result<Group, String> {
-    state.store().group(&group_id)
+    api::get_group(&state, &group_id)
 }
 
 #[tauri::command]
@@ -38,14 +38,14 @@ fn create_group(
     currency: String,
     participants: Vec<String>,
 ) -> Result<Group, String> {
-    sync::create_group(&state, &name, &currency, &participants)
+    api::create_group(&state, &name, &currency, &participants)
 }
 
 /// Removes the group from the account, on all the user's devices. Other members keep it.
 #[tauri::command]
 #[specta::specta]
 async fn leave_group(state: State<'_, AppState>, group_id: String) -> Result<(), String> {
-    sync::leave_group(&state, &group_id).await
+    api::leave_group(&state, &group_id).await
 }
 
 /// Renames the group and sets its currency. Amounts are not converted.
@@ -57,7 +57,7 @@ fn update_group(
     name: String,
     currency: String,
 ) -> Result<Group, String> {
-    state.mutate(&group_id, |d| doc::update_group(d, &name, &currency))
+    api::update_group(&state, &group_id, &name, &currency)
 }
 
 #[tauri::command]
@@ -67,7 +67,7 @@ fn add_participant(
     group_id: String,
     name: String,
 ) -> Result<Group, String> {
-    state.mutate(&group_id, |d| doc::add_participant(d, &name).map(|_| ()))
+    api::add_participant(&state, &group_id, &name)
 }
 
 #[tauri::command]
@@ -77,7 +77,7 @@ fn remove_participant(
     group_id: String,
     participant_id: String,
 ) -> Result<Group, String> {
-    state.mutate(&group_id, |d| doc::remove_participant(d, &participant_id))
+    api::remove_participant(&state, &group_id, &participant_id)
 }
 
 #[tauri::command]
@@ -88,9 +88,7 @@ fn rename_participant(
     participant_id: String,
     name: String,
 ) -> Result<Group, String> {
-    state.mutate(&group_id, |d| {
-        doc::rename_participant(d, &participant_id, &name)
-    })
+    api::rename_participant(&state, &group_id, &participant_id, &name)
 }
 
 #[tauri::command]
@@ -104,9 +102,15 @@ fn add_expense(
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
 ) -> Result<Group, String> {
-    state.mutate(&group_id, |d| {
-        doc::add_expense(d, &title, amount_cents, paid_by, splits, created_at)
-    })
+    api::add_expense(
+        &state,
+        &group_id,
+        &title,
+        amount_cents,
+        paid_by,
+        splits,
+        created_at,
+    )
 }
 
 #[tauri::command]
@@ -122,17 +126,16 @@ fn update_expense(
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
 ) -> Result<Group, String> {
-    state.mutate(&group_id, |d| {
-        doc::update_expense(
-            d,
-            &expense_id,
-            &title,
-            amount_cents,
-            paid_by,
-            splits,
-            created_at,
-        )
-    })
+    api::update_expense(
+        &state,
+        &group_id,
+        &expense_id,
+        &title,
+        amount_cents,
+        paid_by,
+        splits,
+        created_at,
+    )
 }
 
 #[tauri::command]
@@ -142,7 +145,7 @@ fn delete_expense(
     group_id: String,
     expense_id: String,
 ) -> Result<Group, String> {
-    state.mutate(&group_id, |d| doc::delete_expense(d, &expense_id))
+    api::delete_expense(&state, &group_id, &expense_id)
 }
 
 #[tauri::command]
@@ -151,7 +154,7 @@ fn get_balances(
     state: State<AppState>,
     group_id: String,
 ) -> Result<Vec<ParticipantBalance>, String> {
-    Ok(engine::calculate_balances(&state.store().group(&group_id)?))
+    api::get_balances(&state, &group_id)
 }
 
 #[tauri::command]
@@ -160,9 +163,7 @@ fn get_settlements(
     state: State<AppState>,
     group_id: String,
 ) -> Result<Vec<SettlementTransfer>, String> {
-    Ok(engine::calculate_settlements(
-        &state.store().group(&group_id)?,
-    ))
+    api::get_settlements(&state, &group_id)
 }
 
 #[tauri::command]
@@ -175,41 +176,38 @@ fn record_reimbursement(
     amount_cents: i64,
     notes: Option<String>,
 ) -> Result<Group, String> {
-    state.mutate(&group_id, |d| {
-        doc::record_reimbursement(d, from_id, to_id, amount_cents, notes)
-    })
+    api::record_reimbursement(&state, &group_id, from_id, to_id, amount_cents, notes)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn get_storage_warnings(state: State<AppState>) -> Vec<String> {
-    state.warnings.clone()
+    api::get_storage_warnings(&state)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn get_sync_info(state: State<AppState>, group_id: String) -> Result<SyncInfo, String> {
-    state.sync_info(&group_id)
+    api::get_sync_info(&state, &group_id)
 }
 
 /// Syncs one group immediately. Failures are reported in the returned `last_error`.
 #[tauri::command]
 #[specta::specta]
 async fn sync_now(state: State<'_, AppState>, group_id: String) -> Result<SyncInfo, String> {
-    let _ = sync::sync_group(&state, &group_id).await;
-    state.sync_info(&group_id)
+    api::sync_now(&state, &group_id).await
 }
 
 #[tauri::command]
 #[specta::specta]
 async fn join_group(state: State<'_, AppState>, invite_code: String) -> Result<Group, String> {
-    sync::join_group(&state, &invite_code).await
+    api::join_group(&state, &invite_code).await
 }
 
 #[tauri::command]
 #[specta::specta]
 fn get_account(state: State<AppState>) -> Result<Option<AccountInfo>, String> {
-    state.account_info()
+    api::get_account(&state)
 }
 
 #[tauri::command]
@@ -220,11 +218,7 @@ async fn sign_up(
     username: String,
     password: String,
 ) -> Result<SignedIn, String> {
-    let recovery_key = sync::sign_up(&state, &server_url, &username, &password).await?;
-    Ok(SignedIn {
-        account: state.require_account_info()?,
-        recovery_key,
-    })
+    api::sign_up(&state, &server_url, &username, &password).await
 }
 
 /// Sets a new password with the recovery key and logs in. Returns the replacement recovery
@@ -238,12 +232,7 @@ async fn recover_account(
     recovery_key: String,
     new_password: String,
 ) -> Result<SignedIn, String> {
-    let next =
-        sync::recover_account(&state, &server_url, &username, &recovery_key, &new_password).await?;
-    Ok(SignedIn {
-        account: state.require_account_info()?,
-        recovery_key: Some(next),
-    })
+    api::recover_account(&state, &server_url, &username, &recovery_key, &new_password).await
 }
 
 #[tauri::command]
@@ -253,7 +242,7 @@ async fn change_password(
     current_password: String,
     new_password: String,
 ) -> Result<(), String> {
-    sync::change_password(&state, &current_password, &new_password).await
+    api::change_password(&state, &current_password, &new_password).await
 }
 
 /// A new recovery key, replacing the old one. Returned to show once.
@@ -263,7 +252,7 @@ async fn replace_recovery_key(
     state: State<'_, AppState>,
     password: String,
 ) -> Result<String, String> {
-    sync::replace_recovery_key(&state, &password).await
+    api::replace_recovery_key(&state, &password).await
 }
 
 #[tauri::command]
@@ -274,8 +263,7 @@ async fn log_in(
     username: String,
     password: String,
 ) -> Result<AccountInfo, String> {
-    sync::log_in(&state, &server_url, &username, &password).await?;
-    state.require_account_info()
+    api::log_in(&state, &server_url, &username, &password).await
 }
 
 /// Removes the account and its groups from this device. Fails while changes are not uploaded,
@@ -283,7 +271,7 @@ async fn log_in(
 #[tauri::command]
 #[specta::specta]
 async fn log_out(state: State<'_, AppState>, force: bool) -> Result<(), String> {
-    sync::log_out(&state, force).await
+    api::log_out(&state, force).await
 }
 
 /// Records which participant the user is in a group.
@@ -294,22 +282,21 @@ fn set_identity(
     group_id: String,
     participant_id: String,
 ) -> Result<AccountInfo, String> {
-    sync::set_identity(&state, &group_id, &participant_id)?;
-    state.require_account_info()
+    api::set_identity(&state, &group_id, &participant_id)
 }
 
 /// Adds the user to a group as a new participant.
 #[tauri::command]
 #[specta::specta]
 fn add_self(state: State<AppState>, group_id: String, name: String) -> Result<Group, String> {
-    sync::add_self(&state, &group_id, &name)
+    api::add_self(&state, &group_id, &name)
 }
 
 /// How hard a password is to guess. Signing up requires `acceptable`.
 #[tauri::command]
 #[specta::specta]
 async fn password_strength(password: String, username: String) -> PasswordStrength {
-    sync::password_strength(&password, &username)
+    api::password_strength(&password, &username)
 }
 
 /// What this platform can do natively, beyond the web view.

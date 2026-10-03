@@ -31,12 +31,18 @@ type Res<T> = Result<T, String>;
 
 const MIN_PASSWORD_LEN: usize = 8;
 
+/// Every request to the relay gives up after this long (set per request: in the browser,
+/// reqwest has no client-wide timeout).
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub fn http_client() -> Res<reqwest::Client> {
-    let builder = reqwest::Client::builder()
+    let builder = reqwest::Client::builder();
+    // The relay never redirects. Following one could resend tokens elsewhere, or over plain
+    // HTTP. In the browser, fetch follows redirects itself, but drops the Authorization header
+    // across origins and refuses plain HTTP from an HTTPS page.
+    #[cfg(not(target_family = "wasm"))]
+    let builder = builder
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
-        // The relay never redirects. Following one could resend tokens elsewhere, or over
-        // plain HTTP.
         .redirect(reqwest::redirect::Policy::none());
     // Tests swap relays on one address; a pooled connection would still reach the old one.
     #[cfg(test)]
@@ -243,11 +249,19 @@ fn check_password(password: &str, username: &str) -> Res<()> {
 }
 
 /// Argon2 takes a noticeable fraction of a second, so it runs on a blocking thread.
+#[cfg(not(target_family = "wasm"))]
 async fn password_keys(username: &str, password: &str) -> Res<CredentialKeys> {
     let (username, password) = (username.to_string(), password.to_string());
     tokio::task::spawn_blocking(move || CredentialKeys::from_password(&username, &password))
         .await
         .map_err(|e| format!("Could not derive keys from the password: {e}"))?
+}
+
+/// The browser has no blocking threads, but the core runs in a Web Worker there, so hashing
+/// doesn't freeze the page.
+#[cfg(target_family = "wasm")]
+async fn password_keys(username: &str, password: &str) -> Res<CredentialKeys> {
+    CredentialKeys::from_password(username, password)
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +349,12 @@ fn updates_url(server_url: &str, group_id: &str) -> String {
 }
 
 fn request_err(e: reqwest::Error) -> String {
-    if e.is_connect() || e.is_timeout() {
+    // In the browser, a request that can't reach the server is a plain request error.
+    #[cfg(target_family = "wasm")]
+    let unreachable = e.is_request() || e.is_timeout();
+    #[cfg(not(target_family = "wasm"))]
+    let unreachable = e.is_connect() || e.is_timeout();
+    if unreachable {
         "Could not reach the sync server".to_string()
     } else {
         format!("Sync request failed: {e}")
@@ -389,6 +408,7 @@ async fn push(
         .bearer_auth(&keys.auth_token)
         .header("content-type", "application/octet-stream")
         .body(keys.seal(group_id, update)?)
+        .timeout(REQUEST_TIMEOUT)
         .send()
         .await
         .map_err(request_err)?;
@@ -408,6 +428,7 @@ async fn pull_page(
         .get(updates_url(server_url, group_id))
         .query(&[("after", after)])
         .bearer_auth(&keys.auth_token)
+        .timeout(REQUEST_TIMEOUT)
         .send()
         .await
         .map_err(request_err)?;
@@ -440,12 +461,19 @@ const MAX_PAGES_PER_SYNC: usize = 50;
 
 /// Runs blocking storage work (SQLite commits wait for the disk) without stalling the
 /// other tasks on this async worker thread.
+#[cfg(not(target_family = "wasm"))]
 fn blocking<T>(work: impl FnOnce() -> T) -> T {
     use tokio::runtime::{Handle, RuntimeFlavor};
     match Handle::try_current().map(|h| h.runtime_flavor()) {
         Ok(RuntimeFlavor::MultiThread) => tokio::task::block_in_place(work),
         _ => work(),
     }
+}
+
+/// The browser's one thread is the Web Worker running the core: nothing else to keep going.
+#[cfg(target_family = "wasm")]
+fn blocking<T>(work: impl FnOnce() -> T) -> T {
+    work()
 }
 
 /// Downloads a document, or its first `MAX_PAGES_PER_SYNC` pages: syncing it once stored
@@ -668,6 +696,7 @@ pub async fn sign_up(
             recovery_wrapped_key: STANDARD
                 .encode(recovery.wrap_account_key(&account_id, &account_key)?),
         })
+        .timeout(REQUEST_TIMEOUT)
         .send()
         .await
         .map_err(request_err)?;
@@ -712,6 +741,7 @@ async fn update_credentials(
         .http
         .post(format!("{server_url}/v1/accounts/credentials"))
         .json(request)
+        .timeout(REQUEST_TIMEOUT)
         .send()
         .await
         .map_err(request_err)?;
@@ -811,6 +841,7 @@ pub async fn recover_account(
             username: &username,
             recovery_token: &recovery.token,
         })
+        .timeout(REQUEST_TIMEOUT)
         .send()
         .await
         .map_err(request_err)?;
@@ -875,6 +906,7 @@ pub async fn log_in(state: &AppState, server_url: &str, username: &str, password
             username: &username,
             login_token: &keys.token,
         })
+        .timeout(REQUEST_TIMEOUT)
         .send()
         .await
         .map_err(request_err)?;
@@ -1606,6 +1638,9 @@ mod end_to_end {
             .contains("default-src 'none'"));
         let html = page.text().await.unwrap();
         assert!(html.contains(r#"new URL("ezcount://join")"#));
+        // No web version here: nothing at the root, and the page doesn't offer one.
+        assert!(!html.contains("<body data-web>"));
+        assert_eq!(http.get(&urls[0]).send().await.unwrap().status(), 404);
 
         let links = format!("{}/.well-known/assetlinks.json", urls[0]);
         assert_eq!(http.get(links).send().await.unwrap().status(), 404);
@@ -1613,6 +1648,70 @@ mod end_to_end {
         let links: serde_json::Value = http.get(links).send().await.unwrap().json().await.unwrap();
         assert_eq!(links[0]["target"]["package_name"], "com.example.app");
         assert_eq!(links[0]["target"]["sha256_cert_fingerprints"][0], "AB:CD");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_relay_serves_the_web_version() {
+        let dir = std::env::temp_dir().join(format!("ezcount-relay-{}", uuid::Uuid::new_v4()));
+        let web = dir.join("web");
+        std::fs::create_dir_all(web.join("assets")).unwrap();
+        std::fs::write(
+            web.join("index.html"),
+            "<!doctype html><title>ezcount</title>",
+        )
+        .unwrap();
+        std::fs::write(web.join("assets").join("index-abc.js"), "start()").unwrap();
+        std::fs::write(dir.join("secret.txt"), "not for the web").unwrap();
+        let settings = ezcount_sync_server::Settings {
+            web_dir: Some(web),
+            ..Default::default()
+        };
+        let relay =
+            ezcount_sync_server::Relay::open_with(&dir.join("db.sqlite3"), settings).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(ezcount_sync_server::serve(listener, relay));
+        let http = reqwest::Client::new();
+        let header =
+            |r: &reqwest::Response, name: &str| r.headers()[name].to_str().unwrap().to_string();
+
+        let page = http.get(format!("{url}/")).send().await.unwrap();
+        assert_eq!(page.status(), 200);
+        assert!(header(&page, "content-type").starts_with("text/html"));
+        let csp = header(&page, "content-security-policy");
+        assert!(
+            csp.contains("script-src 'self' 'wasm-unsafe-eval';"),
+            "{csp}"
+        );
+        assert!(csp.contains("connect-src 'self';"), "{csp}");
+        assert_eq!(header(&page, "cache-control"), "no-cache");
+        assert_eq!(header(&page, "x-content-type-options"), "nosniff");
+
+        let asset = http
+            .get(format!("{url}/assets/index-abc.js"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(asset.status(), 200);
+        assert!(header(&asset, "cache-control").contains("immutable"));
+        assert_eq!(header(&asset, "content-security-policy"), csp);
+        assert_eq!(asset.text().await.unwrap(), "start()");
+
+        // Nothing outside the web folder, and the API still answers.
+        for path in [
+            "/../secret.txt",
+            "/%2e%2e/secret.txt",
+            "/assets/..%2f..%2fsecret.txt",
+        ] {
+            let response = http.get(format!("{url}{path}")).send().await.unwrap();
+            assert_ne!(response.status(), 200, "{path}");
+        }
+        let health = http.get(format!("{url}/health")).send().await.unwrap();
+        assert_eq!(health.text().await.unwrap(), "ok");
+        let join = http.get(format!("{url}/join")).send().await.unwrap();
+        assert!(join.text().await.unwrap().contains("<body data-web>"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

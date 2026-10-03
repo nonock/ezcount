@@ -47,6 +47,10 @@
 //! configured, `GET /.well-known/assetlinks.json` lets that Android app open invite links
 //! directly (Android App Links).
 //!
+//! With [`Settings::web_dir`] set, the relay also serves the web version of the app (`GET /`, its
+//! files, under a strict Content-Security-Policy), on the same origin as the API so it needs
+//! no CORS, and the join page offers to open invites there.
+//!
 //! [`Limits`] keep one client from filling the disk or locking other people out: per-document
 //! and total sizes (413 and 507 past them), and per-client rates of uploads, new documents,
 //! sign-ups and failed logins (429).
@@ -57,7 +61,7 @@ pub use limits::Limits;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
-use axum::http::{header, HeaderMap, HeaderName, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -68,8 +72,11 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 /// Largest single update accepted. A full history of a big group is well under this.
 const MAX_UPDATE_BYTES: usize = 8 * 1024 * 1024;
@@ -86,6 +93,9 @@ pub struct Settings {
     /// proxy: otherwise clients pick their own address and slip past the limits.
     pub client_ip_header: Option<HeaderName>,
     pub limits: Limits,
+    /// The web version to serve (`bun run build:web` writes it to `sync-server/web`). Ignored
+    /// without an `index.html` in it.
+    pub web_dir: Option<PathBuf>,
 }
 
 pub struct Relay {
@@ -99,6 +109,7 @@ pub struct Relay {
     android_app: Option<AndroidApp>,
     pub(crate) client_ip_header: Option<HeaderName>,
     limits: Limits,
+    web_dir: Option<PathBuf>,
 }
 
 impl Relay {
@@ -181,6 +192,9 @@ impl Relay {
             android_app: settings.android_app,
             client_ip_header: settings.client_ip_header,
             limits: settings.limits,
+            web_dir: settings
+                .web_dir
+                .filter(|dir| dir.join("index.html").is_file()),
         }))
     }
 }
@@ -208,17 +222,54 @@ pub fn router(relay: Arc<Relay>) -> Router {
         }
         None => get(|| async { StatusCode::NOT_FOUND }),
     };
-    Router::new()
+    let has_web = relay.web_dir.is_some();
+    let mut router = Router::new()
         .route("/health", get(|| async { "ok" }))
-        .route("/join", get(join_page))
+        .route("/join", get(move || join_page(has_web)))
         .route("/.well-known/assetlinks.json", asset_links)
         .route("/v1/groups/{id}/updates", get(pull).post(push))
         .route("/v1/accounts", post(sign_up))
         .route("/v1/accounts/login", post(log_in))
         .route("/v1/accounts/recover", post(recover))
-        .route("/v1/accounts/credentials", post(update_credentials))
+        .route("/v1/accounts/credentials", post(update_credentials));
+    if let Some(dir) = &relay.web_dir {
+        router = router.fallback_service(web_app(dir));
+    }
+    router
         .layer(DefaultBodyLimit::max(MAX_UPDATE_BYTES))
         .with_state(relay)
+}
+
+/// What the web version may load and talk to: only this origin, plus running its WebAssembly.
+const WEB_CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval';      style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self';      connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none';      form-action 'none'; frame-ancestors 'none'";
+
+/// The web version's files. Vite names everything in `assets/` by its content, so those are
+/// cached for good; the rest (`index.html`, `theme.js`) is checked on every load.
+fn web_app(dir: &FsPath) -> Router {
+    let cache = |value: &'static str| {
+        SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, HeaderValue::from_static(value))
+    };
+    let assets = Router::new()
+        .fallback_service(ServeDir::new(dir.join("assets")))
+        .layer(cache("public, max-age=31536000, immutable"));
+    let rest = Router::new()
+        .fallback_service(ServeDir::new(dir))
+        .layer(cache("no-cache"));
+    Router::new()
+        .nest_service("/assets", assets)
+        .fallback_service(rest)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(WEB_CSP),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
 }
 
 pub async fn serve(listener: tokio::net::TcpListener, relay: Arc<Relay>) -> std::io::Result<()> {
@@ -227,7 +278,14 @@ pub async fn serve(listener: tokio::net::TcpListener, relay: Arc<Relay>) -> std:
     axum::serve(listener, app).await
 }
 
-async fn join_page() -> impl IntoResponse {
+async fn join_page(has_web: bool) -> impl IntoResponse {
+    let page = include_str!("join.html");
+    // Tells the page to offer the web version too.
+    let page = if has_web {
+        page.replacen("<body>", "<body data-web>", 1)
+    } else {
+        page.to_string()
+    };
     (
         [
             (header::CONTENT_TYPE, "text/html; charset=utf-8"),
@@ -238,7 +296,7 @@ async fn join_page() -> impl IntoResponse {
             ),
             (header::REFERRER_POLICY, "no-referrer"),
         ],
-        include_str!("join.html"),
+        page,
     )
 }
 

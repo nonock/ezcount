@@ -20,14 +20,20 @@ Test it there: unit tests in the module's `#[cfg(test)] mod tests`, or in `sync.
 `end_to_end` module when it talks to the relay (it starts a real relay in-process; see the
 `Device` helper and `start_relay`). Run them with `cargo test --manifest-path core/Cargo.toml`.
 
-## 2. The command (`src-tauri/src/lib.rs`)
+## 2. The command (`core/src/api.rs`, then `src-tauri/src/lib.rs`)
+
+Write what the command does as a function in `core/src/api.rs`, taking `&AppState` first, and add
+its name to the `match` in `api::invoke` (the web version calls commands through it, with
+camelCase JSON arguments: `arg(&args, "someArg")`). `api::tests::every_bound_command_is_dispatched`
+fails for a command in `bindings.ts` that `invoke` doesn't know. Then the Tauri command in
+`src-tauri/src/lib.rs` is a one-line wrapper:
 
 ```rust
 /// One line on what it does; this becomes the TS doc comment.
 #[tauri::command]
 #[specta::specta]
 async fn do_thing(state: State<'_, AppState>, some_arg: String) -> Result<Thing, String> {
-    sync::do_thing(&state, &some_arg).await
+    api::do_thing(&state, &some_arg).await
 }
 ```
 

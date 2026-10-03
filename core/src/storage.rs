@@ -132,6 +132,23 @@ impl Store {
         let conn = Connection::open(db_path).map_err(db_err)?;
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;")
             .map_err(db_err)?;
+        let (mut store, mut warnings) = Self::from_connection(conn)?;
+        store.migrate_legacy_json(legacy_json, &mut warnings);
+        Ok((store, warnings))
+    }
+
+    /// In the browser: opens (or creates) `name` in the SQLite VFS the web app registered as
+    /// the default. No WAL, which needs shared memory the browser VFSs don't have, and no
+    /// legacy JSON file to migrate.
+    #[cfg(target_family = "wasm")]
+    pub fn open_in_browser(name: &str) -> Res<(Self, Vec<String>)> {
+        let conn = Connection::open(name).map_err(db_err)?;
+        conn.execute_batch("PRAGMA synchronous = FULL;")
+            .map_err(db_err)?;
+        Self::from_connection(conn)
+    }
+
+    fn from_connection(conn: Connection) -> Res<(Self, Vec<String>)> {
         conn.execute_batch(SCHEMA).map_err(db_err)?;
         let mut warnings = Vec::new();
         upgrade_schema(&conn, &mut warnings)?;
@@ -143,7 +160,6 @@ impl Store {
             session: None,
         };
         store.load(&mut warnings)?;
-        store.migrate_legacy_json(legacy_json, &mut warnings);
         Ok((store, warnings))
     }
 

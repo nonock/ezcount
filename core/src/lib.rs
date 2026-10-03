@@ -4,6 +4,7 @@
 //! it as commands and runs the background sync loop around `sync::sync_all`.
 
 mod account;
+pub mod api;
 mod crypto;
 pub mod doc;
 pub mod engine;

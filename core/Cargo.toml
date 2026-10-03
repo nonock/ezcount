@@ -21,14 +21,25 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 base64 = "0.23.1"
 getrandom = "0.4"
-# Only the runtime-independent parts and blocking-thread helpers: the app owns the runtime.
-tokio = { version = "1.53.1", features = ["sync", "rt-multi-thread"] }
+# Only the runtime-independent parts (and, natively, blocking-thread helpers): the app owns the
+# runtime.
+tokio = { version = "1.53.1", features = ["sync"] }
 url = "2"
 chacha20poly1305 = "0.11.0"
 hkdf = "0.13.0"
 sha2 = "0.11.0"
 argon2 = { version = "0.6.0", default-features = false, features = ["alloc"] }
 zxcvbn = "3.1"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { version = "1.53.1", features = ["rt-multi-thread"] }
+
+# In the browser, randomness comes from the Web Crypto API (crypto.getRandomValues).
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
+# Loro's older getrandom.
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+uuid = { version = "1", features = ["js"] }
 
 [dev-dependencies]
 # End-to-end sync tests run a real relay in-process.
