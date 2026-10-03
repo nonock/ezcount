@@ -21,8 +21,12 @@ class Dialogs {
   reimburse = $state({ open: false, fromId: "", toId: "", amount: "" });
   share = $state(false);
   who = $state(false);
+  /** The account: who is logged in, and what can be done with it. */
+  account = $state(false);
   changePassword = $state(false);
   newRecoveryKey = $state(false);
+  /** Shows a code that logs another device in. */
+  linkDevice = $state(false);
 
   openJoin(code = "", error: string | null = null) {
     this.join = { open: true, code, error };

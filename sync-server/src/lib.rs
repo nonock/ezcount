@@ -42,6 +42,15 @@
 //!   recovery key (`new_recovery_token`, `new_recovery_wrapped_key`), or both. A recovery key
 //!   works once: proving with it requires replacing it. 204, or errors as for login
 //!
+//! A logged-in device can log another one in without the password being typed there (see
+//! `links`): it leaves the account's key here, encrypted with a code only the two devices see,
+//! for the other one to fetch once, within two minutes.
+//!
+//! - `POST /v1/accounts/links`: `{ username, login_token, ticket, data }` returns
+//!   `{ "expires_in": 120 }`; errors as for login
+//! - `POST /v1/accounts/links/claim`: `{ ticket }` returns `{ data }` and forgets it; 410 once
+//!   used or expired
+//!
 //! - `GET /v1/rates/{from}/{to}?date=YYYY-MM-DD`: the exchange rate between two currencies
 //!   that day (the latest without a date, or when that day has none), as
 //!   `{ "rate": "0.85856", "date": "2026-08-29" }`, from a public rate service
@@ -62,6 +71,7 @@
 //! sign-ups and failed logins (429).
 
 mod limits;
+mod links;
 mod rates;
 
 pub use limits::Limits;
@@ -122,6 +132,7 @@ pub struct Relay {
     limits: Limits,
     web_dir: Option<PathBuf>,
     rates: rates::Rates,
+    links: links::Links,
 }
 
 impl Relay {
@@ -208,6 +219,7 @@ impl Relay {
                 .web_dir
                 .filter(|dir| dir.join("index.html").is_file()),
             rates: rates::Rates::new(settings.rates_url),
+            links: links::Links::default(),
         }))
     }
 }
@@ -245,6 +257,8 @@ pub fn router(relay: Arc<Relay>) -> Router {
         .route("/v1/accounts/login", post(log_in))
         .route("/v1/accounts/recover", post(recover))
         .route("/v1/accounts/credentials", post(update_credentials))
+        .route("/v1/accounts/links", post(links::create))
+        .route("/v1/accounts/links/claim", post(links::claim))
         .route("/v1/rates/{from}/{to}", get(rates::rate));
     if let Some(dir) = &relay.web_dir {
         router = router.fallback_service(web_app(dir));
@@ -332,6 +346,8 @@ enum ApiError {
     StorageFull,
     /// No exchange rate to suggest.
     NoRate,
+    /// A login link that was used already, expired, or never existed.
+    LinkGone,
     /// Something the relay depends on didn't answer.
     Unavailable(String),
     Internal(String),
@@ -375,6 +391,7 @@ impl IntoResponse for ApiError {
                 (StatusCode::INSUFFICIENT_STORAGE, "the relay is full").into_response()
             }
             ApiError::NoRate => (StatusCode::NOT_FOUND, "no rate").into_response(),
+            ApiError::LinkGone => (StatusCode::GONE, "link used or expired").into_response(),
             ApiError::Unavailable(e) => {
                 eprintln!("[relay] {e}");
                 (StatusCode::SERVICE_UNAVAILABLE, "try later").into_response()

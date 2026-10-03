@@ -42,6 +42,10 @@ pub struct Limits {
     pub rate_lookups_per_hour: u64,
     /// The same for all networks together: the most the relay asks the rate service per hour.
     pub rate_lookups_per_hour_total: u64,
+    /// How long a login link can be used: the time to pick up the phone and scan.
+    pub link_lifetime: Duration,
+    /// Login links one client network may try to claim per hour.
+    pub link_claims_per_hour: u64,
 }
 
 impl Default for Limits {
@@ -56,6 +60,8 @@ impl Default for Limits {
             login_failures_per_username: 50,
             rate_lookups_per_hour: 120,
             rate_lookups_per_hour_total: 600,
+            link_lifetime: Duration::from_secs(120),
+            link_claims_per_hour: 60,
         }
     }
 }

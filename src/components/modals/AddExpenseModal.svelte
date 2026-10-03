@@ -14,6 +14,7 @@
   import { Label } from "@/components/ui/label";
   import * as Select from "@/components/ui/select";
   import { Spinner } from "@/components/ui/spinner";
+  import { t } from "@/lib/i18n/index.svelte";
   import { owedAmounts } from "@/lib/split";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
@@ -76,7 +77,7 @@
   const currencies = $derived([
     ...new Set([
       group.currency,
-      ...CURRENCIES.map((c) => c.code),
+      ...CURRENCIES,
       ...(editing?.original ? [editing.original.currency] : []),
     ]),
   ]);
@@ -224,10 +225,10 @@
   const splitProblem = $derived.by(() => {
     if (!anyFixed || paidCents <= 0) return null;
     if (restCents < 0) {
-      return `The amounts are ${formatMoney(-restCents, currency)} more than the expense.`;
+      return t("expense.tooMuch", formatMoney(-restCents, currency));
     }
     if (totalShares === 0 && restCents > 0) {
-      return `${formatMoney(restCents, currency)} is left to assign.`;
+      return t("expense.leftToAssign", formatMoney(restCents, currency));
     }
     return null;
   });
@@ -236,27 +237,27 @@
     e.preventDefault();
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
-      error = "Please enter a description.";
+      error = t("expense.needDescription");
       return;
     }
     if (paidCents <= 0) {
-      error = "Please enter an amount greater than zero.";
+      error = t("expense.needAmount");
       return;
     }
     if (foreign && !(rate > 0)) {
-      error = `Please enter the exchange rate from ${currency} to ${group.currency}.`;
+      error = t("expense.needRate", currency, group.currency);
       return;
     }
     if (amountCents <= 0) {
-      error = `This is less than a cent in ${group.currency}.`;
+      error = t("expense.lessThanCent", group.currency);
       return;
     }
     if (includedParticipants.length === 0) {
-      error = "Select at least one person to split the bill with.";
+      error = t("expense.needPeople");
       return;
     }
     if (splits.some((s) => s.fixed_cents != null && s.fixed_cents <= 0)) {
-      error = "Enter an amount for everyone who owes a set amount, or give them parts.";
+      error = t("expense.needSetAmounts");
       return;
     }
     if (splitProblem) {
@@ -302,38 +303,39 @@
     }
   }
 
+  const nameWithYou = (p: { id: string; name: string }) =>
+    p.id === currentUserId ? t("common.withYou", p.name) : p.name;
+
   const payerName = $derived.by(() => {
     const p = participants.find((x) => x.id === paidBy);
-    return p ? `${p.name}${p.id === currentUserId ? " (You)" : ""}` : "Choose…";
+    return p ? nameWithYou(p) : t("common.choose");
   });
 </script>
 
 <Dialog.Root bind:open={dialogs.expense.open}>
   <Dialog.Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
     <Dialog.Header>
-      <Dialog.Title>{editing ? "Edit Expense" : "Add New Expense"}</Dialog.Title>
+      <Dialog.Title>{editing ? t("expense.editTitle") : t("expense.addTitle")}</Dialog.Title>
       <Dialog.Description>
-        {editing
-          ? "Changes are recorded in the expense's history."
-          : "Who paid, how much, and who it was for."}
+        {editing ? t("expense.editIntro") : t("expense.addIntro")}
       </Dialog.Description>
     </Dialog.Header>
 
     <form onsubmit={handleSubmit}>
       <Field.Group>
         <Field.Field>
-          <Field.Label for="input-expense-title">Description</Field.Label>
+          <Field.Label for="input-expense-title">{t("expense.description")}</Field.Label>
           <Input
             id="input-expense-title"
             required
             bind:value={title}
-            placeholder="e.g. Groceries, Dinner, Taxi"
+            placeholder={t("expense.descriptionPlaceholder")}
           />
         </Field.Field>
 
         <div class="grid grid-cols-2 gap-4">
           <Field.Field>
-            <Field.Label for="input-expense-amount">Amount</Field.Label>
+            <Field.Label for="input-expense-amount">{t("common.amount")}</Field.Label>
             <Input
               id="input-expense-amount"
               type="number"
@@ -348,7 +350,7 @@
           </Field.Field>
 
           <Field.Field>
-            <Field.Label for="select-expense-currency">Currency</Field.Label>
+            <Field.Label for="select-expense-currency">{t("common.currency")}</Field.Label>
             <Select.Root type="single" value={currency} onValueChange={chooseCurrency}>
               <Select.Trigger id="select-expense-currency" class="w-full">{currency}</Select.Trigger
               >
@@ -362,7 +364,7 @@
 
           {#if foreign}
             <Field.Field class="col-span-2">
-              <Field.Label for="input-expense-rate">Exchange rate</Field.Label>
+              <Field.Label for="input-expense-rate">{t("expense.rate")}</Field.Label>
               <InputGroup.Root>
                 <InputGroup.Addon>
                   <InputGroup.Text>1 {currency} =</InputGroup.Text>
@@ -376,7 +378,7 @@
                   required
                   bind:value={rateStr}
                   oninput={() => (rateIsOwn = true)}
-                  placeholder={lookingUpRate ? "Looking up…" : "0.92"}
+                  placeholder={lookingUpRate ? t("expense.lookingUp") : "0.92"}
                   class="tabular-nums"
                 />
                 <InputGroup.Addon align="inline-end">
@@ -385,19 +387,21 @@
               </InputGroup.Root>
               <Field.Description>
                 {#if amountCents > 0}
-                  Counts as {formatMoney(amountCents, group.currency)} in the group.
+                  {t("expense.countsAs", formatMoney(amountCents, group.currency))}
                 {:else}
-                  The group counts in {group.currency}.
+                  {t("expense.groupCounts", group.currency)}
                 {/if}
                 {#if !rateIsOwn && rate > 0}
-                  Suggested rate: change it if you got another.
+                  {t("expense.suggestedRate")}
                 {/if}
               </Field.Description>
             </Field.Field>
           {/if}
 
           <Field.Field>
-            <Field.Label id="label-expense-date" for="input-expense-date">Date</Field.Label>
+            <Field.Label id="label-expense-date" for="input-expense-date"
+              >{t("common.date")}</Field.Label
+            >
             <DatePicker
               id="input-expense-date"
               labelId="label-expense-date"
@@ -407,15 +411,12 @@
           </Field.Field>
 
           <Field.Field>
-            <Field.Label for="select-expense-payer">Paid by</Field.Label>
+            <Field.Label for="select-expense-payer">{t("common.paidBy")}</Field.Label>
             <Select.Root type="single" bind:value={paidBy}>
               <Select.Trigger id="select-expense-payer" class="w-full">{payerName}</Select.Trigger>
               <Select.Content>
                 {#each participants as p (p.id)}
-                  <Select.Item
-                    value={p.id}
-                    label={`${p.name}${p.id === currentUserId ? " (You)" : ""}`}
-                  />
+                  <Select.Item value={p.id} label={nameWithYou(p)} />
                 {/each}
               </Select.Content>
             </Select.Root>
@@ -424,17 +425,20 @@
 
         <Field.Set>
           <div class="flex items-center justify-between">
-            <Field.Legend variant="label" class="mb-0">Split between</Field.Legend>
+            <Field.Legend variant="label" class="mb-0">{t("common.splitBetween")}</Field.Legend>
             <Button variant="link" size="sm" onclick={toggleAll}>
-              {allIncluded ? "Deselect all" : "Select all"}
+              {allIncluded ? t("expense.deselectAll") : t("expense.selectAll")}
             </Button>
           </div>
           <Field.Description>
-            {includedParticipants.length}/{participants.length}
-            people{#if totalShares > 0}, {totalShares}
-              {totalShares === 1 ? "part" : "parts"}
+            {t(
+              "expense.people",
+              includedParticipants.length,
+              participants.length
+            )}{#if totalShares > 0},
+              {t("common.parts", totalShares)}
               {#if restCents > 0}
-                · about {formatMoney(Math.floor(restCents / totalShares), currency)} per part
+                · {t("expense.perPart", formatMoney(Math.floor(restCents / totalShares), currency))}
               {/if}
             {/if}
             {#if splitProblem}
@@ -453,7 +457,7 @@
               {@const owes = owed.get(p.id) ?? 0}
               <li
                 class={cn(
-                  "flex min-h-11 items-center justify-between gap-2 px-3 py-1.5",
+                  "flex min-h-11 items-center justify-between gap-2 py-1.5 pr-1.5 pl-3 sm:pr-3",
                   !state.included && "text-muted-foreground"
                 )}
               >
@@ -463,11 +467,13 @@
                     checked={state.included}
                     onCheckedChange={() => toggleParticipant(p.id)}
                   />
-                  <Label for={`split-${p.id}`} class="truncate font-normal">{p.name}</Label>
+                  <Label for={`split-${p.id}`} class="block min-w-0 truncate font-normal"
+                    >{p.name}</Label
+                  >
                 </div>
 
                 {#if state.included}
-                  <div class="flex shrink-0 items-center gap-1.5">
+                  <div class="flex shrink-0 items-center gap-1 sm:gap-1.5">
                     {#if state.fixed}
                       <Input
                         type="number"
@@ -476,7 +482,7 @@
                         min="0.01"
                         bind:value={splitsState[p.id].amount}
                         placeholder="0.00"
-                        aria-label={`Amount for ${p.name}`}
+                        aria-label={t("expense.amountFor", p.name)}
                         class="h-8 w-24 text-right tabular-nums"
                       />
                     {:else}
@@ -489,19 +495,18 @@
                           size="icon-sm"
                           onclick={() => updateShares(p.id, state.shares - 1)}
                           disabled={state.shares <= 1}
-                          aria-label={`Fewer parts for ${p.name}`}
+                          aria-label={t("expense.fewerParts", p.name)}
                         >
                           <MinusIcon />
                         </Button>
-                        <span class="min-w-14 text-center text-xs" aria-live="polite">
-                          {state.shares}
-                          {state.shares === 1 ? "part" : "parts"}
+                        <span class="min-w-12 text-center text-xs sm:min-w-14" aria-live="polite">
+                          {t("common.parts", state.shares)}
                         </span>
                         <Button
                           variant="ghost"
                           size="icon-sm"
                           onclick={() => updateShares(p.id, state.shares + 1)}
-                          aria-label={`More parts for ${p.name}`}
+                          aria-label={t("expense.moreParts", p.name)}
                         >
                           <PlusIcon />
                         </Button>
@@ -512,9 +517,9 @@
                       size="icon-sm"
                       onclick={() => (splitsState[p.id].fixed = !state.fixed)}
                       aria-label={state.fixed
-                        ? `Give ${p.name} parts of the rest`
-                        : `Set an amount for ${p.name}`}
-                      title={state.fixed ? "Share the rest by parts" : "Set an amount"}
+                        ? t("expense.giveParts", p.name)
+                        : t("expense.setAmountFor", p.name)}
+                      title={state.fixed ? t("expense.shareRest") : t("expense.setAmount")}
                     >
                       {#if state.fixed}
                         <ChartPieIcon />
@@ -537,14 +542,14 @@
       <Dialog.Footer class="mt-6">
         <Dialog.Close>
           {#snippet child({ props })}
-            <Button {...props} variant="outline">Cancel</Button>
+            <Button {...props} variant="outline">{t("common.cancel")}</Button>
           {/snippet}
         </Dialog.Close>
         <Button type="submit" disabled={submitting}>
           {#if submitting}
             <Spinner data-icon="inline-start" />
           {/if}
-          {editing ? "Save Changes" : "Save Expense"}
+          {editing ? t("expense.saveChanges") : t("expense.saveNew")}
         </Button>
       </Dialog.Footer>
     </form>

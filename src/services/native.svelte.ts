@@ -10,6 +10,7 @@ import {
   scan,
 } from "@tauri-apps/plugin-barcode-scanner";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
+import { t } from "../lib/i18n/index.svelte";
 import type { NativeFeatures } from "../types";
 import { api } from "./api";
 
@@ -120,7 +121,7 @@ export async function scanQrCode(): Promise<string> {
   let permission = await checkPermissions();
   if (permission !== "granted") permission = await requestPermissions();
   if (permission !== "granted") {
-    throw new Error("ezcount needs the camera to scan. Allow it in the phone's settings.");
+    throw new Error(t("join.cameraNeeded"));
   }
   try {
     return (await scan({ windowed: true, formats: [Format.QRCode] })).content;

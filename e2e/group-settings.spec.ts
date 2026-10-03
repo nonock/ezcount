@@ -82,17 +82,19 @@ test("renaming a member renames them everywhere", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /Lisbon Trip/ }).click();
 
-  await page.getByRole("button", { name: "Rename Bob" }).click();
+  await page.getByRole("button", { name: "Rename or remove Bob" }).click();
   const dialog = page.getByRole("dialog", { name: "Rename Bob" });
   await expect(dialog.getByLabel("Name")).toHaveValue("Bob");
   await dialog.getByLabel("Name").fill("Robert");
   await dialog.getByRole("button", { name: "Rename" }).click();
 
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByRole("button", { name: "Rename Robert" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Rename Bob" })).not.toBeVisible();
-  const items = page.getByTestId("expense-item");
-  await expect(items.filter({ hasText: "Dinner" })).toContainText("Robert");
+  await expect(page.getByRole("button", { name: "Rename or remove Robert" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Rename or remove Bob" })).not.toBeVisible();
+  // Shared by everyone, the dinner no longer lists who shares it.
+  await expect(page.getByTestId("expense-item").filter({ hasText: "Dinner" })).toContainText(
+    "for everyone"
+  );
   // The payment's title carried the old name.
   await expect(page.getByRole("heading", { name: "Payment: Robert → Alice (cash)" })).toBeVisible();
 });
@@ -148,7 +150,8 @@ test("on a phone: the logo and tabs at the bottom, settings in the menu", async 
 
   await page.getByRole("button", { name: "Menu" }).click();
   await expect(page.getByRole("menuitemradio", { name: "Dark" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "Log out" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Connect a device" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /Account/ })).toBeVisible();
 });
 
 test("the help on Balances and Settle Up is behind a ?", async ({ page }) => {
@@ -252,7 +255,7 @@ test("an expense in another currency, with a set amount for someone", async ({ p
   await dialog.getByLabel("Currency", { exact: true }).click();
   await page.getByRole("option", { name: "USD", exact: true }).click();
   await expect(dialog.getByLabel("Exchange rate")).toHaveValue("0.9234");
-  await expect(dialog.getByText("Counts as 46.17 € in the group.")).toBeVisible();
+  await expect(dialog.getByText("Counts as €46.17 in the group.")).toBeVisible();
 
   // Bob owes 20 dollars of it; Alice, on parts, the rest.
   await dialog.getByRole("button", { name: "Set an amount for Bob" }).click();
@@ -264,13 +267,13 @@ test("an expense in another currency, with a set amount for someone", async ({ p
   await expect(dialog).not.toBeVisible();
 
   const taxi = page.getByTestId("expense-item").filter({ hasText: "Taxi" });
-  await expect(taxi).toContainText("46.17 €");
+  await expect(taxi).toContainText("€46.17");
   await expect(taxi).toContainText("$50.00");
   await expect(taxi.getByLabel("Split between")).toContainText("Bob $20.00");
 
   // 20 of the 50 dollars is 18.47 of the 46.17 euros, on top of the 25.00 Bob owed.
   await page.getByRole("tab", { name: "Balances" }).click();
-  await expect(page.getByText("-43.47 €")).toBeVisible();
+  await expect(page.getByText("-€43.47")).toBeVisible();
 
   // Editing shows it as it was typed.
   await page.getByRole("tab", { name: "Expenses" }).click();

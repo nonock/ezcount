@@ -88,6 +88,11 @@
   --color-positive: var(--positive);
   --color-negative: var(--negative);
   --color-warning: var(--warning);
+  /* Soft fills behind positive and destructive text. */
+  --color-positive-soft: var(--positive-soft);
+  --color-destructive-soft: var(--destructive-soft);
+  /* Two weights only: regular and semibold. */
+  --font-weight-medium: 600;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -149,14 +154,17 @@
   --popover-foreground: oklch(21% 0.006 285.885);
   --primary: oklch(45% 0.24 277.023);
   --primary-foreground: oklch(93% 0.034 272.788);
-  --secondary: oklch(95% 0 0);
+  /* Three greys: buttons, quiet surfaces (tab bars, bars), and what is under the pointer. */
+  --secondary: oklch(92.5% 0.002 286);
   --secondary-foreground: oklch(21% 0.006 285.885);
   --muted: oklch(95% 0 0);
-  --muted-foreground: oklch(52% 0.014 285.9);
-  --accent: oklch(95% 0 0);
+  --muted-foreground: oklch(47% 0.014 285.9);
+  --accent: oklch(96.5% 0 0);
   --accent-foreground: oklch(21% 0.006 285.885);
   --destructive: oklch(53% 0.2 13.428);
+  --destructive-soft: oklch(95% 0.03 13.428);
   --positive: oklch(50% 0.12 163.223);
+  --positive-soft: oklch(94.5% 0.04 163.223);
   --negative: oklch(53% 0.2 13.428);
   --warning: oklch(82% 0.189 84.429);
   --border: oklch(21% 0.006 285.885 / 10%);
@@ -187,14 +195,16 @@
   --popover-foreground: oklch(97.807% 0.029 256.847);
   --primary: oklch(52% 0.233 277.117);
   --primary-foreground: oklch(96% 0.018 272.314);
-  --secondary: oklch(30% 0.016 252.42);
+  --secondary: oklch(33% 0.018 252.42);
   --secondary-foreground: oklch(97.807% 0.029 256.847);
   --muted: oklch(30% 0.016 252.42);
   --muted-foreground: oklch(72% 0.025 256.847);
-  --accent: oklch(30% 0.016 252.42);
+  --accent: oklch(31% 0.016 252.42);
   --accent-foreground: oklch(97.807% 0.029 256.847);
   --destructive: oklch(71% 0.194 13.428);
+  --destructive-soft: oklch(34% 0.07 13.428);
   --positive: oklch(76% 0.177 163.223);
+  --positive-soft: oklch(34% 0.05 163.223);
   --negative: oklch(71% 0.194 13.428);
   --warning: oklch(82% 0.189 84.429);
   --border: oklch(97.807% 0.029 256.847 / 10%);
@@ -220,39 +230,49 @@
    warning hues, given to members by their position in the group. --tone fills (at 15%) and
    --tone-text is a shade of it readable on that fill. */
 .tone-0 {
+  --tone-fill: oklch(93.5% 0.035 277);
   --tone: oklch(45% 0.24 277);
   --tone-text: oklch(45% 0.24 277);
 }
 .tone-1 {
+  --tone-fill: oklch(94.5% 0.035 354);
   --tone: oklch(65% 0.241 354.3);
   --tone-text: oklch(50% 0.2 354);
 }
 .tone-2 {
+  --tone-fill: oklch(95.5% 0.04 182);
   --tone: oklch(77% 0.152 181.9);
   --tone-text: oklch(48% 0.09 182);
 }
 .tone-3 {
+  --tone-fill: oklch(95% 0.035 233);
   --tone: oklch(74% 0.16 232.7);
   --tone-text: oklch(48% 0.12 240);
 }
 .tone-4 {
+  --tone-fill: oklch(95.5% 0.055 84);
   --tone: oklch(82% 0.189 84.4);
   --tone-text: oklch(50% 0.11 60);
 }
 .dark .tone-0 {
+  --tone-fill: oklch(33% 0.07 277);
   --tone: oklch(58% 0.233 277);
   --tone-text: oklch(80% 0.11 277);
 }
 .dark .tone-1 {
+  --tone-fill: oklch(34% 0.06 354);
   --tone-text: oklch(80% 0.12 354);
 }
 .dark .tone-2 {
+  --tone-fill: oklch(35% 0.045 182);
   --tone-text: oklch(82% 0.12 182);
 }
 .dark .tone-3 {
+  --tone-fill: oklch(35% 0.045 233);
   --tone-text: oklch(82% 0.1 233);
 }
 .dark .tone-4 {
+  --tone-fill: oklch(36% 0.05 84);
   --tone-text: oklch(86% 0.13 84);
 }
 

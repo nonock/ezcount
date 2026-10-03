@@ -12,12 +12,14 @@
   import QrScanOverlay from "@/components/common/QrScanOverlay.svelte";
   import Splash from "@/components/common/Splash.svelte";
   import GroupDashboard from "@/components/dashboard/GroupDashboard.svelte";
+  import AccountDialog from "@/components/modals/AccountDialog.svelte";
   import AddExpenseModal from "@/components/modals/AddExpenseModal.svelte";
   import ChangePasswordDialog from "@/components/modals/ChangePasswordDialog.svelte";
   import CreateGroupModal from "@/components/modals/CreateGroupModal.svelte";
   import EditGroupModal from "@/components/modals/EditGroupModal.svelte";
   import ExpenseHistoryModal from "@/components/modals/ExpenseHistoryModal.svelte";
   import JoinGroupModal from "@/components/modals/JoinGroupModal.svelte";
+  import LinkDeviceDialog from "@/components/modals/LinkDeviceDialog.svelte";
   import MemberModal from "@/components/modals/MemberModal.svelte";
   import RecordReimbursementModal from "@/components/modals/RecordReimbursementModal.svelte";
   import RecoveryKeyDialog from "@/components/modals/RecoveryKeyDialog.svelte";
@@ -27,7 +29,9 @@
   import { Button } from "@/components/ui/button";
   import { Spinner } from "@/components/ui/spinner";
   import GroupPage from "@/components/workspace/GroupPage.svelte";
-  import { goHome, logOut } from "@/lib/actions";
+  import { goHome, removeMember } from "@/lib/actions";
+  import { backendText } from "@/lib/i18n/backend";
+  import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { groupList, openGroup } from "@/lib/state/groups.svelte";
   import { navigation } from "@/lib/state/navigation.svelte";
@@ -120,7 +124,7 @@
     const selected = navigation.groupId;
     if (selected && !list.some((g) => g.id === selected)) {
       navigation.close();
-      toast.info("This group was removed from your account on another device");
+      toast.info(t("app.removedElsewhere"));
     }
   });
 
@@ -199,6 +203,10 @@
 
 <ModeWatcher modeStorageKey="theme" />
 <ConfirmDialog />
+<!-- For an invite once logged in, and before that for a code that logs in. -->
+{#if dialogs.scanning}
+  <QrScanOverlay onCancel={stopScanning} />
+{/if}
 
 {#if session.account === undefined}
   <Splash />
@@ -208,19 +216,15 @@
   {@const account = session.account}
   <div class="flex min-h-screen flex-col">
     <Navbar
-      currentGroup={openGroup.group}
+      inGroup={openGroup.group !== null}
       onNavigateHome={goHome}
       onOpenCreateGroup={() => (dialogs.createGroup = true)}
       username={account.username}
-      serverUrl={account.server_url}
-      onChangePassword={() => (dialogs.changePassword = true)}
-      onNewRecoveryKey={() => (dialogs.newRecoveryKey = true)}
-      onLogOut={logOut}
     />
 
     <main
       class={cn(
-        "mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]",
+        "mx-auto w-full max-w-3xl flex-1 space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]",
         // Room for the bottom bar on phones.
         "max-sm:pb-[calc(5rem+env(safe-area-inset-bottom))]"
       )}
@@ -228,18 +232,18 @@
       {#if storageWarnings.length > 0}
         <Alert.Root>
           <TriangleAlertIcon />
-          <Alert.Title>Some saved data could not be loaded</Alert.Title>
+          <Alert.Title>{t("app.storageWarnings")}</Alert.Title>
           <Alert.Description>
             <ul class="list-disc pl-4">
               {#each storageWarnings as warning (warning)}
-                <li>{warning}</li>
+                <li>{backendText(warning)}</li>
               {/each}
             </ul>
-            <p>Nothing was deleted. The data is still on disk.</p>
+            <p>{t("app.storageKept")}</p>
           </Alert.Description>
           <Alert.Action>
             <Button variant="ghost" size="sm" onclick={() => (storageWarnings = [])}>
-              Dismiss
+              {t("common.dismiss")}
             </Button>
           </Alert.Action>
         </Alert.Root>
@@ -248,7 +252,7 @@
       {#if groupList.loading}
         <div class="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
           <Spinner />
-          Loading groups…
+          {t("app.loadingGroups")}
         </div>
       {:else if !openGroup.group}
         <GroupDashboard
@@ -260,7 +264,7 @@
         <BottomBar home onHome={goHome} class="sm:hidden">
           <Button onclick={() => (dialogs.createGroup = true)} class="ml-auto">
             <PlusIcon data-icon="inline-start" />
-            New Group
+            {t("app.newGroup")}
           </Button>
         </BottomBar>
       {:else}
@@ -270,7 +274,9 @@
 
     <CreateGroupModal />
     <JoinGroupModal />
+    <AccountDialog />
     <ChangePasswordDialog />
+    <LinkDeviceDialog />
     <RecoveryKeyDialog
       open={session.newRecoveryKey !== null}
       onClose={() => (session.newRecoveryKey = null)}
@@ -282,10 +288,6 @@
       onClose={() => (dialogs.newRecoveryKey = false)}
       reason="replace"
     />
-
-    {#if dialogs.scanning}
-      <QrScanOverlay onCancel={stopScanning} />
-    {/if}
 
     {#if openGroup.group}
       {@const group = openGroup.group}
@@ -300,6 +302,10 @@
         bind:open={dialogs.renameMember.open}
         member={dialogs.renameMember.member}
         onSubmit={renameMember}
+        onRemove={() => {
+          const member = dialogs.renameMember.member;
+          if (member) removeMember(member.id);
+        }}
       />
     {/if}
   </div>

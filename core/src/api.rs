@@ -10,8 +10,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::models::{
-    AccountInfo, ExpenseSplit, Group, OriginalAmount, ParticipantBalance, PasswordStrength,
-    SettlementTransfer, SignedIn, SyncInfo,
+    AccountInfo, ExpenseSplit, Group, LoginLink, OriginalAmount, ParticipantBalance,
+    PasswordStrength, SettlementTransfer, SignedIn, SyncInfo,
 };
 use crate::{csv_file, doc, engine, sync, AppState};
 
@@ -238,6 +238,17 @@ pub async fn log_in(
     state.require_account_info()
 }
 
+/// A link that logs another device into the account, once and for a short time.
+pub async fn create_login_link(state: &AppState, password: &str) -> Res<LoginLink> {
+    sync::create_login_link(state, password).await
+}
+
+/// Logs in with a link made by `create_login_link` on another device.
+pub async fn log_in_with_link(state: &AppState, link: &str) -> Res<AccountInfo> {
+    sync::log_in_with_link(state, link).await?;
+    state.require_account_info()
+}
+
 /// Removes the account and its groups from this device. Fails while changes are not uploaded,
 /// unless `force` is set.
 pub async fn log_out(state: &AppState, force: bool) -> Res<()> {
@@ -368,6 +379,8 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
         }
         "replace_recovery_key" => json(replace_recovery_key(state, &s("password")?).await?),
         "log_in" => json(log_in(state, &s("serverUrl")?, &s("username")?, &s("password")?).await?),
+        "create_login_link" => json(create_login_link(state, &s("password")?).await?),
+        "log_in_with_link" => json(log_in_with_link(state, &s("link")?).await?),
         "log_out" => json(log_out(state, arg(&args, "force")?).await?),
         "set_identity" => json(set_identity(state, &s("groupId")?, &s("participantId")?)?),
         "add_self" => json(add_self(state, &s("groupId")?, &s("name")?)?),

@@ -299,6 +299,29 @@ async replaceRecoveryKey(password: string) : Promise<Result<string, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * A link that logs another device into the account, once and for a short time. Shown as a
+ * QR code.
+ */
+async createLoginLink(password: string) : Promise<Result<LoginLink, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_login_link", { password }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Logs in with a link made by `create_login_link` on another device.
+ */
+async logInWithLink(link: string) : Promise<Result<AccountInfo, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("log_in_with_link", { link }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -317,6 +340,10 @@ export type Expense = { id: string; group_id: string; title: string; amount_cent
 export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; summary: string }
 export type ExpenseSplit = { participant_id: string; shares: number; fixed_cents?: number | null }
 export type Group = { id: string; name: string; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string }
+/**
+ * A link that logs another device into the account, shown as a QR code.
+ */
+export type LoginLink = { link: string; expires_in: number }
 export type NativeFeatures = { share: boolean; scan: boolean }
 /**
  * What an expense paid in another currency than the group's cost there.

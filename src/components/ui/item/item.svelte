@@ -6,7 +6,7 @@
 		variants: {
 			variant: {
 				default: "border-transparent",
-				outline: "border-border bg-card shadow-sm",
+				outline: "border-border bg-card",
 				muted: "bg-muted/50 border-transparent",
 			},
 			size: {

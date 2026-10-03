@@ -8,6 +8,7 @@
   import { Button } from "@/components/ui/button";
   import * as Tabs from "@/components/ui/tabs";
   import { goHome } from "@/lib/actions";
+  import { t } from "@/lib/i18n/index.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { navigation } from "@/lib/state/navigation.svelte";
   import { cn } from "@/lib/utils";
@@ -31,7 +32,7 @@
 <div class="space-y-4">
   <Button variant="ghost" size="sm" onclick={goHome} class="-ml-2 max-sm:hidden">
     <ArrowLeftIcon data-icon="inline-start" />
-    Back to All Groups
+    {t("group.back")}
   </Button>
 
   <GroupHeader {group} />
@@ -43,18 +44,18 @@
       >
         <Tabs.Trigger value="expenses" class={BOTTOM_TAB}>
           <ReceiptTextIcon />
-          Expenses
+          {t("tabs.expenses")}
           <Badge variant="secondary" class={cn("tabular-nums", BOTTOM_TAB_BADGE)}>
             {group.expenses.length}
           </Badge>
         </Tabs.Trigger>
         <Tabs.Trigger value="balances" class={BOTTOM_TAB}>
           <ScaleIcon />
-          Balances
+          {t("tabs.balances")}
         </Tabs.Trigger>
         <Tabs.Trigger value="settle" class={BOTTOM_TAB}>
           <ArrowLeftRightIcon />
-          Settle Up
+          {t("tabs.settle")}
           {#if openGroup.settlements.length > 0}
             <Badge variant="secondary" class={cn("tabular-nums", BOTTOM_TAB_BADGE)}>
               {openGroup.settlements.length}

@@ -89,6 +89,25 @@ test("keeps its data and syncs it with the user's other devices", async ({ brows
   });
 });
 
+test("shows a code to log a phone in, after the password", async ({ browser }) => {
+  const laptop = await device(browser);
+  await signUp(laptop, `carol${Date.now()}`);
+
+  await laptop.getByRole("button", { name: "Menu", exact: true }).click();
+  await laptop.getByRole("menuitem", { name: "Connect a device" }).click();
+  const dialog = laptop.getByRole("dialog", { name: "Connect another device" });
+  await dialog.getByLabel("Password").fill(PASSWORD);
+  await dialog.getByRole("button", { name: "Show Code" }).click();
+  // The relay took the link: it says how long it works.
+  await expect(dialog.getByRole("img", { name: /QR code/ })).toBeVisible();
+  await expect(dialog.getByText(/Works once, for another [12]:\d\d/)).toBeVisible();
+  // The browser has no camera scanning, so it doesn't offer to log in that way.
+  const phone = await device(browser);
+  await phone.goto("/");
+  await expect(phone.getByRole("button", { name: "Log In" })).toBeVisible();
+  await expect(phone.getByRole("button", { name: "Scan a code to log in" })).toHaveCount(0);
+});
+
 test("runs in one tab at a time", async ({ browser }) => {
   const first = await device(browser);
   await first.goto("/");

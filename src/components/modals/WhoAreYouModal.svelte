@@ -9,6 +9,7 @@
   import { Input } from "@/components/ui/input";
   import { Spinner } from "@/components/ui/spinner";
   import { addSelf, chooseIdentity, skipIdentity } from "@/lib/actions";
+  import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { session } from "@/lib/state/session.svelte";
@@ -74,14 +75,12 @@
 >
   <Dialog.Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-sm">
     <Dialog.Header>
-      <Dialog.Title>Who are you in "{group.name}"?</Dialog.Title>
-      <Dialog.Description>
-        Your balance and "Paid by you" follow this choice on all your devices.
-      </Dialog.Description>
+      <Dialog.Title>{t("who.title", group.name)}</Dialog.Title>
+      <Dialog.Description>{t("who.intro")}</Dialog.Description>
     </Dialog.Header>
 
     {#if !addingSelf}
-      <ul class="space-y-1.5" aria-label="Members">
+      <ul class="space-y-1.5" aria-label={t("common.members")}>
         {#each people as p (p.id)}
           <li>
             <Button
@@ -99,7 +98,7 @@
               {#if busyId === p.id}
                 <Spinner class="ml-auto" />
               {:else if p.id === currentUserId}
-                <CheckIcon class="ml-auto" aria-label="You" />
+                <CheckIcon class="ml-auto" aria-label={t("common.you")} />
               {/if}
             </Button>
           </li>
@@ -111,14 +110,14 @@
       <Dialog.Footer>
         <Button variant="ghost" onclick={() => (addingSelf = true)}>
           <UserPlusIcon data-icon="inline-start" />
-          I'm not in the list
+          {t("who.notListed")}
         </Button>
       </Dialog.Footer>
     {:else}
       <form onsubmit={handleAddSelf}>
         <Field.Group>
           <Field.Field>
-            <Field.Label for="input-self-name">Your name in this group</Field.Label>
+            <Field.Label for="input-self-name">{t("who.yourName")}</Field.Label>
             <Input id="input-self-name" required bind:ref={selfInput} bind:value={name} />
           </Field.Field>
           {#if error}
@@ -126,12 +125,12 @@
           {/if}
         </Field.Group>
         <Dialog.Footer class="mt-6">
-          <Button variant="outline" onclick={() => (addingSelf = false)}>Back</Button>
+          <Button variant="outline" onclick={() => (addingSelf = false)}>{t("common.back")}</Button>
           <Button type="submit" disabled={busyId !== null}>
             {#if busyId === "new"}
               <Spinner data-icon="inline-start" />
             {/if}
-            Add Me
+            {t("who.addMe")}
           </Button>
         </Dialog.Footer>
       </form>

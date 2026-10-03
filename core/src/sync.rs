@@ -21,10 +21,10 @@ use std::time::Duration;
 use url::Url;
 
 use crate::account;
-use crate::crypto::{new_recovery_key, CredentialKeys, GroupKeys, Secret};
+use crate::crypto::{new_recovery_key, CredentialKeys, GroupKeys, LinkKeys, Secret};
 use crate::csv_file;
 use crate::doc;
-use crate::models::{Group, PasswordStrength};
+use crate::models::{Group, LoginLink, PasswordStrength};
 use crate::storage::{import_remote_update, Session, SyncMeta};
 use crate::AppState;
 
@@ -932,6 +932,172 @@ pub async fn log_in(state: &AppState, server_url: &str, username: &str, password
         server_url,
         username,
         account_id: found.account_id,
+    };
+    state.store().set_session(session, doc, meta)?;
+    adopt_local_groups(state)?;
+    state.sync_wakeup.notify_one();
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Login links
+// ---------------------------------------------------------------------------
+
+/// What a login link hands to the other device, encrypted with the link's code.
+#[derive(Serialize, Deserialize)]
+struct LinkedAccount {
+    username: String,
+    account_id: String,
+    account_key: String,
+}
+
+#[derive(Serialize)]
+struct CreateLinkRequest<'a> {
+    username: &'a str,
+    login_token: &'a str,
+    ticket: &'a str,
+    data: String,
+}
+
+#[derive(Deserialize)]
+struct CreateLinkResponse {
+    expires_in: u32,
+}
+
+#[derive(Serialize)]
+struct ClaimLinkRequest<'a> {
+    ticket: &'a str,
+}
+
+#[derive(Deserialize)]
+struct ClaimLinkResponse {
+    data: String,
+}
+
+/// A relay from before login links has no such endpoints.
+const NO_LINKS: &str =
+    "This server can't connect devices with a code yet. Update the ezcount relay.";
+
+/// A login link: `ezcount://login?server=<relay>&code=<code>`. The code never reaches the
+/// relay, only the device that scans the link.
+fn login_link(server_url: &str, code: &Secret) -> String {
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("server", server_url)
+        .append_pair("code", code.expose())
+        .finish();
+    format!("ezcount://login?{query}")
+}
+
+/// The relay and the code of a login link.
+fn parse_login_link(link: &str) -> Res<(String, Secret)> {
+    let invalid = || "This is not an ezcount login code".to_string();
+    let url = Url::parse(link.trim()).map_err(|_| invalid())?;
+    if url.scheme() != "ezcount" || url.host_str() != Some("login") {
+        return Err(invalid());
+    }
+    let param = |name: &str| {
+        url.query_pairs()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.into_owned())
+            .ok_or_else(invalid)
+    };
+    Ok((
+        normalize_server_url(&param("server")?)?,
+        Secret::new(param("code")?),
+    ))
+}
+
+/// Makes a link that logs another device into this account, once and for a short time (the
+/// relay says how long). It asks for the password, so an app left open isn't enough to take
+/// the account elsewhere.
+///
+/// The account's key waits on the relay encrypted with the link's code, which only the link
+/// carries: the relay can't read it, and forgets it when it is fetched or expires.
+pub async fn create_login_link(state: &AppState, password: &str) -> Res<LoginLink> {
+    let (username, server_url, account_id, account_key) = account_credentials(state)?;
+    let keys = password_keys(&username, password).await?;
+    let code = new_secret()?;
+    let link_keys = LinkKeys::derive(&code)?;
+    let account = serde_json::to_vec(&LinkedAccount {
+        username: username.clone(),
+        account_id,
+        account_key: account_key.expose().to_string(),
+    })
+    .map_err(|e| format!("Could not encode the account: {e}"))?;
+
+    let response = state
+        .http
+        .post(format!("{server_url}/v1/accounts/links"))
+        .json(&CreateLinkRequest {
+            username: &username,
+            login_token: &keys.token,
+            ticket: &link_keys.ticket,
+            data: STANDARD.encode(link_keys.seal(&account)?),
+        })
+        .timeout(REQUEST_TIMEOUT)
+        .send()
+        .await
+        .map_err(request_err)?;
+    let created: CreateLinkResponse = match response.status().as_u16() {
+        401 => return Err("Wrong password".to_string()),
+        404 | 405 => return Err(NO_LINKS.to_string()),
+        429 => return Err(TOO_MANY_ATTEMPTS.to_string()),
+        _ => check_status(response)
+            .await?
+            .json()
+            .await
+            .map_err(|e| format!("The sync server sent an unexpected response: {e}"))?,
+    };
+    Ok(LoginLink {
+        link: login_link(&server_url, &code),
+        expires_in: created.expires_in,
+    })
+}
+
+/// Logs this device into the account a login link is for (see [`create_login_link`]). Its
+/// groups download in the background.
+pub async fn log_in_with_link(state: &AppState, link: &str) -> Res<()> {
+    let (server_url, code) = parse_login_link(link)?;
+    let link_keys = LinkKeys::derive(&code)?;
+    ensure_logged_out(state)?;
+
+    let response = state
+        .http
+        .post(format!("{server_url}/v1/accounts/links/claim"))
+        .json(&ClaimLinkRequest {
+            ticket: &link_keys.ticket,
+        })
+        .timeout(REQUEST_TIMEOUT)
+        .send()
+        .await
+        .map_err(request_err)?;
+    let claimed: ClaimLinkResponse = match response.status().as_u16() {
+        410 => {
+            return Err(
+                "This code has expired or was already used. Show a new one and scan it."
+                    .to_string(),
+            )
+        }
+        404 | 405 => return Err(NO_LINKS.to_string()),
+        _ => check_status(response)
+            .await?
+            .json()
+            .await
+            .map_err(|e| format!("The sync server sent an unexpected response: {e}"))?,
+    };
+    let corrupt = || "The sync server sent corrupt account data".to_string();
+    let sealed = STANDARD.decode(&claimed.data).map_err(|_| corrupt())?;
+    let account: LinkedAccount =
+        serde_json::from_slice(&link_keys.open(&sealed)?).map_err(|_| corrupt())?;
+    let account_key = Secret::new(account.account_key);
+    GroupKeys::derive(&account_key).map_err(|_| corrupt())?;
+
+    // Download the account before saving anything, so a failure leaves the device as it was.
+    let (doc, meta) = download(&state.http, &server_url, &account_key, &account.account_id).await?;
+    let session = Session {
+        server_url,
+        username: account.username,
+        account_id: account.account_id,
     };
     state.store().set_session(session, doc, meta)?;
     adopt_local_groups(state)?;
@@ -2191,6 +2357,83 @@ mod end_to_end {
         recover_account(&phone.state, &url, "alice", &second, NEW_PASSWORD)
             .await
             .unwrap();
+
+        let _ = std::fs::remove_dir_all(&relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_login_link_logs_another_device_in_once() {
+        let (url, relay_dir) = start_relay().await;
+        let laptop = Device::signed_up(&url, "alice").await;
+        let trip = laptop.create("Trip", &["Alice", "Bob"]);
+        laptop.sync().await;
+
+        let err = create_login_link(&laptop.state, "not my password")
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Wrong password");
+        let link = create_login_link(&laptop.state, PASSWORD).await.unwrap();
+        assert_eq!(link.expires_in, 120);
+        assert!(link.link.starts_with("ezcount://login?server=http"));
+
+        // The relay is given the ticket, which is neither the code nor in the link.
+        let (_, code) = parse_login_link(&link.link).unwrap();
+        let ticket = LinkKeys::derive(&code).unwrap().ticket;
+        assert!(ticket != code.expose() && !link.link.contains(&ticket));
+
+        let phone = Device::new();
+        log_in_with_link(&phone.state, &link.link).await.unwrap();
+        reconcile(&phone.state).await.unwrap();
+        assert_eq!(phone.group_ids(), vec![trip.id.clone()]);
+        assert_eq!(phone.state.store().session().unwrap().username, "alice");
+        // It is a full login: the phone's edits reach the laptop.
+        phone.edit(&trip.id, |doc| {
+            doc::add_participant(doc, "Carol").map(|_| ())
+        });
+        phone.sync().await;
+        laptop.sync().await;
+        assert_eq!(laptop.group(&trip.id).participants.len(), 3);
+
+        // A link works once.
+        let tablet = Device::new();
+        let err = log_in_with_link(&tablet.state, &link.link)
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("This code has expired"), "{err}");
+        assert!(tablet.state.store().session().is_none());
+
+        for bad in [
+            "hello",
+            "ezcount://join?server=x",
+            "https://example.com/login?code=x",
+        ] {
+            let err = log_in_with_link(&tablet.state, bad).await.unwrap_err();
+            assert_eq!(err, "This is not an ezcount login code", "{bad}");
+        }
+        let err = log_in_with_link(&phone.state, &link.link)
+            .await
+            .unwrap_err();
+        assert_eq!(err, "This device is already logged in");
+
+        let _ = std::fs::remove_dir_all(&relay_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_login_link_expires() {
+        let (url, relay_dir) = start_limited_relay(ezcount_sync_server::Limits {
+            link_lifetime: Duration::from_millis(50),
+            ..Default::default()
+        })
+        .await;
+        let laptop = Device::signed_up(&url, "alice").await;
+        let link = create_login_link(&laptop.state, PASSWORD).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(120)).await;
+
+        let phone = Device::new();
+        let err = log_in_with_link(&phone.state, &link.link)
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("This code has expired"), "{err}");
 
         let _ = std::fs::remove_dir_all(&relay_dir);
     }

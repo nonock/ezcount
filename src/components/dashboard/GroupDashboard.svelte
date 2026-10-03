@@ -10,6 +10,7 @@
   import * as Card from "@/components/ui/card";
   import * as Empty from "@/components/ui/empty";
   import { importGroup } from "@/lib/actions";
+  import { t } from "@/lib/i18n/index.svelte";
   import type { Group } from "@/types";
 
   interface Props {
@@ -37,7 +38,7 @@
   type="file"
   accept=".csv,text/csv"
   class="hidden"
-  aria-label="CSV file to import"
+  aria-label={t("groups.csvFile")}
   onchange={importChosenFile}
 />
 
@@ -45,24 +46,23 @@
   <Empty.Root class="border border-dashed py-16">
     <Empty.Header>
       <Empty.Media variant="icon"><UsersIcon /></Empty.Media>
-      <Empty.Title>No groups yet</Empty.Title>
+      <Empty.Title>{t("groups.empty")}</Empty.Title>
       <Empty.Description>
-        Create a group for your next trip, dinner, flatshare or event to start splitting bills, or
-        join one a friend shared with you.
+        {t("groups.emptyHelp")}
       </Empty.Description>
     </Empty.Header>
     <Empty.Content class="flex-row flex-wrap justify-center gap-2">
       <Button onclick={onOpenCreateGroup}>
         <PlusIcon data-icon="inline-start" />
-        Create Group
+        {t("groups.create")}
       </Button>
       <Button variant="outline" onclick={onOpenJoinGroup}>
         <LinkIcon data-icon="inline-start" />
-        Join with Code
+        {t("groups.joinWithCode")}
       </Button>
       <Button variant="outline" onclick={() => fileInput?.click()}>
         <FileUpIcon data-icon="inline-start" />
-        Import CSV
+        {t("groups.importCsv")}
       </Button>
     </Empty.Content>
   </Empty.Root>
@@ -70,25 +70,24 @@
   <div class="space-y-4">
     <div class="flex flex-wrap items-end justify-between gap-2">
       <div>
-        <h1 class="text-xl font-semibold tracking-tight">Your Groups</h1>
+        <h1 class="text-2xl font-semibold tracking-tight">{t("groups.yours")}</h1>
         <p class="text-sm text-muted-foreground">
-          {groups.length}
-          active {groups.length === 1 ? "group" : "groups"}
+          {t("groups.active", groups.length)}
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
         <Button variant="outline" onclick={onOpenJoinGroup}>
           <LinkIcon data-icon="inline-start" />
-          Join with code
+          {t("groups.joinWithCodeLower")}
         </Button>
         <Button variant="outline" onclick={() => fileInput?.click()}>
           <FileUpIcon data-icon="inline-start" />
-          Import CSV
+          {t("groups.importCsv")}
         </Button>
       </div>
     </div>
 
-    <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <ul class="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {#each groups as group (group.id)}
         {@const totalCents = group.expenses.reduce((sum, e) => sum + e.amount_cents, 0)}
         {@const members = group.participants.filter((p) => !p.removed).length}
@@ -113,7 +112,7 @@
             </Card.Header>
             <Card.Content class="flex items-end justify-between gap-2">
               <div>
-                <div class="text-xs text-muted-foreground">Total spent</div>
+                <div class="text-xs text-muted-foreground">{t("groups.totalSpent")}</div>
                 <Amount
                   cents={totalCents}
                   currency={group.currency}
@@ -121,8 +120,7 @@
                 />
               </div>
               <div class="flex items-center gap-1 text-xs text-muted-foreground">
-                {members}
-                people · {group.expenses.length} records
+                {t("groups.summary", members, group.expenses.length)}
                 <ChevronRightIcon class="size-4" aria-hidden="true" />
               </div>
             </Card.Content>

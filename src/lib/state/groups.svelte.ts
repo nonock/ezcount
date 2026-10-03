@@ -4,6 +4,7 @@ import { toast } from "svelte-sonner";
 import { api } from "@/services/api";
 import type { Group, ParticipantBalance, SettlementTransfer, SyncInfo } from "@/types";
 import { errorMessage } from "@/utils/errors";
+import { t } from "../i18n/index.svelte";
 import { navigation } from "./navigation.svelte";
 import { session } from "./session.svelte";
 
@@ -51,7 +52,7 @@ class OpenGroup {
       this.syncInfo = syncInfo;
     } catch (err) {
       console.error("Failed to load active group:", err);
-      toast.error("Could not open the group", { description: errorMessage(err) });
+      toast.error(t("groups.openFailed"), { description: errorMessage(err) });
       navigation.close();
       this.clear();
     }

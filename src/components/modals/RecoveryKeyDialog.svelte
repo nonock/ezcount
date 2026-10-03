@@ -14,16 +14,15 @@
   import { Input } from "@/components/ui/input";
   import { Label } from "@/components/ui/label";
   import { Spinner } from "@/components/ui/spinner";
+  import { t } from "@/lib/i18n/index.svelte";
   import { api } from "@/services/api";
   import { errorMessage } from "@/utils/errors";
 
-  const INTROS: Record<RecoveryKeyReason, string> = {
-    signup:
-      "If you forget your password, this key is the only way back into your account: nobody can reset it for you. Keep it in a password manager, or write it down.",
-    recovered:
-      "Your new password is set. The recovery key you used no longer works, so here is a new one to keep.",
-    replace: "Your previous recovery key no longer works. Keep this one instead.",
-  };
+  const INTROS = {
+    signup: "recovery.signup",
+    recovered: "recovery.recovered",
+    replace: "recovery.replace",
+  } as const;
 
   interface Props {
     open: boolean;
@@ -76,9 +75,9 @@
     if (!key) return;
     try {
       await navigator.clipboard.writeText(key);
-      toast.success("Recovery key copied");
+      toast.success(t("recovery.copied"));
     } catch {
-      toast.info("Select the key and copy it manually");
+      toast.info(t("recovery.copyManually"));
     }
   }
 </script>
@@ -98,11 +97,9 @@
     interactOutsideBehavior={showingKey ? "ignore" : "close"}
   >
     <Dialog.Header>
-      <Dialog.Title>{showingKey ? "Save your recovery key" : "New recovery key"}</Dialog.Title>
+      <Dialog.Title>{showingKey ? t("recovery.saveTitle") : t("menu.newRecoveryKey")}</Dialog.Title>
       <Dialog.Description>
-        {showingKey
-          ? INTROS[reason]
-          : "A new key replaces your current one, which stops working. Enter your password to continue."}
+        {showingKey ? t(INTROS[reason]) : t("recovery.newIntro")}
       </Dialog.Description>
     </Dialog.Header>
 
@@ -110,27 +107,27 @@
       <div class="space-y-3">
         <output
           class="block rounded-xl border bg-muted/50 px-3 py-4 text-center font-mono text-base font-semibold tracking-wide break-all select-all"
-          aria-label="Recovery key"
+          aria-label={t("auth.recoveryKey")}
         >
           {key}
         </output>
         <Button variant="outline" class="w-full" onclick={handleCopy}>
           <CopyIcon data-icon="inline-start" />
-          Copy Key
+          {t("recovery.copy")}
         </Button>
         <div class="flex items-center gap-2.5 pt-1">
           <Checkbox id="recovery-key-saved" bind:checked={saved} />
-          <Label for="recovery-key-saved" class="font-normal">I've saved it somewhere safe</Label>
+          <Label for="recovery-key-saved" class="font-normal">{t("recovery.saved")}</Label>
         </div>
       </div>
       <Dialog.Footer>
-        <Button onclick={onClose} disabled={!saved}>Done</Button>
+        <Button onclick={onClose} disabled={!saved}>{t("common.done")}</Button>
       </Dialog.Footer>
     {:else}
       <form onsubmit={handleCreate}>
         <Field.Group>
           <Field.Field>
-            <Field.Label for="recovery-password">Password</Field.Label>
+            <Field.Label for="recovery-password">{t("common.password")}</Field.Label>
             <Input
               id="recovery-password"
               type="password"
@@ -144,12 +141,12 @@
           {/if}
         </Field.Group>
         <Dialog.Footer class="mt-6">
-          <Button variant="outline" onclick={onClose}>Cancel</Button>
+          <Button variant="outline" onclick={onClose}>{t("common.cancel")}</Button>
           <Button type="submit" disabled={submitting}>
             {#if submitting}
               <Spinner data-icon="inline-start" />
             {/if}
-            Create New Key
+            {t("recovery.create")}
           </Button>
         </Dialog.Footer>
       </form>

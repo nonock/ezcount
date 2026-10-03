@@ -7,6 +7,7 @@
   import { Spinner } from "@/components/ui/spinner";
   import { Textarea } from "@/components/ui/textarea";
   import { joinGroup, scanInvite } from "@/lib/actions";
+  import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { nativeFeatures } from "@/services/native.svelte";
   import { errorMessage } from "@/utils/errors";
@@ -43,22 +44,19 @@
 <Dialog.Root bind:open={dialogs.join.open}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Join a Group</Dialog.Title>
-      <Dialog.Description>
-        Open the invite link a member sent you, or paste it here. To get one, a member opens the
-        group and taps Invite.
-      </Dialog.Description>
+      <Dialog.Title>{t("join.title")}</Dialog.Title>
+      <Dialog.Description>{t("join.intro")}</Dialog.Description>
     </Dialog.Header>
     <form onsubmit={handleSubmit}>
       <Field.Group>
         {#if nativeFeatures.scan}
           <Button variant="outline" size="lg" onclick={scanInvite}>
             <ScanQrCodeIcon data-icon="inline-start" />
-            Scan QR Code
+            {t("join.scan")}
           </Button>
         {/if}
         <Field.Field>
-          <Field.Label for="input-invite-code">Invite link</Field.Label>
+          <Field.Label for="input-invite-code">{t("join.link")}</Field.Label>
           <Textarea
             id="input-invite-code"
             required
@@ -77,14 +75,14 @@
       <Dialog.Footer class="mt-6">
         <Dialog.Close>
           {#snippet child({ props })}
-            <Button {...props} variant="outline">Cancel</Button>
+            <Button {...props} variant="outline">{t("common.cancel")}</Button>
           {/snippet}
         </Dialog.Close>
         <Button type="submit" disabled={submitting}>
           {#if submitting}
             <Spinner data-icon="inline-start" />
           {/if}
-          Join Group
+          {t("join.submit")}
         </Button>
       </Dialog.Footer>
     </form>

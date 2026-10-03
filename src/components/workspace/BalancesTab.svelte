@@ -6,6 +6,7 @@
   import { Button } from "@/components/ui/button";
   import * as Card from "@/components/ui/card";
   import { Progress } from "@/components/ui/progress";
+  import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { memberTone } from "@/lib/tones";
@@ -20,13 +21,14 @@
 
 <div class="space-y-3">
   <div class="flex items-center gap-1">
-    <h2 class="font-medium">Who owes what</h2>
-    <HelpPopover title="Balances">
-      Positive amounts in <span class="font-medium text-positive">green</span> mean the participant
-      is owed money back. Negative amounts in
-      <span class="font-medium text-negative">red</span>
-      mean they need to pay.
-    </HelpPopover>
+    <h2 class="text-base font-semibold">{t("balances.heading")}</h2>
+    <HelpPopover title={t("balances.help")}
+      >{t("balances.helpPositive")}<span class="font-medium text-positive"
+        >{t("balances.green")}</span
+      >{t("balances.helpPositiveEnd")}<span class="font-medium text-negative"
+        >{t("balances.red")}</span
+      >{t("balances.helpNegativeEnd")}</HelpPopover
+    >
   </div>
 
   <ul class="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -48,11 +50,15 @@
                   <h3 class="flex items-center gap-1.5 truncate font-medium">
                     {b.participant_name}
                     {#if b.removed}
-                      <Badge variant="secondary">Removed</Badge>
+                      <Badge variant="secondary">{t("member.removed")}</Badge>
                     {/if}
                   </h3>
                   <p class="text-xs text-muted-foreground">
-                    {isPositive ? "Gets back" : isNegative ? "Owes" : "Settled up"}
+                    {isPositive
+                      ? t("balances.getsBack")
+                      : isNegative
+                        ? t("balances.owes")
+                        : t("balances.settled")}
                   </p>
                 </div>
               </div>
@@ -60,13 +66,13 @@
                 cents={b.net_cents}
                 currency={group.currency}
                 tone="balance"
-                class="font-semibold"
+                class="text-base font-semibold"
               />
             </div>
 
             <Progress
               value={percentage}
-              aria-label={`${b.participant_name}'s share of the largest balance`}
+              aria-label={t("balances.share", b.participant_name)}
               class={cn(
                 "h-1.5",
                 isPositive && "**:data-[slot=progress-indicator]:bg-positive",
@@ -76,11 +82,11 @@
 
             <div class="flex justify-between text-xs text-muted-foreground">
               <span>
-                Paid:
+                {t("balances.paid")}
                 <Amount cents={b.paid_cents} currency={group.currency} class="text-foreground" />
               </span>
               <span>
-                Consumed:
+                {t("balances.consumed")}
                 <Amount cents={b.owed_cents} currency={group.currency} class="text-foreground" />
               </span>
             </div>
@@ -97,7 +103,7 @@
                     amount: (Math.abs(b.net_cents) / 100).toFixed(2),
                   })}
               >
-                Reimburse debt
+                {t("balances.reimburse")}
                 <Amount
                   cents={Math.abs(b.net_cents)}
                   currency={group.currency}

@@ -6,14 +6,15 @@
   import UserPlusIcon from "@lucide/svelte/icons/user-plus";
   import UserRoundIcon from "@lucide/svelte/icons/user-round";
   import UsersIcon from "@lucide/svelte/icons/users";
-  import XIcon from "@lucide/svelte/icons/x";
   import Amount from "@/components/common/Amount.svelte";
-  import { Badge } from "@/components/ui/badge";
+  import { Badge, badgeVariants } from "@/components/ui/badge";
   import { Button } from "@/components/ui/button";
   import * as Card from "@/components/ui/card";
   import * as DropdownMenu from "@/components/ui/dropdown-menu";
   import { Separator } from "@/components/ui/separator";
-  import { exportGroup, leaveGroup, removeMember } from "@/lib/actions";
+  import { exportGroup, leaveGroup } from "@/lib/actions";
+  import { backendText } from "@/lib/i18n/backend";
+  import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { memberTone } from "@/lib/tones";
@@ -45,34 +46,33 @@
 <Card.Root>
   <Card.Header>
     <div class="flex min-w-0 items-center gap-2">
-      <h1 class="truncate text-lg font-semibold tracking-tight">{group.name}</h1>
+      <h1 class="truncate text-2xl font-semibold tracking-tight">{group.name}</h1>
       <Badge variant="soft">{group.currency}</Badge>
     </div>
     <Card.Description>
-      {activeParticipants.length}
-      participants · Group total
+      {t("group.summary", activeParticipants.length)}
       <Amount cents={totalCents} currency={group.currency} class="text-foreground" />
     </Card.Description>
     <Card.Action class="flex items-center gap-1">
       <Button
         variant="outline"
         onclick={() => (dialogs.share = true)}
-        title={syncError ? `Last sync failed: ${syncError}` : "Invite other members"}
+        title={syncError ? t("share.syncFailed", backendText(syncError)) : t("group.inviteHelp")}
       >
         <!-- The dot tells the sync state; the dialog explains a failure. -->
         <span
           aria-hidden="true"
           class={cn("size-2 rounded-full", syncError ? "bg-negative" : "bg-positive")}
         ></span>
-        Invite
+        {t("group.invite")}
         {#if syncError}
-          <span class="sr-only">(last sync failed)</span>
+          <span class="sr-only">{t("share.syncFailedShort")}</span>
         {/if}
       </Button>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger>
           {#snippet child({ props })}
-            <Button {...props} variant="ghost" size="icon" aria-label="Group options">
+            <Button {...props} variant="ghost" size="icon" aria-label={t("group.options")}>
               <EllipsisVerticalIcon />
             </Button>
           {/snippet}
@@ -80,23 +80,23 @@
         <DropdownMenu.Content align="end">
           <DropdownMenu.Item onSelect={() => (dialogs.editGroup = true)}>
             <PencilIcon />
-            Edit group
+            {t("group.edit")}
           </DropdownMenu.Item>
           <DropdownMenu.Item onSelect={() => (dialogs.addMember = true)}>
             <UserPlusIcon />
-            Add member
+            {t("group.addMember")}
           </DropdownMenu.Item>
           <DropdownMenu.Item onSelect={() => (dialogs.who = true)}>
             <UserRoundIcon />
-            Change who you are
+            {t("group.changeWho")}
           </DropdownMenu.Item>
           <DropdownMenu.Item onSelect={exportGroup}>
             <DownloadIcon />
-            Export as CSV
+            {t("group.export")}
           </DropdownMenu.Item>
           <DropdownMenu.Item variant="destructive" onSelect={leaveGroup}>
             <LogOutIcon />
-            Leave group
+            {t("group.leave")}
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Root>
@@ -104,97 +104,67 @@
   </Card.Header>
 
   <Card.Content class="space-y-4">
-    <ul class="flex flex-wrap gap-1.5" aria-label="Members">
+    <ul class="flex flex-wrap gap-1.5" aria-label={t("common.members")}>
       {#each activeParticipants as p (p.id)}
         <li>
-          <Badge
-            variant="outline"
+          <!-- Renaming and removing a member are both behind their name. -->
+          <button
+            type="button"
+            onclick={() => renameMember(p.id)}
+            aria-label={t("group.editMember", p.name)}
             class={cn(
-              "h-7 gap-1 border-transparent pr-0.5 pl-2.5 text-sm",
+              badgeVariants({ variant: "outline" }),
+              "h-7 cursor-pointer border-transparent px-2.5 text-sm font-normal hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
               memberTone(group, p.id)
             )}
           >
-            <button
-              type="button"
-              onclick={() => renameMember(p.id)}
-              aria-label={`Rename ${p.name}`}
-              title="Rename"
-              class="cursor-pointer rounded-sm hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            >
-              {p.name}
-            </button>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              onclick={() => removeMember(p.id)}
-              aria-label={`Remove ${p.name}`}
-              class="text-muted-foreground hover:text-destructive"
-            >
-              <XIcon />
-            </Button>
-          </Badge>
+            {p.name}
+          </button>
         </li>
       {/each}
       <li>
         <Button variant="ghost" size="sm" onclick={() => (dialogs.addMember = true)} class="h-7">
           <UserPlusIcon data-icon="inline-start" />
-          Add Member
+          {t("group.addMemberButton")}
         </Button>
       </li>
     </ul>
 
     {#if activeParticipants.length > 0}
       <Separator />
-      <div class="flex flex-col gap-3 text-sm md:flex-row md:items-center md:justify-between">
-        {#if me}
-          <p class="flex items-center gap-1 text-muted-foreground">
-            You're <span class="font-medium text-foreground">{me.name}</span>
-            <Button
-              variant="link"
-              size="sm"
-              onclick={() => (dialogs.who = true)}
-              class="h-auto px-1"
-            >
-              Change
-            </Button>
-          </p>
-        {:else}
-          <Button variant="outline" size="sm" onclick={() => (dialogs.who = true)} class="w-fit">
-            <UsersIcon data-icon="inline-start" />
-            Who are you in this group?
-          </Button>
-        {/if}
-
-        <dl class="grid grid-cols-3 gap-3 md:flex md:gap-6">
-          <div>
-            <dt class="text-xs text-muted-foreground">Your expenses</dt>
-            <dd>
-              <Amount
-                cents={currentUserBalance?.owed_cents || 0}
-                currency={group.currency}
-                class="font-medium"
-              />
-            </dd>
-          </div>
-          <div>
-            <dt class="text-xs text-muted-foreground">Paid by you</dt>
-            <dd>
-              <Amount cents={userPaidCents} currency={group.currency} class="font-medium" />
-            </dd>
-          </div>
-          <div>
-            <dt class="text-xs text-muted-foreground">Net</dt>
-            <dd>
-              <Amount
-                cents={currentUserBalance?.net_cents || 0}
-                currency={group.currency}
-                tone="balance"
-                class="font-semibold"
-              />
-            </dd>
-          </div>
-        </dl>
-      </div>
+      {#if me}
+        <!-- Where the user stands, their balance first. Who they are is changed from the menu. -->
+        <div class="text-sm">
+          <dl class="flex flex-wrap items-end gap-x-8 gap-y-2">
+            <div>
+              <dt class="text-xs text-muted-foreground">{t("group.net")}</dt>
+              <dd>
+                <Amount
+                  cents={currentUserBalance?.net_cents || 0}
+                  currency={group.currency}
+                  tone="balance"
+                  class="text-2xl font-semibold"
+                />
+              </dd>
+            </div>
+            <div>
+              <dt class="text-xs text-muted-foreground">{t("group.yourExpenses")}</dt>
+              <dd>
+                <Amount cents={currentUserBalance?.owed_cents || 0} currency={group.currency} />
+              </dd>
+            </div>
+            <div>
+              <dt class="text-xs text-muted-foreground">{t("group.paidByYou")}</dt>
+              <dd><Amount cents={userPaidCents} currency={group.currency} /></dd>
+            </div>
+          </dl>
+        </div>
+      {:else}
+        <Button variant="outline" size="sm" onclick={() => (dialogs.who = true)} class="w-fit">
+          <UsersIcon data-icon="inline-start" />
+          {t("group.whoAreYou")}
+        </Button>
+      {/if}
     {/if}
   </Card.Content>
 </Card.Root>

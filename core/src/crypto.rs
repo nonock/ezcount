@@ -291,6 +291,46 @@ impl CredentialKeys {
     }
 }
 
+/// Keys from the code of a login link (see `sync::create_login_link`): the ticket the relay
+/// keeps the account under, and the key that encrypts it. The relay sees the ticket only,
+/// which says nothing about the key.
+pub struct LinkKeys {
+    pub ticket: String,
+    cipher: XChaCha20Poly1305,
+}
+
+impl LinkKeys {
+    pub fn derive(code: &Secret) -> Res<Self> {
+        let invalid = || "This is not an ezcount login code".to_string();
+        let code = URL_SAFE_NO_PAD
+            .decode(code.expose())
+            .map_err(|_| invalid())?;
+        if code.len() != SECRET_LEN {
+            return Err(invalid());
+        }
+        let hkdf = Hkdf::<Sha256>::new(Some(b"ezcount login links"), &code);
+        let mut ticket = [0u8; 32];
+        let mut enc = [0u8; 32];
+        hkdf.expand(b"ezcount/v1/link-ticket", &mut ticket)
+            .and_then(|_| hkdf.expand(b"ezcount/v1/link-encryption", &mut enc))
+            .map_err(|_| invalid())?;
+        Ok(Self {
+            ticket: URL_SAFE_NO_PAD.encode(ticket),
+            cipher: XChaCha20Poly1305::new_from_slice(&enc).map_err(|_| invalid())?,
+        })
+    }
+
+    /// Bound to the ticket, so what one link holds can't be served for another.
+    pub fn seal(&self, plaintext: &[u8]) -> Res<Vec<u8>> {
+        seal_with(&self.cipher, self.ticket.as_bytes(), plaintext)
+    }
+
+    pub fn open(&self, blob: &[u8]) -> Res<Vec<u8>> {
+        open_with(&self.cipher, self.ticket.as_bytes(), blob)
+            .map_err(|_| "The sync server sent corrupt account data".to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13,10 +13,11 @@
 		variants: {
 			variant: {
 				default: `bg-primary text-primary-foreground border-[color-mix(in_oklab,var(--primary),black_5%)] hover:bg-[color-mix(in_oklab,var(--primary),black_7%)] [--btn-depth:var(--primary)] ${depth}`,
-				outline: `bg-secondary text-secondary-foreground border-[color-mix(in_oklab,var(--secondary),black_5%)] hover:bg-[color-mix(in_oklab,var(--secondary),black_7%)] aria-expanded:bg-[color-mix(in_oklab,var(--secondary),black_7%)] [--btn-depth:var(--secondary)] ${depth}`,
+				// Flat and bordered: a quieter step below the filled grey `secondary`.
+				outline: "bg-card text-foreground border-input hover:bg-accent aria-expanded:bg-accent",
 				secondary: `bg-secondary text-secondary-foreground border-[color-mix(in_oklab,var(--secondary),black_5%)] hover:bg-[color-mix(in_oklab,var(--secondary),black_7%)] aria-expanded:bg-[color-mix(in_oklab,var(--secondary),black_7%)] [--btn-depth:var(--secondary)] ${depth}`,
 				ghost: "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
-				destructive: "bg-destructive/10 border-destructive/10 hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/20 text-destructive focus-visible:border-destructive/40 dark:hover:bg-destructive/30",
+				destructive: "bg-destructive-soft hover:bg-[color-mix(in_oklab,var(--destructive-soft),var(--destructive)_12%)] focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 text-destructive focus-visible:border-destructive/40",
 				link: "text-link underline-offset-4 hover:underline",
 			},
 			size: {

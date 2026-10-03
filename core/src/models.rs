@@ -104,6 +104,14 @@ pub struct SyncInfo {
     pub last_error: Option<String>,
 }
 
+/// A link that logs another device into the account, shown as a QR code.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct LoginLink {
+    pub link: String,
+    // Seconds it can be used for. It works once.
+    pub expires_in: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct PasswordStrength {
     // 0 (guessed at once) to 4 (very hard to guess), from zxcvbn.

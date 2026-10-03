@@ -50,9 +50,10 @@ test.describe("Removing members", () => {
     await page.goto("/");
     await page.getByRole("button", { name: /Lisbon Trip/ }).click();
 
-    await page.getByRole("button", { name: "Remove Bob" }).click();
+    await page.getByRole("button", { name: "Rename or remove Bob" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Remove from group" }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click();
-    await expect(page.getByRole("button", { name: "Remove Bob" })).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "Rename or remove Bob" })).not.toBeVisible();
     await expect(page.getByText("2 participants")).toBeVisible();
 
     // Bob is no longer offered for new expenses...
@@ -67,7 +68,7 @@ test.describe("Removing members", () => {
     await page.getByRole("tab", { name: "Balances" }).click();
     const bobCard = page.getByTestId("balance-card").filter({ hasText: "Bob" });
     await expect(bobCard.getByText("Removed")).toBeVisible();
-    await expect(bobCard.getByText("-30.00 €")).toBeVisible();
+    await expect(bobCard.getByText("-€30.00")).toBeVisible();
   });
 });
 
@@ -196,8 +197,8 @@ test.describe("Sharing and joining", () => {
     const who = page.getByRole("dialog", { name: 'Who are you in "Lisbon Trip"?' });
     await who.getByRole("button", { name: "Bob", exact: true }).click();
     await expect(who).not.toBeVisible();
-    await expect(page.getByText("You're Bob")).toBeVisible();
-    await expect(page.getByText("-30.00 €")).toBeVisible();
+    await expect(page.getByText("Your balance", { exact: true })).toBeVisible();
+    await expect(page.getByText("-€30.00")).toBeVisible();
   });
 
   test("adds yourself when you're not in the list", async ({ page }) => {
@@ -210,7 +211,7 @@ test.describe("Sharing and joining", () => {
     await expect(who.getByLabel("Your name in this group")).toHaveValue("alice");
     await who.getByLabel("Your name in this group").fill("Dana");
     await who.getByRole("button", { name: "Add Me" }).click();
-    await expect(page.getByText("You're Dana")).toBeVisible();
+    await expect(page.getByText("Your balance", { exact: true })).toBeVisible();
     await expect(page.getByText("4 participants")).toBeVisible();
   });
 
@@ -222,7 +223,7 @@ test.describe("Sharing and joining", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
     await page.getByRole("button", { name: "Who are you in this group?" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Carol", exact: true }).click();
-    await expect(page.getByText("You're Carol")).toBeVisible();
+    await expect(page.getByText("Your balance", { exact: true })).toBeVisible();
   });
 
   test("reloads the open group when another device's changes arrive", async ({ page }) => {
@@ -283,9 +284,13 @@ test.describe("Account", () => {
     await saveRecoveryKey(page, /^MOCK-KEY1-/);
     await expect(page.getByText("No groups yet")).toBeVisible();
 
-    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
     await expect(page.getByRole("menu")).toContainText("robert");
-    await page.getByRole("menuitem", { name: "Log out" }).click();
+    await page.getByRole("menuitem", { name: /Account/ }).click();
+    await page
+      .getByRole("dialog", { name: "Account" })
+      .getByRole("button", { name: "Log out" })
+      .click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Log Out" }).click();
     await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   });
@@ -351,8 +356,12 @@ test.describe("Account", () => {
     await saveRecoveryKey(page, /^MOCK-KEY1-/);
 
     // The new password is the one that works now.
-    await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "Log out" }).click();
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Account/ }).click();
+    await page
+      .getByRole("dialog", { name: "Account" })
+      .getByRole("button", { name: "Log out" })
+      .click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Log Out" }).click();
     await page.getByLabel("Username").fill("alice");
     await page.getByLabel("Password").fill(MOCK_PASSWORD);
@@ -363,10 +372,75 @@ test.describe("Account", () => {
     await expect(page.getByText("No groups yet")).toBeVisible();
   });
 
+  test("shows a code that logs another device in, for a while", async ({ page }) => {
+    await seed(page, { __LINK_SECONDS__: 2 });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Connect a device" }).click();
+    const dialog = page.getByRole("dialog", { name: "Connect another device" });
+
+    await dialog.getByLabel("Password").fill("not my password");
+    await dialog.getByRole("button", { name: "Show Code" }).click();
+    await expect(dialog.getByText("Wrong password")).toBeVisible();
+
+    await dialog.getByLabel("Password").fill(MOCK_PASSWORD);
+    await dialog.getByRole("button", { name: "Show Code" }).click();
+    await expect(
+      dialog.getByRole("img", { name: /QR code that logs another device/ })
+    ).toBeVisible();
+    await expect(dialog.getByText(/Works once, for another 0:0\d/)).toBeVisible();
+
+    // Past its time, the code is gone and a new one asks for the password again.
+    await expect(dialog.getByText("This code has expired.")).toBeVisible();
+    await expect(dialog.getByRole("img")).not.toBeVisible();
+    await expect(dialog.getByLabel("Password")).toHaveValue("");
+    await expect(dialog.getByRole("button", { name: "New Code" })).toBeVisible();
+  });
+
+  test("logs in by scanning the code another device shows", async ({ page }) => {
+    await seed(page, {
+      __LOGGED_OUT__: true,
+      __NATIVE__: { scan: true },
+      __SCANNED__: "ezcount://login?server=https%3A%2F%2Fsync.example.com&code=mock-code",
+    });
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Scan a code to log in" }).click();
+    await expect(page.getByText("No groups yet")).toBeVisible();
+    await expect(page.locator("html")).not.toHaveClass(/scanning/);
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Account/ }).click();
+    await expect(page.getByRole("dialog", { name: "Account" })).toContainText("sync.example.com");
+  });
+
+  test("a scanned code that no longer works says so", async ({ page }) => {
+    await seed(page, {
+      __LOGGED_OUT__: true,
+      __NATIVE__: { scan: true },
+      __SCANNED__: "ezcount://login?server=https%3A%2F%2Fsync.example.com&code=used",
+    });
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Scan a code to log in" }).click();
+    await expect(page.getByText(/This code has expired or was already used/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Log In", exact: true })).toBeVisible();
+  });
+
+  test("scanning to log in is offered only where the device can scan", async ({ page }) => {
+    await seed(page, { __LOGGED_OUT__: true });
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: "Log In" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Scan a code to log in" })).toHaveCount(0);
+  });
+
   test("changes the password from the account menu", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "Change password" }).click();
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Account/ }).click();
+    await page
+      .getByRole("dialog", { name: "Account" })
+      .getByRole("button", { name: "Change password" })
+      .click();
     const dialog = page.getByRole("dialog", { name: "Change password" });
 
     await dialog.getByLabel("Current password").fill("not my password");
@@ -383,8 +457,12 @@ test.describe("Account", () => {
 
   test("makes a new recovery key from the account menu", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "New recovery key" }).click();
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Account/ }).click();
+    await page
+      .getByRole("dialog", { name: "Account" })
+      .getByRole("button", { name: "New recovery key" })
+      .click();
     const dialog = page.getByRole("dialog", { name: "New recovery key" });
 
     await dialog.getByLabel("Password").fill("not my password");
@@ -418,11 +496,15 @@ test.describe("Account", () => {
     await page.getByLabel("Username").fill("alice");
     await page.getByLabel("Password").fill(MOCK_PASSWORD);
     await page.getByRole("button", { name: "Log In" }).click();
-    await page.getByRole("button", { name: "Account" }).click();
-    await expect(page.getByRole("menu")).toContainText("relay.example.com");
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Account/ }).click();
+    await expect(page.getByRole("dialog", { name: "Account" })).toContainText("relay.example.com");
 
     // It's remembered for the next login, with a way back to the default.
-    await page.getByRole("menuitem", { name: "Log out" }).click();
+    await page
+      .getByRole("dialog", { name: "Account" })
+      .getByRole("button", { name: "Log out" })
+      .click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Log Out" }).click();
     await expect(page.getByText("Server: relay.example.com")).toBeVisible();
     await page.getByRole("button", { name: "Change server" }).click();
@@ -447,8 +529,12 @@ test.describe("Account", () => {
   test("warns before logging out with changes not uploaded", async ({ page }) => {
     await seed(page, { __SEED_GROUPS__: [tripGroup], __UNSYNCED__: true });
     await page.goto("/");
-    await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "Log out" }).click();
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Account/ }).click();
+    await page
+      .getByRole("dialog", { name: "Account" })
+      .getByRole("button", { name: "Log out" })
+      .click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Log Out" }).click();
 
     const warning = page.getByRole("alertdialog");

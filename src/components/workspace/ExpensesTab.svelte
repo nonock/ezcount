@@ -16,13 +16,14 @@
   import * as Empty from "@/components/ui/empty";
   import * as Item from "@/components/ui/item";
   import { deleteExpense } from "@/lib/actions";
+  import { t } from "@/lib/i18n/index.svelte";
   import { paidCurrency } from "@/lib/split";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { memberTone } from "@/lib/tones";
   import type { Expense, Group } from "@/types";
   import {
-    formatDate,
+    expenseTitle,
     formatDateGroupHeader,
     formatMoney,
     getLocalDateKey,
@@ -40,7 +41,7 @@
   }
 
   const names = $derived(new Map(group.participants.map((p) => [p.id, p.name])));
-  const nameOf = (id: string | undefined) => (id && names.get(id)) || "Unknown";
+  const nameOf = (id: string | undefined) => (id && names.get(id)) || t("common.unknown");
 
   const hasOutstandingDebt = $derived(
     group.expenses.length > 0 && openGroup.settlements.length > 0
@@ -101,26 +102,28 @@
     return Array.from(map.values());
   });
 
-  const totalCents = $derived(group.expenses.reduce((sum, e) => sum + e.amount_cents, 0));
+  // An expense shared equally by everyone is the usual case: only the others list who shares.
+  const activeIds = $derived(group.participants.filter((p) => !p.removed).map((p) => p.id));
+  const isForEveryone = (e: Expense) =>
+    e.splits.length === activeIds.length &&
+    e.splits.every(
+      (s) =>
+        s.fixed_cents == null &&
+        s.shares === e.splits[0].shares &&
+        activeIds.includes(s.participant_id)
+    );
 </script>
 
 <!-- On phones, room below the list for the floating Add Expense button. -->
 <div class="space-y-5 max-sm:pb-16">
-  <div class="flex flex-wrap items-center justify-between gap-3">
-    <div>
-      <h2 class="flex items-center gap-2 font-semibold">
-        Transaction History <Badge variant="soft">{group.expenses.length}</Badge>
-      </h2>
-      <p class="text-sm text-muted-foreground">
-        Total recorded volume: <Amount cents={totalCents} currency={group.currency} />
-      </p>
-    </div>
-
+  <!-- The count is on the tab and the total in the group's header: only the actions here. -->
+  <div class="flex items-center justify-end gap-3">
+    <h2 class="sr-only">{t("expenses.heading")}</h2>
     <div class="flex items-center gap-2">
       {#if hasOutstandingDebt}
         <Button variant="outline" onclick={() => dialogs.openReimburse()}>
           <CheckIcon data-icon="inline-start" />
-          Reimburse
+          {t("expenses.reimburse")}
         </Button>
       {/if}
       <!-- On phones, floating above the bottom bar, within reach of the thumb. -->
@@ -129,7 +132,7 @@
         class="max-sm:fixed max-sm:right-4 max-sm:bottom-[calc(5rem+env(safe-area-inset-bottom))] max-sm:z-30 max-sm:h-12 max-sm:rounded-full max-sm:px-5 max-sm:text-base max-sm:shadow-lg"
       >
         <PlusIcon data-icon="inline-start" />
-        Add Expense
+        {t("expenses.add")}
       </Button>
     </div>
   </div>
@@ -138,15 +141,15 @@
     <Empty.Root class="border border-dashed">
       <Empty.Header>
         <Empty.Media variant="icon"><ReceiptTextIcon /></Empty.Media>
-        <Empty.Title>No expenses recorded yet</Empty.Title>
+        <Empty.Title>{t("expenses.empty")}</Empty.Title>
         <Empty.Description>
-          Add your first shared expense or bill to start calculating fair balances.
+          {t("expenses.emptyHelp")}
         </Empty.Description>
       </Empty.Header>
       <Empty.Content>
-        <Button variant="outline" onclick={() => dialogs.openExpense()}>
+        <Button onclick={() => dialogs.openExpense()} class="max-sm:hidden">
           <PlusIcon data-icon="inline-start" />
-          Add First Expense
+          {t("expenses.addFirst")}
         </Button>
       </Empty.Content>
     </Empty.Root>
@@ -156,10 +159,9 @@
     <section aria-labelledby={`date-header-${dg.dateKey}`} class="space-y-2">
       <div id={`date-header-${dg.dateKey}`} class="flex items-center justify-between px-1 text-sm">
         <span>
-          <span class="font-medium">{dg.displayDate}</span>
+          <span class="font-semibold">{dg.displayDate}</span>
           <span class="text-muted-foreground">
-            · {dg.items.length}
-            {dg.items.length === 1 ? "transaction" : "transactions"}
+            · {t("expenses.count", dg.items.length)}
           </span>
         </span>
         {#if dg.totalCents > 0}
@@ -167,19 +169,19 @@
         {/if}
       </div>
 
-      <ul class="space-y-2">
+      <ul class="divide-y overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
         {#each dg.items as e (e.id)}
           {@const isReimbursement = Boolean(e.is_reimbursement)}
           {@const editCount = e.history?.length ?? 0}
           {@const totalShares = e.splits.reduce((sum, s) => sum + s.shares, 0)}
           {@const anyFixed = e.splits.some((s) => s.fixed_cents != null)}
           <li data-testid="expense-item">
-            <Item.Root variant="outline" class="items-start sm:items-center">
+            <Item.Root class="items-start rounded-none sm:items-center">
               <Item.Media>
                 <Avatar.Root>
                   <Avatar.Fallback
                     class={isReimbursement
-                      ? "bg-positive/15 text-positive"
+                      ? "bg-positive-soft text-positive"
                       : memberTone(group, e.paid_by)}
                   >
                     {#if isReimbursement}
@@ -193,52 +195,59 @@
 
               <Item.Content class="min-w-0">
                 <Item.Title class="flex-wrap">
-                  <h3 class="truncate">{e.title}</h3>
+                  <h3 class="truncate font-normal">{expenseTitle(e)}</h3>
                   {#if isReimbursement}
-                    <Badge variant="outline" class="text-positive">Reimbursement</Badge>
+                    <Badge variant="outline" class="text-positive"
+                      >{t("expenses.reimbursement")}</Badge
+                    >
                   {/if}
                   {#if editCount > 0}
                     <button
                       type="button"
                       class={badgeVariants({ variant: "secondary" })}
                       onclick={() => (dialogs.history = e)}
-                      aria-label={`Edited (${editCount}): View revision history for ${e.title}`}
+                      aria-label={t("expenses.editedLabel", editCount, expenseTitle(e))}
                     >
                       <HistoryIcon />
-                      Edited ({editCount})
+                      {t("expenses.edited", editCount)}
                     </button>
                   {/if}
                 </Item.Title>
 
                 {#if isReimbursement}
                   <Item.Description class="flex items-center gap-1">
-                    <span>Paid by</span>
-                    <span class="font-medium text-foreground">{nameOf(e.paid_by)}</span>
+                    <span>{t("common.paidBy")}</span>
+                    <span class="text-foreground">{nameOf(e.paid_by)}</span>
                     <ArrowRightIcon class="size-3.5" aria-hidden="true" />
-                    <span class="sr-only">to</span>
-                    <span class="font-medium text-foreground">
+                    <span class="sr-only">{t("expenses.to")}</span>
+                    <span class="text-foreground">
                       {nameOf(e.splits[0]?.participant_id)}
                     </span>
                   </Item.Description>
                 {:else}
                   <Item.Description>
-                    Paid by <span class="font-medium text-foreground">{nameOf(e.paid_by)}</span>
+                    {t("common.paidBy")}
+                    <span class="text-foreground">{nameOf(e.paid_by)}</span>
+                    {#if isForEveryone(e)}
+                      · {t("expenses.forEveryone")}
+                    {/if}
                   </Item.Description>
-                  <ul class="flex flex-wrap gap-1 pt-1" aria-label="Split between">
-                    {#each e.splits as s (s.participant_id)}
-                      <li>
-                        <Badge variant="secondary" class={memberTone(group, s.participant_id)}>
-                          {nameOf(s.participant_id)}{s.fixed_cents != null
-                            ? ` ${formatMoney(s.fixed_cents, paidCurrency(e, group.currency))}`
-                            : s.shares > 1
-                              ? ` ×${s.shares}`
-                              : ""}
-                        </Badge>
-                      </li>
-                    {/each}
-                  </ul>
+                  {#if !isForEveryone(e)}
+                    <ul class="flex flex-wrap gap-1 pt-1" aria-label={t("common.splitBetween")}>
+                      {#each e.splits as s (s.participant_id)}
+                        <li>
+                          <Badge variant="secondary" class="font-normal">
+                            {nameOf(s.participant_id)}{s.fixed_cents != null
+                              ? ` ${formatMoney(s.fixed_cents, paidCurrency(e, group.currency))}`
+                              : s.shares > 1
+                                ? ` ×${s.shares}`
+                                : ""}
+                          </Badge>
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
                 {/if}
-                <span class="text-xs text-muted-foreground">{formatDate(e.created_at)}</span>
               </Item.Content>
 
               <Item.Actions>
@@ -247,7 +256,7 @@
                     cents={e.amount_cents}
                     currency={group.currency}
                     tone={isReimbursement ? "positive" : "neutral"}
-                    class="block font-semibold"
+                    class="block text-base font-semibold"
                   />
                   {#if e.original}
                     <span class="block text-xs text-muted-foreground tabular-nums">
@@ -256,7 +265,7 @@
                   {:else if !isReimbursement && !anyFixed}
                     <span class="block text-xs text-muted-foreground tabular-nums">
                       {formatMoney(Math.floor(e.amount_cents / (totalShares || 1)), group.currency)}
-                      / part
+                      {t("expenses.perPart")}
                     </span>
                   {/if}
                 </div>
@@ -267,7 +276,7 @@
                         {...props}
                         variant="ghost"
                         size="icon"
-                        aria-label={`Actions for ${e.title}`}
+                        aria-label={t("expenses.actions", expenseTitle(e))}
                       >
                         <EllipsisIcon />
                       </Button>
@@ -276,18 +285,18 @@
                   <DropdownMenu.Content align="end">
                     <DropdownMenu.Item onSelect={() => dialogs.openExpense(e)}>
                       <PencilIcon />
-                      Edit
+                      {t("common.edit")}
                     </DropdownMenu.Item>
                     {#if editCount > 0}
                       <DropdownMenu.Item onSelect={() => (dialogs.history = e)}>
                         <HistoryIcon />
-                        View history
+                        {t("expenses.viewHistory")}
                       </DropdownMenu.Item>
                     {/if}
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item variant="destructive" onSelect={() => deleteExpense(e.id)}>
                       <TrashIcon />
-                      Delete
+                      {t("common.delete")}
                     </DropdownMenu.Item>
                   </DropdownMenu.Content>
                 </DropdownMenu.Root>
@@ -302,15 +311,15 @@
   {#if hasMore}
     <div bind:this={sentinel} class="text-center">
       <Button variant="outline" onclick={loadMore}>
-        Load 10 more transactions
-        <span class="text-muted-foreground">({remainingCount} remaining)</span>
+        {t("expenses.loadMore", PAGE_SIZE)}
+        <span class="text-muted-foreground">{t("expenses.remaining", remainingCount)}</span>
       </Button>
     </div>
   {/if}
 
   {#if sortedExpenses.length > PAGE_SIZE}
     <p class="text-center text-xs text-muted-foreground">
-      Showing {visibleExpenses.length} of {sortedExpenses.length} transactions
+      {t("expenses.showing", visibleExpenses.length, sortedExpenses.length)}
     </p>
   {/if}
 </div>

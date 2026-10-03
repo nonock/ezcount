@@ -62,6 +62,7 @@ export const MOCK_SERVER = "http://localhost:8787";
  * - `__NATIVE__`: `{ share, scan }` features, none by default; shared texts land in
  *   `window.__shared`
  * - `__SCANNED__`: what the camera "scans"
+ * - `__LINK_SECONDS__`: how long a login link works, 120 by default
  * - `__RATES__`: exchange rates the relay suggests, as `{ "USD/EUR": "0.9234" }`
  * - `__STORAGE_WARNINGS__`
  */
@@ -426,6 +427,32 @@ export function installTauriMock() {
           requireAccount();
           if (args.password !== password) throw new Error("Wrong password");
           return nextRecoveryKey();
+        }
+
+        case "create_login_link": {
+          const acc = requireAccount();
+          if (args.password !== password) throw new Error("Wrong password");
+          return {
+            link: `ezcount://login?server=${encodeURIComponent(acc.server_url)}&code=mock-code`,
+            expires_in: w.__LINK_SECONDS__ ?? 120,
+          };
+        }
+
+        case "log_in_with_link": {
+          if (getAccount()) throw new Error("This device is already logged in");
+          const link = String(args.link);
+          if (!link.startsWith("ezcount://login?")) {
+            throw new Error("This is not an ezcount login code");
+          }
+          const params = new URL(link.replace("ezcount://", "https://")).searchParams;
+          if (params.get("code") !== "mock-code") {
+            throw new Error(
+              "This code has expired or was already used. Show a new one and scan it."
+            );
+          }
+          account = { username: "alice", server_url: params.get("server") || "", identities: {} };
+          groups = [];
+          return clone(account);
         }
 
         case "log_out": {

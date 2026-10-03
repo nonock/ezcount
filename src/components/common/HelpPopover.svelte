@@ -3,6 +3,7 @@
   import type { Snippet } from "svelte";
   import { Button } from "@/components/ui/button";
   import * as Popover from "@/components/ui/popover";
+  import { t } from "@/lib/i18n/index.svelte";
 
   /** A "?" button that explains something in a popover, instead of text always on screen. */
   let { title, children }: { title: string; children: Snippet } = $props();
@@ -15,7 +16,7 @@
         {...props}
         variant="ghost"
         size="icon-sm"
-        aria-label={`About ${title.toLowerCase()}`}
+        aria-label={t("common.about", title)}
         class="text-muted-foreground"
       >
         <CircleHelpIcon />

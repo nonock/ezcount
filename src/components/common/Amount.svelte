@@ -1,6 +1,6 @@
 <script lang="ts">
   import { cn } from "@/lib/utils";
-  import { formatMoney } from "@/utils/formatters";
+  import { moneyParts } from "@/utils/formatters";
 
   interface Props {
     cents: number;
@@ -19,8 +19,10 @@
         ? "text-negative"
         : undefined
   );
+  const parts = $derived(moneyParts(cents, currency, tone === "balance"));
 </script>
 
-<span class={cn("tabular-nums", color, className)}
-  >{tone === "balance" && cents > 0 ? "+" : ""}{formatMoney(cents, currency)}</span
+<!-- The cents are smaller, so the eye lands on the whole amount first. -->
+<span class={cn("whitespace-nowrap tabular-nums", color, className)}
+  >{parts.before}<span class="text-[0.8em]">{parts.cents}</span>{parts.after}</span
 >

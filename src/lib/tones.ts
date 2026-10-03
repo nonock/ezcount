@@ -10,5 +10,5 @@ const TONES = 5;
  */
 export function memberTone(group: Group, participantId: string | undefined): string {
   const index = group.participants.findIndex((p) => p.id === participantId);
-  return index < 0 ? "" : `tone-${index % TONES} bg-(--tone)/15 text-(--tone-text)`;
+  return index < 0 ? "" : `tone-${index % TONES} bg-(--tone-fill) text-(--tone-text)`;
 }

@@ -3,6 +3,7 @@ import type {
   AccountInfo,
   ExpenseSplit,
   Group,
+  LoginLink,
   NativeFeatures,
   OriginalAmount,
   ParticipantBalance,
@@ -174,6 +175,19 @@ export const api = {
   /** Replaces the recovery key; the old one stops working. */
   async replaceRecoveryKey(password: string): Promise<string> {
     return unwrap(await commands.replaceRecoveryKey(password));
+  },
+
+  /**
+   * A link that logs another device into the account, to show as a QR code. It works once,
+   * for `expires_in` seconds.
+   */
+  async createLoginLink(password: string): Promise<LoginLink> {
+    return unwrap(await commands.createLoginLink(password));
+  },
+
+  /** Logs in with a link scanned from a device that is logged in already. */
+  async logInWithLink(link: string): Promise<AccountInfo> {
+    return unwrap(await commands.logInWithLink(link));
   },
 
   async logIn(serverUrl: string, username: string, password: string): Promise<AccountInfo> {

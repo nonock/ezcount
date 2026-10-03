@@ -8,6 +8,7 @@
   import * as Field from "@/components/ui/field";
   import { Input } from "@/components/ui/input";
   import { Spinner } from "@/components/ui/spinner";
+  import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { session } from "@/lib/state/session.svelte";
   import { api } from "@/services/api";
@@ -37,14 +38,14 @@
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
     if (next !== confirm) {
-      error = "The new passwords don't match.";
+      error = t("password.mismatch");
       return;
     }
     submitting = true;
     error = null;
     try {
       await api.changePassword(current, next);
-      toast.success("Password changed");
+      toast.success(t("password.changed"));
       dialogs.changePassword = false;
     } catch (err) {
       error = errorMessage(err);
@@ -57,15 +58,13 @@
 <Dialog.Root bind:open={dialogs.changePassword}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Change password</Dialog.Title>
-      <Dialog.Description>
-        Your other devices stay logged in. Your recovery key keeps working.
-      </Dialog.Description>
+      <Dialog.Title>{t("password.title")}</Dialog.Title>
+      <Dialog.Description>{t("password.intro")}</Dialog.Description>
     </Dialog.Header>
     <form onsubmit={handleSubmit}>
       <Field.Group>
         <Field.Field>
-          <Field.Label for="current-password">Current password</Field.Label>
+          <Field.Label for="current-password">{t("password.current")}</Field.Label>
           <Input
             id="current-password"
             type="password"
@@ -75,7 +74,7 @@
           />
         </Field.Field>
         <Field.Field>
-          <Field.Label for="new-password">New password</Field.Label>
+          <Field.Label for="new-password">{t("auth.newPassword")}</Field.Label>
           <Input
             id="new-password"
             type="password"
@@ -90,7 +89,7 @@
           {/if}
         </Field.Field>
         <Field.Field>
-          <Field.Label for="confirm-new-password">Confirm new password</Field.Label>
+          <Field.Label for="confirm-new-password">{t("auth.confirmNewPassword")}</Field.Label>
           <Input
             id="confirm-new-password"
             type="password"
@@ -106,14 +105,14 @@
       <Dialog.Footer class="mt-6">
         <Dialog.Close>
           {#snippet child({ props })}
-            <Button {...props} variant="outline">Cancel</Button>
+            <Button {...props} variant="outline">{t("common.cancel")}</Button>
           {/snippet}
         </Dialog.Close>
         <Button type="submit" disabled={submitting || !strength.current?.acceptable}>
           {#if submitting}
             <Spinner data-icon="inline-start" />
           {/if}
-          Change Password
+          {t("password.submit")}
         </Button>
       </Dialog.Footer>
     </form>

@@ -7,8 +7,8 @@ mod share;
 
 use chrono::{DateTime, Utc};
 use ezcount_core::models::{
-    AccountInfo, ExpenseSplit, Group, NativeFeatures, OriginalAmount, ParticipantBalance,
-    PasswordStrength, SettlementTransfer, SignedIn, SyncInfo,
+    AccountInfo, ExpenseSplit, Group, LoginLink, NativeFeatures, OriginalAmount,
+    ParticipantBalance, PasswordStrength, SettlementTransfer, SignedIn, SyncInfo,
 };
 use ezcount_core::storage::Store;
 use ezcount_core::{api, AppState};
@@ -303,6 +303,24 @@ async fn log_in(
     api::log_in(&state, &server_url, &username, &password).await
 }
 
+/// A link that logs another device into the account, once and for a short time. Shown as a
+/// QR code.
+#[tauri::command]
+#[specta::specta]
+async fn create_login_link(
+    state: State<'_, AppState>,
+    password: String,
+) -> Result<LoginLink, String> {
+    api::create_login_link(&state, &password).await
+}
+
+/// Logs in with a link made by `create_login_link` on another device.
+#[tauri::command]
+#[specta::specta]
+async fn log_in_with_link(state: State<'_, AppState>, link: String) -> Result<AccountInfo, String> {
+    api::log_in_with_link(&state, &link).await
+}
+
 /// Removes the account and its groups from this device. Fails while changes are not uploaded,
 /// unless `force` is set.
 #[tauri::command]
@@ -391,7 +409,9 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         password_strength,
         recover_account,
         change_password,
-        replace_recovery_key
+        replace_recovery_key,
+        create_login_link,
+        log_in_with_link
     ])
 }
 

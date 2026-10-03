@@ -4,6 +4,7 @@
   import { Button } from "@/components/ui/button";
   import { Calendar } from "@/components/ui/calendar";
   import * as Popover from "@/components/ui/popover";
+  import { i18n, t } from "@/lib/i18n/index.svelte";
 
   interface Props {
     id: string;
@@ -28,7 +29,7 @@
   /** First day of the week for the user's locale (0 = Sunday), Monday if unknown. */
   function firstDayOfWeek(): 0 | 1 | 2 | 3 | 4 | 5 | 6 {
     try {
-      const locale = new Intl.Locale(navigator.language) as Intl.Locale & {
+      const locale = new Intl.Locale(i18n.locale) as Intl.Locale & {
         getWeekInfo?: () => { firstDay: number };
         weekInfo?: { firstDay: number };
       };
@@ -53,8 +54,8 @@
       >
         <CalendarIcon data-icon="inline-start" class="text-muted-foreground" />
         {date
-          ? date.toDate(getLocalTimeZone()).toLocaleDateString(undefined, { dateStyle: "medium" })
-          : "Pick a date"}
+          ? date.toDate(getLocalTimeZone()).toLocaleDateString(i18n.locale, { dateStyle: "medium" })
+          : t("date.pick")}
       </Button>
     {/snippet}
   </Popover.Trigger>
@@ -64,7 +65,7 @@
       value={date}
       placeholder={date}
       weekStartsOn={firstDayOfWeek()}
-      locale={navigator.language}
+      locale={i18n.locale}
       class="[--cell-size:--spacing(9)] sm:[--cell-size:--spacing(7)]"
       onValueChange={(picked) => {
         if (!picked) return;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import KeyRoundIcon from "@lucide/svelte/icons/key-round";
+  import ScanQrCodeIcon from "@lucide/svelte/icons/scan-qr-code";
   import { toast } from "svelte-sonner";
   import LogoMark from "@/components/common/LogoMark.svelte";
   import Wordmark from "@/components/common/Wordmark.svelte";
@@ -10,8 +11,12 @@
   import { Input } from "@/components/ui/input";
   import { Spinner } from "@/components/ui/spinner";
   import * as Tabs from "@/components/ui/tabs";
+  import { i18n, LANGUAGES, t } from "@/lib/i18n/index.svelte";
+  import { dialogs } from "@/lib/state/dialogs.svelte";
   import type { NewRecoveryKey } from "@/lib/state/session.svelte";
+  import { cn } from "@/lib/utils";
   import { api } from "@/services/api";
+  import { nativeFeatures, ScanCancelled, scanQrCode } from "@/services/native.svelte";
   import type { AccountInfo } from "@/types";
   import { errorMessage } from "@/utils/errors";
   import { serverName } from "@/utils/formatters";
@@ -53,14 +58,11 @@
     }
   }
 
-  const TITLES: Record<Mode, [string, string]> = {
-    login: ["Welcome back", "Log in to get your groups on this device."],
-    signup: ["Create your account", "One account for your phone, your computer and every group."],
-    recover: [
-      "Reset your password",
-      "Use the recovery key you saved when you created your account.",
-    ],
-  };
+  const TITLES = {
+    login: ["auth.loginTitle", "auth.loginIntro"],
+    signup: ["auth.signupTitle", "auth.signupIntro"],
+    recover: ["auth.recoverTitle", "auth.recoverIntro"],
+  } as const;
 
   let mode = $state<Mode>("login");
   let username = $state("");
@@ -76,7 +78,7 @@
   // Signing up and recovering both choose a new password, rated as the user types.
   const newPassword = $derived(mode !== "login");
   const strength = ratePassword(() => ({ password, username, enabled: newPassword }));
-  const [title, description] = $derived(TITLES[mode]);
+  const [title, description] = $derived(TITLES[mode].map((key) => t(key)));
 
   function switchMode(next: Mode) {
     mode = next;
@@ -85,10 +87,35 @@
     confirmPassword = "";
   }
 
+  /** Logs in with the code another device of the account shows (its menu: Connect a device). */
+  async function scanToLogIn() {
+    error = null;
+    dialogs.scanning = true;
+    let link: string;
+    try {
+      link = await scanQrCode();
+    } catch (err) {
+      if (!(err instanceof ScanCancelled)) error = errorMessage(err);
+      return;
+    } finally {
+      dialogs.scanning = false;
+    }
+    submitting = true;
+    try {
+      const account = await api.logInWithLink(link);
+      rememberServer(account.server_url);
+      onAuthenticated(account);
+    } catch (err) {
+      error = errorMessage(err);
+    } finally {
+      submitting = false;
+    }
+  }
+
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
     if (newPassword && password !== confirmPassword) {
-      error = "The passwords don't match.";
+      error = t("auth.mismatch");
       return;
     }
     submitting = true;
@@ -109,9 +136,8 @@
       if (!signedIn.recovery_key) {
         // A relay from before recovery keys: say so, rather than leave the user thinking they
         // have a way back in.
-        toast.warning("Your account has no recovery key", {
-          description:
-            "This server can't store recovery keys yet, so a forgotten password can't be reset. Once the server is updated, create one from the account menu: New recovery key.",
+        toast.warning(t("auth.noRecoveryKey"), {
+          description: t("auth.noRecoveryKeyHelp"),
           duration: Number.POSITIVE_INFINITY,
           closeButton: true,
         });
@@ -148,8 +174,8 @@
         {#if mode !== "recover"}
           <Tabs.Root value={mode} onValueChange={(value) => switchMode(value as Mode)}>
             <Tabs.List class="w-full">
-              <Tabs.Trigger value="login">Log in</Tabs.Trigger>
-              <Tabs.Trigger value="signup">Sign up</Tabs.Trigger>
+              <Tabs.Trigger value="login">{t("auth.logInTab")}</Tabs.Trigger>
+              <Tabs.Trigger value="signup">{t("auth.signUpTab")}</Tabs.Trigger>
             </Tabs.List>
           </Tabs.Root>
         {/if}
@@ -157,7 +183,7 @@
         <form onsubmit={handleSubmit}>
           <Field.Group>
             <Field.Field>
-              <Field.Label for="input-username">Username</Field.Label>
+              <Field.Label for="input-username">{t("auth.username")}</Field.Label>
               <Input
                 id="input-username"
                 required
@@ -170,7 +196,7 @@
             </Field.Field>
             {#if mode === "recover"}
               <Field.Field>
-                <Field.Label for="input-recovery-key">Recovery key</Field.Label>
+                <Field.Label for="input-recovery-key">{t("auth.recoveryKey")}</Field.Label>
                 <Input
                   id="input-recovery-key"
                   required
@@ -187,7 +213,7 @@
             <Field.Field>
               <div class="flex items-baseline justify-between gap-2">
                 <Field.Label for="input-password">
-                  {mode === "recover" ? "New password" : "Password"}
+                  {mode === "recover" ? t("auth.newPassword") : t("common.password")}
                 </Field.Label>
                 {#if mode === "login"}
                   <button
@@ -195,7 +221,7 @@
                     class="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
                     onclick={() => switchMode("recover")}
                   >
-                    Forgot password?
+                    {t("auth.forgot")}
                   </button>
                 {/if}
               </div>
@@ -215,7 +241,7 @@
             {#if newPassword}
               <Field.Field>
                 <Field.Label for="input-confirm-password">
-                  {mode === "recover" ? "Confirm new password" : "Confirm password"}
+                  {mode === "recover" ? t("auth.confirmNewPassword") : t("auth.confirmPassword")}
                 </Field.Label>
                 <Input
                   id="input-confirm-password"
@@ -228,7 +254,7 @@
             {/if}
             {#if editingServer}
               <Field.Field>
-                <Field.Label for="input-server">Server</Field.Label>
+                <Field.Label for="input-server">{t("common.server")}</Field.Label>
                 <Input
                   id="input-server"
                   type="url"
@@ -238,14 +264,14 @@
                   class="font-mono text-sm"
                 />
                 <Field.Description>
-                  Only for a relay you run yourself. Your account and groups live on it.
+                  {t("auth.serverHelp")}
                   {#if serverUrl.trim() !== DEFAULT_SERVER}
                     <button
                       type="button"
                       class="underline underline-offset-4 hover:text-foreground"
                       onclick={() => (serverUrl = DEFAULT_SERVER)}
                     >
-                      Use the default server
+                      {t("auth.defaultServer")}
                     </button>
                   {/if}
                 </Field.Description>
@@ -256,8 +282,7 @@
               <Alert.Root>
                 <KeyRoundIcon />
                 <Alert.Description>
-                  Nobody can reset your password, not even the server. You'll get a recovery key
-                  next: it's the way back in if you forget it.
+                  {t("auth.signupNote")}
                 </Alert.Description>
               </Alert.Root>
             {/if}
@@ -275,28 +300,36 @@
                 <Spinner data-icon="inline-start" />
               {/if}
               {mode === "login"
-                ? "Log In"
+                ? t("auth.logIn")
                 : mode === "signup"
-                  ? "Create Account"
-                  : "Reset Password"}
+                  ? t("auth.createAccount")
+                  : t("auth.resetPassword")}
             </Button>
+
+            {#if mode === "login" && nativeFeatures.scan}
+              <Button type="button" variant="outline" disabled={submitting} onclick={scanToLogIn}>
+                <ScanQrCodeIcon data-icon="inline-start" />
+                {t("auth.scan")}
+              </Button>
+              <Field.Description class="text-center">{t("auth.scanHelp")}</Field.Description>
+            {/if}
 
             {#if mode === "recover"}
               <Button type="button" variant="ghost" onclick={() => switchMode("login")}>
-                Back to log in
+                {t("auth.backToLogin")}
               </Button>
             {/if}
 
             {#if !editingServer}
               <p class="text-center text-sm text-muted-foreground">
-                Server: <span class="font-mono">{serverName(serverUrl)}</span> ·
+                {t("common.server")}: <span class="font-mono">{serverName(serverUrl)}</span> ·
                 <button
                   type="button"
                   class="underline underline-offset-4 hover:text-foreground"
                   onclick={() => (editingServer = true)}
-                  aria-label="Change server"
+                  aria-label={t("auth.changeServer")}
                 >
-                  Change
+                  {t("common.change")}
                 </button>
               </p>
             {/if}
@@ -304,5 +337,23 @@
         </form>
       </Card.Content>
     </Card.Root>
+
+    <!-- Before logging in there is no menu to pick the language from. -->
+    <div class="flex justify-center gap-4 text-sm text-muted-foreground">
+      {#each LANGUAGES as language (language.code)}
+        <button
+          type="button"
+          lang={language.code}
+          aria-pressed={i18n.language === language.code}
+          class={cn(
+            "underline-offset-4 hover:text-foreground hover:underline",
+            i18n.language === language.code && "font-medium text-foreground"
+          )}
+          onclick={() => i18n.choose(language.code)}
+        >
+          {language.name}
+        </button>
+      {/each}
+    </div>
   </div>
 </main>

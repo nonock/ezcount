@@ -1,10 +1,12 @@
 <script lang="ts">
+  import UserMinusIcon from "@lucide/svelte/icons/user-minus";
   import { untrack } from "svelte";
   import { Button } from "@/components/ui/button";
   import * as Dialog from "@/components/ui/dialog";
   import * as Field from "@/components/ui/field";
   import { Input } from "@/components/ui/input";
   import { Spinner } from "@/components/ui/spinner";
+  import { t } from "@/lib/i18n/index.svelte";
   import type { Participant } from "@/types";
   import { errorMessage } from "@/utils/errors";
 
@@ -13,10 +15,12 @@
     /** The member to rename; adds a new one when absent. */
     member?: Participant | null;
     onSubmit: (name: string) => Promise<void>;
+    /** Removes `member` from the group; offered next to renaming. */
+    onRemove?: () => void;
   }
 
   /** Adds a member to the group, or renames one. */
-  let { open = $bindable(), member = null, onSubmit }: Props = $props();
+  let { open = $bindable(), member = null, onSubmit, onRemove }: Props = $props();
 
   let name = $state("");
   let submitting = $state(false);
@@ -51,34 +55,52 @@
 <Dialog.Root bind:open>
   <Dialog.Content class="sm:max-w-sm">
     <Dialog.Header>
-      <Dialog.Title>{member ? `Rename ${member.name}` : "Add Group Member"}</Dialog.Title>
+      <Dialog.Title
+        >{member ? t("group.renameMember", member.name) : t("member.addTitle")}</Dialog.Title
+      >
       <Dialog.Description>
-        {member
-          ? "Their expenses and payments show the new name too."
-          : "They can be included in expenses right away."}
+        {member ? t("member.renameIntro") : t("member.addIntro")}
       </Dialog.Description>
     </Dialog.Header>
     <form onsubmit={handleSubmit}>
       <Field.Group>
         <Field.Field>
-          <Field.Label for="input-member-name">Name</Field.Label>
-          <Input id="input-member-name" required bind:value={name} placeholder="e.g. David" />
+          <Field.Label for="input-member-name">{t("common.name")}</Field.Label>
+          <Input
+            id="input-member-name"
+            required
+            bind:value={name}
+            placeholder={t("member.placeholder")}
+          />
         </Field.Field>
         {#if error}
           <Field.Error>{error}</Field.Error>
         {/if}
       </Field.Group>
       <Dialog.Footer class="mt-6">
+        {#if member && onRemove}
+          <Button
+            variant="ghost"
+            class="text-destructive sm:mr-auto"
+            onclick={() => {
+              open = false;
+              onRemove();
+            }}
+          >
+            <UserMinusIcon data-icon="inline-start" />
+            {t("member.remove")}
+          </Button>
+        {/if}
         <Dialog.Close>
           {#snippet child({ props })}
-            <Button {...props} variant="outline">Cancel</Button>
+            <Button {...props} variant="outline">{t("common.cancel")}</Button>
           {/snippet}
         </Dialog.Close>
         <Button type="submit" disabled={submitting}>
           {#if submitting}
             <Spinner data-icon="inline-start" />
           {/if}
-          {member ? "Rename" : "Add to Group"}
+          {member ? t("common.rename") : t("member.add")}
         </Button>
       </Dialog.Footer>
     </form>

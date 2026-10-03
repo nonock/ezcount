@@ -12,6 +12,8 @@
   import * as Field from "@/components/ui/field";
   import { Spinner } from "@/components/ui/spinner";
   import { Textarea } from "@/components/ui/textarea";
+  import { backendText } from "@/lib/i18n/backend";
+  import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { api } from "@/services/api";
@@ -45,16 +47,16 @@
     if (!invite) return;
     try {
       await navigator.clipboard.writeText(invite);
-      toast.success("Invite link copied");
+      toast.success(t("share.copied"));
     } catch {
       document.getElementById("share-invite-code")?.focus();
-      toast.info("Select the link and copy it manually");
+      toast.info(t("share.copyManually"));
     }
   }
 
   async function handleShare() {
     if (!invite) return;
-    const title = `Join "${group.name}" on ezcount`;
+    const title = t("share.message", group.name);
     try {
       if (nativeFeatures.share) {
         await api.shareText(`${title}: ${invite}`, title);
@@ -64,7 +66,7 @@
     } catch (err) {
       // Closing the browser's share sheet without picking an app rejects too.
       if (err instanceof DOMException && err.name === "AbortError") return;
-      toast.error("Could not share the invite", { description: errorMessage(err) });
+      toast.error(t("share.failed"), { description: errorMessage(err) });
     }
   }
 </script>
@@ -72,27 +74,20 @@
 <Dialog.Root bind:open={dialogs.share}>
   <Dialog.Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Invite to Group</Dialog.Title>
-      <Dialog.Description>
-        Send this link to the people you want in "{group.name}", or let them scan the code from
-        ezcount's Join with Code. Everyone can edit, even offline.
-      </Dialog.Description>
+      <Dialog.Title>{t("share.title")}</Dialog.Title>
+      <Dialog.Description>{t("share.intro", group.name)}</Dialog.Description>
     </Dialog.Header>
 
     {#if !invite || !qrCode}
       <div class="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
         <Spinner />
-        Loading…
+        {t("common.loading")}
       </div>
     {:else}
       <Field.Group>
-        <img
-          src={qrCode}
-          alt={`QR code of the invite to "${group.name}"`}
-          class="mx-auto size-56 rounded-lg"
-        />
+        <img src={qrCode} alt={t("share.qrAlt", group.name)} class="mx-auto size-56 rounded-lg" />
         <Field.Field>
-          <Field.Label for="share-invite-code">Invite link</Field.Label>
+          <Field.Label for="share-invite-code">{t("join.link")}</Field.Label>
           <Textarea
             id="share-invite-code"
             readonly
@@ -103,24 +98,25 @@
           />
           <Field.Description class="flex items-start gap-1.5">
             <LockIcon class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            Anyone with this link can see and edit the group, so share it only with members. Changes are
-            end-to-end encrypted: the sync server cannot read them.
+            {t("share.warning")}
           </Field.Description>
         </Field.Field>
 
         <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-          <dt class="text-muted-foreground">Server</dt>
+          <dt class="text-muted-foreground">{t("common.server")}</dt>
           <dd class="truncate text-right font-mono">{syncInfo?.server_url}</dd>
-          <dt class="text-muted-foreground">Last synced</dt>
+          <dt class="text-muted-foreground">{t("share.lastSynced")}</dt>
           <dd class="text-right">
-            {syncInfo?.last_synced_at ? formatDateTime(syncInfo.last_synced_at) : "Never"}
+            {syncInfo?.last_synced_at ? formatDateTime(syncInfo.last_synced_at) : t("share.never")}
           </dd>
         </dl>
 
         {#if syncInfo?.last_error}
           <Alert.Root variant="destructive">
             <TriangleAlertIcon />
-            <Alert.Description>Last sync failed: {syncInfo.last_error}</Alert.Description>
+            <Alert.Description>
+              {t("share.syncFailed", backendText(syncInfo.last_error))}
+            </Alert.Description>
           </Alert.Root>
         {/if}
       </Field.Group>
@@ -132,16 +128,16 @@
           {:else}
             <RefreshCwIcon data-icon="inline-start" />
           {/if}
-          Sync Now
+          {t("share.syncNow")}
         </Button>
         <Button variant={canShare ? "outline" : "default"} onclick={handleCopy}>
           <CopyIcon data-icon="inline-start" />
-          Copy Link
+          {t("share.copy")}
         </Button>
         {#if canShare}
           <Button onclick={handleShare}>
             <Share2Icon data-icon="inline-start" />
-            Share
+            {t("share.share")}
           </Button>
         {/if}
       </Dialog.Footer>

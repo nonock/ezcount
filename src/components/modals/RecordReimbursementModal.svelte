@@ -7,6 +7,7 @@
   import * as InputGroup from "@/components/ui/input-group";
   import * as Select from "@/components/ui/select";
   import { Spinner } from "@/components/ui/spinner";
+  import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { api } from "@/services/api";
@@ -42,19 +43,19 @@
 
   const nameOf = (id: string) => {
     const p = group.participants.find((x) => x.id === id);
-    return p ? `${p.name}${p.removed ? " (removed)" : ""}` : "";
+    return p ? (p.removed ? t("member.withRemoved", p.name) : p.name) : "";
   };
 
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
     if (fromId === toId) {
-      error = "The sender and recipient cannot be the same person.";
+      error = t("reimburse.samePerson");
       return;
     }
     const amountDecimal = Number.parseFloat(String(amountStr ?? ""));
     const amountCents = !Number.isNaN(amountDecimal) ? Math.round(amountDecimal * 100) : 0;
     if (amountCents <= 0) {
-      error = "Please enter an amount greater than zero.";
+      error = t("expense.needAmount");
       return;
     }
     submitting = true;
@@ -83,15 +84,15 @@
 <Dialog.Root bind:open={dialogs.reimburse.open}>
   <Dialog.Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Record Reimbursement</Dialog.Title>
-      <Dialog.Description>Record money paid back between two members.</Dialog.Description>
+      <Dialog.Title>{t("reimburse.title")}</Dialog.Title>
+      <Dialog.Description>{t("reimburse.intro")}</Dialog.Description>
     </Dialog.Header>
 
     <form onsubmit={handleSubmit}>
       <Field.Group>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field.Field>
-            <Field.Label for="select-reimburse-from">From (sender)</Field.Label>
+            <Field.Label for="select-reimburse-from">{t("reimburse.from")}</Field.Label>
             <Select.Root type="single" bind:value={fromId}>
               <Select.Trigger id="select-reimburse-from" class="w-full">
                 {nameOf(fromId)}
@@ -100,7 +101,7 @@
             </Select.Root>
           </Field.Field>
           <Field.Field>
-            <Field.Label for="select-reimburse-to">To (recipient)</Field.Label>
+            <Field.Label for="select-reimburse-to">{t("reimburse.to")}</Field.Label>
             <Select.Root type="single" bind:value={toId}>
               <Select.Trigger id="select-reimburse-to" class="w-full">
                 {nameOf(toId)}
@@ -111,7 +112,7 @@
         </div>
 
         <Field.Field>
-          <Field.Label for="input-reimburse-amount">Amount</Field.Label>
+          <Field.Label for="input-reimburse-amount">{t("common.amount")}</Field.Label>
           <InputGroup.Root>
             <InputGroup.Input
               id="input-reimburse-amount"
@@ -131,10 +132,10 @@
         </Field.Field>
 
         <Field.Field>
-          <Field.Label for="input-reimburse-notes">Note (optional)</Field.Label>
+          <Field.Label for="input-reimburse-notes">{t("reimburse.note")}</Field.Label>
           <Input
             id="input-reimburse-notes"
-            placeholder="e.g. Bank transfer, Cash"
+            placeholder={t("reimburse.notePlaceholder")}
             bind:value={notes}
           />
         </Field.Field>
@@ -147,14 +148,14 @@
       <Dialog.Footer class="mt-6">
         <Dialog.Close>
           {#snippet child({ props })}
-            <Button {...props} variant="outline">Cancel</Button>
+            <Button {...props} variant="outline">{t("common.cancel")}</Button>
           {/snippet}
         </Dialog.Close>
         <Button type="submit" disabled={submitting}>
           {#if submitting}
             <Spinner data-icon="inline-start" />
           {/if}
-          Confirm Payment
+          {t("reimburse.submit")}
         </Button>
       </Dialog.Footer>
     </form>

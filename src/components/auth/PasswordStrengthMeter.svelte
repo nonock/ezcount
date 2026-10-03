@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { backendText } from "@/lib/i18n/backend";
+  import { t } from "@/lib/i18n/index.svelte";
   import { cn } from "@/lib/utils";
   import type { PasswordStrength } from "@/types";
 
@@ -10,16 +12,18 @@
 
   // By zxcvbn score, 0 to 4. Sign-up needs 3.
   const LEVELS = [
-    { label: "Too weak", color: "bg-negative" },
-    { label: "Too weak", color: "bg-negative" },
-    { label: "Weak", color: "bg-warning" },
-    { label: "Good", color: "bg-positive" },
-    { label: "Strong", color: "bg-positive" },
-  ];
+    { label: "strength.tooWeak", color: "bg-negative" },
+    { label: "strength.tooWeak", color: "bg-negative" },
+    { label: "strength.weak", color: "bg-warning" },
+    { label: "strength.good", color: "bg-positive" },
+    { label: "strength.strong", color: "bg-positive" },
+  ] as const;
 
   const level = $derived(LEVELS[strength.score] ?? LEVELS[0]);
   // Strong enough but under the minimum length: only length is missing.
-  const label = $derived(!strength.acceptable && strength.score >= 3 ? "Too short" : level.label);
+  const label = $derived(
+    t(!strength.acceptable && strength.score >= 3 ? "strength.tooShort" : level.label)
+  );
   const color = $derived(
     strength.acceptable ? level.color : strength.score >= 3 ? "bg-warning" : level.color
   );
@@ -42,7 +46,7 @@
   <p {id} aria-live="polite" class="text-sm text-muted-foreground">
     <span class="font-medium text-foreground">{label}</span>
     {#if hint}
-      {` · ${hint}`}
+      {` · ${backendText(hint)}`}
     {/if}
   </p>
 </div>

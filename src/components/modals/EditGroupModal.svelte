@@ -6,11 +6,12 @@
   import { Input } from "@/components/ui/input";
   import * as Select from "@/components/ui/select";
   import { Spinner } from "@/components/ui/spinner";
+  import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { api } from "@/services/api";
   import type { Group } from "@/types";
-  import { CURRENCIES } from "@/utils/currencies";
+  import { CURRENCIES, currencyLabel } from "@/utils/currencies";
   import { errorMessage } from "@/utils/errors";
 
   let { group }: { group: Group } = $props();
@@ -32,16 +33,14 @@
 
   // A group made elsewhere may use a currency this list doesn't offer.
   const options = $derived(
-    CURRENCIES.some((c) => c.code === group.currency)
-      ? CURRENCIES
-      : [{ code: group.currency, label: group.currency }, ...CURRENCIES]
+    CURRENCIES.includes(group.currency) ? CURRENCIES : [group.currency, ...CURRENCIES]
   );
 
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {
-      error = "Please enter a group name.";
+      error = t("create.needName");
       return;
     }
     submitting = true;
@@ -60,29 +59,29 @@
 <Dialog.Root bind:open={dialogs.editGroup}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>Edit Group</Dialog.Title>
-      <Dialog.Description>Changes show up for every member of the group.</Dialog.Description>
+      <Dialog.Title>{t("editGroup.title")}</Dialog.Title>
+      <Dialog.Description>{t("editGroup.intro")}</Dialog.Description>
     </Dialog.Header>
     <form onsubmit={handleSubmit}>
       <Field.Group>
         <Field.Field>
-          <Field.Label for="input-edit-group-name">Group name</Field.Label>
+          <Field.Label for="input-edit-group-name">{t("create.name")}</Field.Label>
           <Input id="input-edit-group-name" required bind:value={name} />
         </Field.Field>
         <Field.Field>
-          <Field.Label for="select-edit-group-currency">Currency</Field.Label>
+          <Field.Label for="select-edit-group-currency">{t("common.currency")}</Field.Label>
           <Select.Root type="single" bind:value={currency}>
             <Select.Trigger id="select-edit-group-currency" class="w-full">
-              {options.find((c) => c.code === currency)?.label ?? currency}
+              {currencyLabel(currency)}
             </Select.Trigger>
             <Select.Content>
-              {#each options as c (c.code)}
-                <Select.Item value={c.code} label={c.label} />
+              {#each options as code (code)}
+                <Select.Item value={code} label={currencyLabel(code)} />
               {/each}
             </Select.Content>
           </Select.Root>
           <Field.Description>
-            Amounts stay as they are: 10 € becomes 10 in the new currency, not converted.
+            {t("editGroup.currencyHelp")}
           </Field.Description>
         </Field.Field>
         {#if error}
@@ -92,14 +91,14 @@
       <Dialog.Footer class="mt-6">
         <Dialog.Close>
           {#snippet child({ props })}
-            <Button {...props} variant="outline">Cancel</Button>
+            <Button {...props} variant="outline">{t("common.cancel")}</Button>
           {/snippet}
         </Dialog.Close>
         <Button type="submit" disabled={submitting}>
           {#if submitting}
             <Spinner data-icon="inline-start" />
           {/if}
-          Save
+          {t("common.save")}
         </Button>
       </Dialog.Footer>
     </form>

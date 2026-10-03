@@ -2,6 +2,7 @@
 // (`bindings.ts` and the @tauri-apps APIs all call `window.__TAURI_INTERNALS__`), so the web
 // build provides one: app commands go to the Rust core in a Web Worker (worker.ts), with the
 // same JSON in and out as Tauri's, and the native ones get browser equivalents.
+import { t } from "@/lib/i18n/index.svelte";
 import type { CommandMessage, WorkerMessage } from "./protocol";
 
 /** Holds the database: OPFS lets one worker open it at a time, so one tab runs ezcount. */
@@ -133,9 +134,7 @@ function holdLock(): Promise<boolean> {
 function showElsewhere(sentInvite: boolean) {
   const note = document.createElement("p");
   note.className = "ez-splash-note";
-  note.textContent = sentInvite
-    ? "ezcount is open in another tab: the invite was sent there."
-    : "ezcount is already open in another tab. Use that one, or close it and reload this page.";
+  note.textContent = sentInvite ? t("app.otherTabInvite") : t("app.otherTab");
   document.querySelector(".ez-splash")?.append(note);
   document.querySelector(".ez-splash-part")?.classList.remove("ez-splash-part");
 }
