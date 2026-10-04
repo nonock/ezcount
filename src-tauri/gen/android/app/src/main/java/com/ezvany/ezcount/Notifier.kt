@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import java.text.NumberFormat
 import java.util.Currency
 import org.json.JSONArray
@@ -58,6 +59,7 @@ object Notifier {
       texts.forEachIndexed { index, text ->
         val notification = NotificationCompat.Builder(context, CHANNEL)
           .setSmallIcon(R.drawable.ic_notification)
+          .setColor(ContextCompat.getColor(context, R.color.ezcount_icon_background))
           .setContentTitle(group)
           .setContentText(text)
           .setStyle(NotificationCompat.BigTextStyle().bigText(text))
