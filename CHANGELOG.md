@@ -4,6 +4,8 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 
 ## Unreleased
 
+## 0.4.0 - 2026-10-04
+
 ### Added
 
 - French, besides English. The app follows the device's language; the Account window has a switch.

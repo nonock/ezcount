@@ -1,6 +1,6 @@
 [package]
 name = "ezcount-sync-server"
-version = "0.3.0"
+version = "0.4.0"
 description = "Relay that stores and forwards ezcount group updates"
 edition = "2021"
 # The newest `rust-version` among the dependencies.
