@@ -2,8 +2,8 @@
 //! `#[tauri::command]` (which is what generates `src/bindings.ts`), and the web build calls
 //! them through `invoke`, by command name with JSON arguments, like Tauri's own IPC.
 //!
-//! Commands that only make sense natively (`native_features`, `share_text`, `save_download`)
-//! stay in each shell.
+//! Commands that only make sense natively (`native_features`, `share_text`, `share_file`,
+//! `save_download`, `save_file`) stay in each shell.
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -17,17 +17,21 @@ use crate::{csv_file, doc, engine, sync, AppState};
 
 type Res<T> = Result<T, String>;
 
-/// Adds the repeated expenses of a group whose day has come. Reading a group is when the app
-/// does it: there is no one else to.
-fn add_due_expenses(state: &AppState, group_id: &str) {
+/// Adds the repeated expenses of a group whose day has come, and empties its trash of what
+/// was deleted long ago. Reading a group is when the app does it: there is no one else to.
+fn keep_up(state: &AppState, group_id: &str) {
     let now = chrono::Utc::now();
     let due = state
         .store()
         .doc(group_id)
-        .is_ok_and(|d| doc::has_due_expenses(d, now));
+        .is_ok_and(|d| doc::has_due_expenses(d, now) || doc::has_old_trash(d, now));
     if due {
-        if let Err(e) = state.mutate(group_id, |d| doc::add_due_expenses(d, now).map(|_| ())) {
-            eprintln!("[api] could not add the repeated expenses of {group_id}: {e}");
+        let done = state.mutate(group_id, |d| {
+            doc::add_due_expenses(d, now)?;
+            doc::empty_old_trash(d, now)
+        });
+        if let Err(e) = done {
+            eprintln!("[api] could not bring {group_id} up to date: {e}");
         }
     }
 }
@@ -35,13 +39,13 @@ fn add_due_expenses(state: &AppState, group_id: &str) {
 pub fn get_groups(state: &AppState) -> Vec<Group> {
     let ids = state.store().group_ids();
     for id in ids {
-        add_due_expenses(state, &id);
+        keep_up(state, &id);
     }
     state.store().groups()
 }
 
 pub fn get_group(state: &AppState, group_id: &str) -> Res<Group> {
-    add_due_expenses(state, group_id);
+    keep_up(state, group_id);
     state.store().group(group_id)
 }
 
@@ -75,6 +79,17 @@ pub async fn suggest_exchange_rate(
     date: Option<&str>,
 ) -> Res<Option<String>> {
     sync::suggested_rate(state, from, to, date).await
+}
+
+/// Sends an idea or a problem to whoever runs the account's relay. `contact` is how to
+/// answer, when an answer is wanted; `app` says which app it comes from.
+pub async fn send_feedback(
+    state: &AppState,
+    message: &str,
+    contact: Option<&str>,
+    app: Option<&str>,
+) -> Res<()> {
+    sync::send_feedback(state, message, contact, app).await
 }
 
 /// Deletes the group for every member. While someone still owes something it takes
@@ -166,6 +181,7 @@ pub fn add_expense(state: &AppState, group_id: &str, expense: ExpenseInput) -> R
                 income: expense.income,
                 by: by.as_deref(),
                 repeat: expense.repeat.as_deref(),
+                items: expense.items,
             },
         )
     })
@@ -180,7 +196,7 @@ pub fn update_expense(
 ) -> Res<Group> {
     let by = me(state, group_id);
     state.mutate(group_id, |d| {
-        doc::update_expense(
+        doc::update_expense_as(
             d,
             expense_id,
             label(&expense),
@@ -189,7 +205,10 @@ pub fn update_expense(
             expense.splits,
             expense.created_at,
             expense.original,
-            by.as_deref(),
+            doc::Editing {
+                by: by.as_deref(),
+                items: expense.items,
+            },
         )
     })
 }
@@ -213,6 +232,24 @@ pub fn restore_expense(state: &AppState, group_id: &str, expense_id: &str) -> Re
 /// Removes a deleted expense from the trash, for good.
 pub fn purge_expense(state: &AppState, group_id: &str, expense_id: &str) -> Res<Group> {
     state.mutate(group_id, |d| doc::purge_expense(d, expense_id))
+}
+
+/// Writes a comment under an expense.
+pub fn add_expense_comment(
+    state: &AppState,
+    group_id: &str,
+    expense_id: &str,
+    text: &str,
+) -> Res<Group> {
+    let by = me(state, group_id);
+    state.mutate(group_id, |d| {
+        doc::add_comment(d, expense_id, text, by.as_deref())
+    })
+}
+
+/// Removes a comment from under an expense.
+pub fn delete_expense_comment(state: &AppState, group_id: &str, comment_id: &str) -> Res<Group> {
+    state.mutate(group_id, |d| doc::delete_comment(d, comment_id))
 }
 
 /// Stops a repeated expense. The ones already added stay.
@@ -342,10 +379,16 @@ pub fn set_identity(state: &AppState, group_id: &str, participant_id: &str) -> R
     state.require_account_info()
 }
 
-/// Sets the name and picture (a `data:` URL) the user shows, in every group where they said
-/// who they are. An empty name keeps the names the groups have.
-pub fn update_profile(state: &AppState, name: &str, avatar: Option<&str>) -> Res<AccountInfo> {
-    sync::update_profile(state, name, avatar)?;
+/// Sets the name, picture (a `data:` URL) and bank account (an IBAN, to be paid back on) the
+/// user shows, in every group where they said who they are. An empty name keeps the names
+/// the groups have.
+pub fn update_profile(
+    state: &AppState,
+    name: &str,
+    avatar: Option<&str>,
+    iban: Option<&str>,
+) -> Res<AccountInfo> {
+    sync::update_profile(state, name, avatar, iban)?;
     state.require_account_info()
 }
 
@@ -393,6 +436,15 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             )
             .await?,
         ),
+        "send_feedback" => json(
+            send_feedback(
+                state,
+                &s("message")?,
+                arg::<Option<String>>(&args, "contact")?.as_deref(),
+                arg::<Option<String>>(&args, "app")?.as_deref(),
+            )
+            .await?,
+        ),
         "leave_group" => json(leave_group(state, &s("groupId")?).await?),
         "delete_group" => json(delete_group(state, &s("groupId")?)?),
         "refuse_group_deletion" => json(refuse_group_deletion(state, &s("groupId")?)?),
@@ -431,6 +483,17 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
         "delete_expense" => json(delete_expense(state, &s("groupId")?, &s("expenseId")?)?),
         "restore_expense" => json(restore_expense(state, &s("groupId")?, &s("expenseId")?)?),
         "purge_expense" => json(purge_expense(state, &s("groupId")?, &s("expenseId")?)?),
+        "add_expense_comment" => json(add_expense_comment(
+            state,
+            &s("groupId")?,
+            &s("expenseId")?,
+            &s("text")?,
+        )?),
+        "delete_expense_comment" => json(delete_expense_comment(
+            state,
+            &s("groupId")?,
+            &s("commentId")?,
+        )?),
         "stop_recurring_expense" => json(stop_recurring_expense(
             state,
             &s("groupId")?,
@@ -477,6 +540,7 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             state,
             &s("name")?,
             arg::<Option<String>>(&args, "avatar")?.as_deref(),
+            arg::<Option<String>>(&args, "iban")?.as_deref(),
         )?),
         "add_self" => json(add_self(state, &s("groupId")?, &s("name")?)?),
         "password_strength" => json(password_strength(&s("password")?, &s("username")?)),
@@ -520,7 +584,13 @@ mod tests {
     #[tokio::test]
     async fn every_bound_command_is_dispatched() {
         let (state, dir) = state();
-        let native_only = ["native_features", "share_text", "save_download"];
+        let native_only = [
+            "native_features",
+            "share_text",
+            "share_file",
+            "save_download",
+            "save_file",
+        ];
         let commands = bound_commands();
         assert!(commands.len() > 20, "found {commands:?}");
         for command in commands

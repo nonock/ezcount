@@ -1,4 +1,5 @@
 <script lang="ts">
+  import MessageSquareIcon from "@lucide/svelte/icons/message-square";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import RepeatIcon from "@lucide/svelte/icons/repeat";
@@ -27,6 +28,7 @@
     edited: PencilIcon,
     deleted: TrashIcon,
     restored: UndoIcon,
+    commented: MessageSquareIcon,
     joined: UserPlusIcon,
     left: UserMinusIcon,
     created: UsersIcon,

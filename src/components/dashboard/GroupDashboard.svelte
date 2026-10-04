@@ -11,6 +11,7 @@
   import * as Empty from "@/components/ui/empty";
   import { importGroup } from "@/lib/actions";
   import { t } from "@/lib/i18n/index.svelte";
+  import { netBalance } from "@/lib/split";
   import { session } from "@/lib/state/session.svelte";
   import type { Group } from "@/types";
 
@@ -26,6 +27,29 @@
   // The groups the user put away are listed apart, folded.
   const active = $derived(groups.filter((g) => !session.isArchived(g.id)));
   const archived = $derived(groups.filter((g) => session.isArchived(g.id)));
+
+  /** What each group owes the user, or the user owes it, where they said who they are. */
+  const nets = $derived(
+    new Map(
+      groups.flatMap((g): [string, number][] => {
+        const me = session.identityIn(g.id);
+        return me ? [[g.id, netBalance(g, me)]] : [];
+      })
+    )
+  );
+  /** Over the groups that aren't put away, a line per currency: nothing adds up across them. */
+  const totals = $derived.by(() => {
+    const byCurrency = new Map<string, { owed: number; owes: number }>();
+    for (const g of active) {
+      const net = nets.get(g.id);
+      if (!net) continue;
+      const total = byCurrency.get(g.currency) ?? { owed: 0, owes: 0 };
+      if (net > 0) total.owed += net;
+      else total.owes -= net;
+      byCurrency.set(g.currency, total);
+    }
+    return [...byCurrency].map(([currency, total]) => ({ currency, ...total }));
+  });
 
   let fileInput = $state<HTMLInputElement>();
 
@@ -50,6 +74,7 @@
 {#snippet card(group: Group)}
   {@const totalCents = group.expenses.reduce((sum, e) => sum + e.amount_cents, 0)}
   {@const members = group.participants.filter((p) => !p.removed).length}
+  {@const net = nets.get(group.id) ?? 0}
   <li>
     <Card.Root
       class="relative h-full transition-colors has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 hover:bg-muted/50"
@@ -84,6 +109,18 @@
         <div>
           <div class="text-xs text-muted-foreground">{t("groups.totalSpent")}</div>
           <Amount cents={totalCents} currency={group.currency} class="text-lg font-semibold" />
+          {#if net !== 0}
+            <div class="text-xs" data-testid="group-net">
+              <span class="text-muted-foreground">
+                {net > 0 ? t("groups.youGetBack") : t("groups.youOwe")}
+              </span>
+              <Amount
+                cents={Math.abs(net)}
+                currency={group.currency}
+                class={net > 0 ? "text-positive" : "text-negative"}
+              />
+            </div>
+          {/if}
         </div>
         <div class="flex items-center gap-1 text-xs text-muted-foreground">
           {t("groups.summary", members, group.expenses.length)}
@@ -146,6 +183,28 @@
         </Button>
       </div>
     </div>
+
+    {#if totals.length > 0}
+      <section
+        aria-label={t("groups.overall")}
+        class="grid grid-cols-2 gap-x-6 gap-y-1 rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10 sm:w-fit"
+      >
+        <h2 class="text-xs text-muted-foreground">{t("groups.owedToYou")}</h2>
+        <h2 class="text-xs text-muted-foreground">{t("groups.youOweTotal")}</h2>
+        {#each totals as total (total.currency)}
+          <Amount
+            cents={total.owed}
+            currency={total.currency}
+            class={total.owed > 0 ? "text-lg font-semibold text-positive" : "text-lg font-semibold"}
+          />
+          <Amount
+            cents={total.owes}
+            currency={total.currency}
+            class={total.owes > 0 ? "text-lg font-semibold text-negative" : "text-lg font-semibold"}
+          />
+        {/each}
+      </section>
+    {/if}
 
     {@render cards(active)}
 

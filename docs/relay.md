@@ -16,6 +16,7 @@ cargo run --release --manifest-path sync-server/Cargo.toml
 | `EZCOUNT_MAX_STORAGE_MB`      | `1024`                 | Data stored in all; keep it under the disk's size                          |
 | `EZCOUNT_MAX_DOCUMENT_MB`     | `50`                   | Data stored per group or account                                           |
 | `EZCOUNT_WEB_DIR`             | (none)                 | The web version to serve at `/` (`bun run build:web` writes `sync-server/web`) |
+| `EZCOUNT_ADMIN_TOKEN`         | none                   | Lets you read what people sent from "Suggest a feature": open `https://<relay>/feedback` and enter it (or `curl -H "Authorization: Bearer <token>" https://<relay>/v1/feedback`) |
 | `EZCOUNT_RATES_URL`           | Frankfurter            | Where the relay gets the exchange rates the app suggests; `off` for none     |
 
 To keep one client from filling the disk or locking others out, the relay also limits each client network (an IPv4 address, or an IPv6 /64) per hour: 50 MB of uploads, 30 new groups and 10 sign-ups. Failed logins (passwords or recovery keys) are limited per username: 5 per 15 minutes from one network, 50 from all networks together. Past a limit the relay answers 413 (group too big), 507 (relay full) or 429, and the app explains it. The counters are in memory and reset when the relay restarts.

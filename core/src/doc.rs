@@ -5,10 +5,11 @@
 //! - `meta` (map): `id`, `name`, `currency`, `created_at`, `description`, `image`, `deleted`
 //! - `deletion` (map): participant id -> true, for the members who agreed to delete the group
 //! - `participants` (map): participant id -> map { `name`, `removed`, `position`, `avatar`,
-//!   `added_at`, `added_by`, `removed_at`, `removed_by` }
+//!   `iban`, `added_at`, `added_by`, `removed_at`, `removed_by` }
 //! - `expenses` (map): expense id -> map { `title`, `category`, `amount_cents`, `paid_by`, `splits`,
 //!   `created_at`, `updated_at`, `is_reimbursement`, `history` (list), `original`, `payers`,
-//!   `added_at`, `added_by`, `recurring` }
+//!   `added_at`, `added_by`, `recurring`, `items` }
+//! - `comments` (map): comment id -> plain map { `expense`, `text`, `at`, `by` }
 //! - `trash` (map): expense id -> the expense as above, with `deleted_at` and `deleted_by`
 //! - `recurring` (map): id -> map { `title`, `category`, `amount_cents`, `paid_by`, `payers`,
 //!   `splits`, `every`, `start`, `made`, `added_by` }
@@ -29,7 +30,16 @@
 //! count it as money spent.
 //!
 //! Deleting an expense moves it to `trash`, so that app versions from before see it gone and
-//! this one can put it back (`restore_expense`).
+//! this one can put it back (`restore_expense`). It stays there `TRASH_DAYS`, after which any
+//! device removes it for good (`empty_old_trash`).
+//!
+//! An expense entered line by line keeps its lines in `items` (a plain value: `name`,
+//! `amount_cents`, `participants`), next to `splits` holding what each person owes of them as
+//! fixed amounts: that is all the balances, and app versions from before, read. Lines that no
+//! longer give those splits (an older version edited the expense) are left out when reading.
+//!
+//! Comments are in a map of their own, by comment id, rather than in a list under each
+//! expense: two people commenting an expense at once then both keep theirs.
 //!
 //! A repeated expense is a model in `recurring`: its occurrence number `n` is due `n` weeks,
 //! months or years (`every`) after `start`, and `made` counts the ones added. Any device adds
@@ -58,8 +68,8 @@ use uuid::Uuid;
 
 use crate::engine;
 use crate::models::{
-    DeletedExpense, Expense, ExpenseHistoryEntry, ExpensePayer, ExpenseSplit, Group,
-    OriginalAmount, Participant, RecurringExpense,
+    DeletedExpense, Expense, ExpenseComment, ExpenseHistoryEntry, ExpenseItem, ExpensePayer,
+    ExpenseSplit, Group, OriginalAmount, Participant, RecurringExpense,
 };
 
 const META: &str = "meta";
@@ -70,6 +80,18 @@ const ORIGINAL: &str = "original";
 const DELETION: &str = "deletion";
 const TRASH: &str = "trash";
 const RECURRING: &str = "recurring";
+const COMMENTS: &str = "comments";
+const ITEMS: &str = "items";
+
+/// Days a deleted expense stays in the trash.
+pub const TRASH_DAYS: u64 = 30;
+
+/// Most lines in an expense entered item by item, and the longest name of one.
+pub const MAX_ITEMS: usize = 100;
+pub const MAX_ITEM_NAME_CHARS: usize = 80;
+
+/// Longest comment, in characters.
+pub const MAX_COMMENT_CHARS: usize = 500;
 
 /// Most occurrences of one repeated expense added in a pass: a group nobody opened for years
 /// catches up over a few.
@@ -184,6 +206,119 @@ fn payers_value(payers: &[ExpensePayer]) -> LoroValue {
     LoroValue::List(list.into())
 }
 
+fn items_value(items: &[ExpenseItem]) -> LoroValue {
+    let list: Vec<LoroValue> = items
+        .iter()
+        .map(|item| {
+            let people: Vec<LoroValue> = item
+                .participants
+                .iter()
+                .map(|p| p.as_str().into())
+                .collect();
+            map_value([
+                ("name", item.name.as_str().into()),
+                ("amount_cents", item.amount_cents.into()),
+                ("participants", LoroValue::List(people.into())),
+            ])
+        })
+        .collect();
+    LoroValue::List(list.into())
+}
+
+/// What each person owes of an expense entered line by line, in the order they first appear.
+/// A line is shared equally between its people, the cents left over going to the first ones.
+pub fn items_owed(items: &[ExpenseItem]) -> Vec<(String, i64)> {
+    let mut owed: Vec<(String, i64)> = Vec::new();
+    for item in items {
+        let people = item.participants.len() as i64;
+        if people == 0 {
+            continue;
+        }
+        let (each, extra) = (item.amount_cents / people, item.amount_cents % people);
+        for (i, id) in item.participants.iter().enumerate() {
+            let part = each + i64::from((i as i64) < extra);
+            match owed.iter_mut().find(|(who, _)| who == id) {
+                Some((_, total)) => *total += part,
+                None => owed.push((id.clone(), part)),
+            }
+        }
+    }
+    owed
+}
+
+/// The splits of an expense entered line by line: what each person owes, as a fixed amount.
+fn items_splits(items: &[ExpenseItem]) -> Vec<ExpenseSplit> {
+    items_owed(items)
+        .into_iter()
+        .filter(|(_, cents)| *cents > 0)
+        .map(|(participant_id, cents)| ExpenseSplit {
+            participant_id,
+            shares: 0,
+            fixed_cents: Some(cents),
+        })
+        .collect()
+}
+
+/// Lines add up to what was paid (`paid_cents`, in the currency paid), and each has an
+/// amount and people.
+fn check_items(paid_cents: i64, items: &[ExpenseItem]) -> Res<()> {
+    if items.len() > MAX_ITEMS {
+        return Err(format!("An expense can't have more than {MAX_ITEMS} items"));
+    }
+    let mut total: i128 = 0;
+    for item in items {
+        if item.name.chars().count() > MAX_ITEM_NAME_CHARS {
+            return Err(format!(
+                "An item's name is too long ({MAX_ITEM_NAME_CHARS} characters at most)"
+            ));
+        }
+        if item.amount_cents <= 0 || item.amount_cents > MAX_AMOUNT_CENTS {
+            return Err("An item's amount must be above zero".to_string());
+        }
+        if item.participants.is_empty() {
+            return Err("Each item needs at least one person".to_string());
+        }
+        let mut seen = HashSet::new();
+        if !item.participants.iter().all(|p| seen.insert(p.as_str())) {
+            return Err("A participant appears twice on an item".to_string());
+        }
+        total += i128::from(item.amount_cents);
+    }
+    let paid = i128::from(paid_cents);
+    if total != paid {
+        return Err(format!(
+            "The items add up to {}, not the expense's {}",
+            money(total),
+            money(paid)
+        ));
+    }
+    Ok(())
+}
+
+/// The lines as stored, when they still give the expense's splits: an older app version
+/// changes the amount or the splits without them, and then the splits alone count.
+fn read_items(
+    value: serde_json::Value,
+    paid_cents: i64,
+    splits: &[ExpenseSplit],
+) -> Vec<ExpenseItem> {
+    let Ok(items) = serde_json::from_value::<Vec<ExpenseItem>>(value) else {
+        return Vec::new();
+    };
+    let sorted = |mut splits: Vec<ExpenseSplit>| {
+        splits.sort_by(|a, b| a.participant_id.cmp(&b.participant_id));
+        splits
+    };
+    let fits = !items.is_empty()
+        && check_items(paid_cents, &items).is_ok()
+        && sorted(items_splits(&items)) == sorted(splits.to_vec());
+    if fits {
+        items
+    } else {
+        Vec::new()
+    }
+}
+
 fn original_value(original: &OriginalAmount) -> LoroValue {
     map_value([
         ("currency", original.currency.as_str().into()),
@@ -273,6 +408,8 @@ struct DocParticipant {
     position: i64,
     #[serde(default)]
     avatar: Option<String>,
+    #[serde(default)]
+    iban: Option<String>,
     // Read as text: a date that isn't one is left out rather than taking the member with it.
     #[serde(default)]
     added_at: Option<String>,
@@ -364,11 +501,48 @@ struct DocExpense {
     added_by: Option<String>,
     #[serde(default)]
     recurring: Option<String>,
+    // Read as it comes: lines that aren't usable are left out, not the expense.
+    #[serde(default)]
+    items: serde_json::Value,
     // In the trash only.
     #[serde(default)]
     deleted_at: Option<String>,
     #[serde(default)]
     deleted_by: Option<String>,
+}
+
+/// A comment as stored.
+#[derive(Deserialize)]
+struct DocComment {
+    expense: String,
+    text: String,
+    at: String,
+    #[serde(default)]
+    by: Option<String>,
+}
+
+/// The comments of each expense, the oldest first.
+fn read_comments(doc: &LoroDoc) -> HashMap<String, Vec<ExpenseComment>> {
+    let mut comments: HashMap<String, Vec<ExpenseComment>> = HashMap::new();
+    for (id, c) in entries::<DocComment>(&doc.get_map(COMMENTS), COMMENTS) {
+        let Some(created_at) = read_time(Some(c.at)) else {
+            continue;
+        };
+        comments.entry(c.expense).or_default().push(ExpenseComment {
+            id,
+            text: c.text.chars().take(MAX_COMMENT_CHARS).collect(),
+            created_at,
+            by: c.by,
+        });
+    }
+    for list in comments.values_mut() {
+        list.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+    }
+    comments
 }
 
 /// A repeated expense as stored.
@@ -425,6 +599,11 @@ fn read_expense(id: String, group_id: &str, mut e: DocExpense) -> Option<Expense
         }
     };
     let payers = e.checked_payers();
+    let paid_cents = e
+        .original
+        .as_ref()
+        .map_or(e.amount_cents, |o| o.amount_cents);
+    let items = read_items(std::mem::take(&mut e.items), paid_cents, &splits);
     Some(Expense {
         id,
         group_id: group_id.to_string(),
@@ -458,6 +637,8 @@ fn read_expense(id: String, group_id: &str, mut e: DocExpense) -> Option<Expense
         added_at: read_time(e.added_at),
         added_by: e.added_by,
         recurring: e.recurring,
+        items,
+        comments: Vec::new(),
     })
 }
 
@@ -638,6 +819,7 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
                         name: p.name,
                         removed: p.removed,
                         avatar: read_image(p.avatar),
+                        iban: p.iban.and_then(|iban| check_iban(&iban).ok()),
                         added_at: read_time(p.added_at),
                         added_by: p.added_by,
                         removed_at: read_time(p.removed_at),
@@ -651,9 +833,15 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
 
     let participants: Vec<Participant> = participants.into_iter().map(|(_, p)| p).collect();
 
+    let mut comments = read_comments(doc);
+    let mut commented = |mut expense: Expense| {
+        expense.comments = comments.remove(&expense.id).unwrap_or_default();
+        expense
+    };
     let mut expenses: Vec<Expense> = entries::<DocExpense>(&doc.get_map(EXPENSES), EXPENSES)
         .into_iter()
         .filter_map(|(id, e)| read_expense(id, &meta.id, e))
+        .map(&mut commented)
         .collect();
     expenses.sort_by(|a, b| {
         a.created_at
@@ -674,6 +862,10 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
         })
         // Put back on one device while deleted on another: it is back.
         .filter(|d| !expenses.iter().any(|e| e.id == d.expense.id))
+        .map(|d| DeletedExpense {
+            expense: commented(d.expense),
+            ..d
+        })
         .collect();
     trash.sort_by(|a, b| {
         b.deleted_at
@@ -802,6 +994,10 @@ fn write_expense(parent: &LoroMap, expense: &Expense) -> Res<LoroMap> {
     if let Some(recurring) = &expense.recurring {
         e.insert("recurring", recurring.as_str()).map_err(doc_err)?;
     }
+    if !expense.items.is_empty() {
+        e.insert(ITEMS, items_value(&expense.items))
+            .map_err(doc_err)?;
+    }
     let history = e
         .insert_container(HISTORY, LoroList::new())
         .map_err(doc_err)?;
@@ -844,6 +1040,35 @@ pub fn check_image(image: &str) -> Res<()> {
         return Err("This picture is too big".to_string());
     }
     Ok(())
+}
+
+/// An IBAN as stored: without spaces, upper-cased, with check digits that fit it.
+pub fn check_iban(iban: &str) -> Res<String> {
+    let iban = iban
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_uppercase();
+    let bytes = iban.as_bytes();
+    let shaped = (15..=34).contains(&bytes.len())
+        && bytes.iter().all(u8::is_ascii_alphanumeric)
+        && bytes[..2].iter().all(u8::is_ascii_uppercase)
+        && bytes[2..4].iter().all(u8::is_ascii_digit);
+    // The country and check digits go last, letters count as 10 to 35, and what that number
+    // leaves when divided by 97 is 1.
+    let valid = shaped
+        && bytes[4..].iter().chain(&bytes[..4]).fold(0u32, |rest, b| {
+            if b.is_ascii_digit() {
+                (rest * 10 + u32::from(b - b'0')) % 97
+            } else {
+                (rest * 100 + u32::from(b - b'A') + 10) % 97
+            }
+        }) == 1;
+    if valid {
+        Ok(iban)
+    } else {
+        Err("This IBAN is not valid".to_string())
+    }
 }
 
 /// A currency code as stored: three letters, upper-cased.
@@ -970,6 +1195,8 @@ pub fn imported_group_doc(
                 added_at: None,
                 added_by: None,
                 recurring: None,
+                items: Vec::new(),
+                comments: Vec::new(),
             },
         )?;
     }
@@ -1097,6 +1324,24 @@ pub fn set_participant_avatar(
             participant.insert("avatar", avatar).map_err(doc_err)
         }
         None => participant.delete("avatar").map_err(doc_err),
+    }
+}
+
+/// Sets or removes the bank account a participant is paid back on.
+pub fn set_participant_iban(doc: &LoroDoc, participant_id: &str, iban: Option<&str>) -> Res<()> {
+    let participant = child_map(&doc.get_map(PARTICIPANTS), participant_id)
+        .ok_or_else(|| "Participant not found".to_string())?;
+    let current = match participant.get("iban") {
+        Some(ValueOrContainer::Value(LoroValue::String(current))) => Some(current.to_string()),
+        _ => None,
+    };
+    let iban = iban.map(check_iban).transpose()?;
+    if current == iban {
+        return Ok(());
+    }
+    match iban {
+        Some(iban) => participant.insert("iban", iban).map_err(doc_err),
+        None => participant.delete("iban").map_err(doc_err),
     }
 }
 
@@ -1454,9 +1699,48 @@ fn validate_expense(
     Ok(())
 }
 
+/// The lines of an expense as stored: names trimmed, on people who can be on the expense
+/// (see `validate_expense` for `grandfathered`), adding up to what was paid.
+fn normal_items(
+    group: &Group,
+    amount_cents: i64,
+    original: Option<&OriginalAmount>,
+    items: Vec<ExpenseItem>,
+    grandfathered: &HashSet<&str>,
+) -> Res<Vec<ExpenseItem>> {
+    if items.is_empty() {
+        return Ok(items);
+    }
+    let items: Vec<ExpenseItem> = items
+        .into_iter()
+        .map(|item| ExpenseItem {
+            name: item.name.trim().to_string(),
+            ..item
+        })
+        .collect();
+    check_items(original.map_or(amount_cents, |o| o.amount_cents), &items)?;
+    let usable = |id: &str| {
+        group
+            .participants
+            .iter()
+            .any(|p| p.id == id && (!p.removed || grandfathered.contains(id)))
+    };
+    if !items
+        .iter()
+        .all(|item| item.participants.iter().all(|p| usable(p)))
+    {
+        return Err(
+            "The split includes someone who is not an active member of this group".to_string(),
+        );
+    }
+    Ok(items)
+}
+
 /// What else there is to say about an expense being added.
 #[derive(Default)]
 pub struct Adding<'a> {
+    /// The expense line by line: the splits are then worked out from these.
+    pub items: Vec<ExpenseItem>,
     /// Money that came in rather than out.
     pub income: bool,
     /// The member adding it, when the app knows who the user is.
@@ -1504,6 +1788,18 @@ pub fn add_expense_as(
     }
     let group = read_group(doc)?;
     let original = normal_original(&group, original)?;
+    let items = normal_items(
+        &group,
+        amount_cents,
+        original.as_ref(),
+        adding.items,
+        &HashSet::new(),
+    )?;
+    let splits = if items.is_empty() {
+        splits
+    } else {
+        items_splits(&items)
+    };
     validate_expense(
         &group,
         amount_cents,
@@ -1544,6 +1840,8 @@ pub fn add_expense_as(
         added_at: Some(now),
         added_by: adding.by.map(str::to_string),
         recurring: recurring.clone(),
+        items,
+        comments: Vec::new(),
     };
     insert_expense(doc, &expense)?;
 
@@ -1650,6 +1948,8 @@ pub fn add_due_expenses(doc: &LoroDoc, now: DateTime<Utc>) -> Res<bool> {
                         added_at: Some(next),
                         added_by: model.added_by.clone(),
                         recurring: Some(model.id.clone()),
+                        items: Vec::new(),
+                        comments: Vec::new(),
                     },
                 )?;
             }
@@ -1678,6 +1978,16 @@ pub fn stop_recurring(doc: &LoroDoc, recurring_id: &str) -> Res<()> {
     models.delete(recurring_id).map_err(doc_err)
 }
 
+/// What else there is to say about an expense being replaced.
+#[derive(Default)]
+pub struct Editing<'a> {
+    /// The member editing it, when the app knows who the user is.
+    pub by: Option<&'a str>,
+    /// The expense line by line: the splits are then worked out from these. Without, any
+    /// lines it had are dropped.
+    pub items: Vec<ExpenseItem>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn update_expense(
     doc: &LoroDoc,
@@ -1690,6 +2000,35 @@ pub fn update_expense(
     original: Option<OriginalAmount>,
     by: Option<&str>,
 ) -> Res<()> {
+    update_expense_as(
+        doc,
+        expense_id,
+        title,
+        amount_cents,
+        paid_by,
+        splits,
+        created_at,
+        original,
+        Editing {
+            by,
+            items: Vec::new(),
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn update_expense_as(
+    doc: &LoroDoc,
+    expense_id: &str,
+    title: impl Into<Label>,
+    amount_cents: i64,
+    paid_by: impl Into<PaidBy>,
+    splits: Vec<ExpenseSplit>,
+    created_at: Option<DateTime<Utc>>,
+    original: Option<OriginalAmount>,
+    editing: Editing,
+) -> Res<()> {
+    let by = editing.by;
     let PaidBy { paid_by, payers } = paid_by.into();
     let Label { title, category } = title.into();
     if let Some(category) = &category {
@@ -1704,8 +2043,26 @@ pub fn update_expense(
     let grandfathered: HashSet<&str> = std::iter::once(expense.paid_by.as_str())
         .chain(expense.payers.iter().map(|p| p.participant_id.as_str()))
         .chain(expense.splits.iter().map(|s| s.participant_id.as_str()))
+        .chain(
+            expense
+                .items
+                .iter()
+                .flat_map(|item| item.participants.iter().map(String::as_str)),
+        )
         .collect();
     let original = normal_original(&group, original)?;
+    let items = normal_items(
+        &group,
+        amount_cents,
+        original.as_ref(),
+        editing.items,
+        &grandfathered,
+    )?;
+    let splits = if items.is_empty() {
+        splits
+    } else {
+        items_splits(&items)
+    };
     validate_expense(
         &group,
         amount_cents,
@@ -1819,7 +2176,15 @@ pub fn update_expense(
         }
         .map_err(doc_err)?;
     }
-    if expense.splits != splits {
+    if expense.items != items {
+        changes.push("Items updated".to_string());
+        if items.is_empty() {
+            target.delete(ITEMS)
+        } else {
+            target.insert(ITEMS, items_value(&items))
+        }
+        .map_err(doc_err)?;
+    } else if expense.splits != splits {
         changes.push("Participants / parts allocation updated".to_string());
     }
     // With fixed amounts, the stored splits also depend on the amounts (see `splits_value`).
@@ -1922,13 +2287,79 @@ pub fn restore_expense(doc: &LoroDoc, expense_id: &str, by: Option<&str>) -> Res
     doc.get_map(TRASH).delete(expense_id).map_err(doc_err)
 }
 
-/// Removes a deleted expense for good.
+/// Removes a deleted expense for good, with its comments.
 pub fn purge_expense(doc: &LoroDoc, expense_id: &str) -> Res<()> {
     let trash = doc.get_map(TRASH);
     if child_map(&trash, expense_id).is_none() {
         return Err("This expense is no longer in the trash".to_string());
     }
+    let comments = doc.get_map(COMMENTS);
+    for (id, comment) in entries::<DocComment>(&comments, COMMENTS) {
+        if comment.expense == expense_id {
+            comments.delete(&id).map_err(doc_err)?;
+        }
+    }
     trash.delete(expense_id).map_err(doc_err)
+}
+
+/// The expenses deleted more than `TRASH_DAYS` ago.
+fn old_trash(group: &Group, now: DateTime<Utc>) -> impl Iterator<Item = &DeletedExpense> {
+    group.trash.iter().filter(move |deleted| {
+        deleted
+            .deleted_at
+            .checked_add_days(Days::new(TRASH_DAYS))
+            .is_some_and(|until| until <= now)
+    })
+}
+
+/// Whether the trash holds expenses to remove for good.
+pub fn has_old_trash(doc: &LoroDoc, now: DateTime<Utc>) -> bool {
+    read_group(doc).is_ok_and(|group| old_trash(&group, now).next().is_some())
+}
+
+/// Removes for good the expenses that were deleted more than `TRASH_DAYS` ago.
+pub fn empty_old_trash(doc: &LoroDoc, now: DateTime<Utc>) -> Res<()> {
+    let group = read_group(doc)?;
+    for deleted in old_trash(&group, now) {
+        purge_expense(doc, &deleted.expense.id)?;
+    }
+    Ok(())
+}
+
+/// Adds a comment under an expense, from `by` when the app knows who the user is.
+pub fn add_comment(doc: &LoroDoc, expense_id: &str, text: &str, by: Option<&str>) -> Res<()> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("A comment can't be empty".to_string());
+    }
+    if text.chars().count() > MAX_COMMENT_CHARS {
+        return Err(format!(
+            "This comment is too long ({MAX_COMMENT_CHARS} characters at most)"
+        ));
+    }
+    if child_map(&doc.get_map(EXPENSES), expense_id).is_none() {
+        return Err("Expense not found".to_string());
+    }
+    let mut comment = HashMap::from([
+        ("expense".to_string(), LoroValue::from(expense_id)),
+        ("text".to_string(), text.into()),
+        ("at".to_string(), timestamp(Utc::now()).into()),
+    ]);
+    if let Some(by) = by {
+        comment.insert("by".to_string(), by.into());
+    }
+    doc.get_map(COMMENTS)
+        .insert(&Uuid::new_v4().to_string(), LoroValue::Map(comment.into()))
+        .map_err(doc_err)
+}
+
+/// Removes a comment.
+pub fn delete_comment(doc: &LoroDoc, comment_id: &str) -> Res<()> {
+    let comments = doc.get_map(COMMENTS);
+    if comments.get(comment_id).is_none() {
+        return Err("This comment no longer exists".to_string());
+    }
+    comments.delete(comment_id).map_err(doc_err)
 }
 
 /// Records a payment between two people. Removed participants are allowed here, since
@@ -1992,6 +2423,8 @@ pub fn record_reimbursement(
             added_at: Some(now),
             added_by: by.map(str::to_string),
             recurring: None,
+            items: Vec::new(),
+            comments: Vec::new(),
         },
     )
 }
@@ -2850,6 +3283,8 @@ mod tests {
                 added_at: None,
                 added_by: None,
                 recurring: None,
+                items: Vec::new(),
+                comments: Vec::new(),
             };
             insert_expense(&doc, &expense).unwrap();
         };
@@ -2906,7 +3341,7 @@ mod tests {
             Adding {
                 income: true,
                 by: Some(bob.as_str()),
-                repeat: None,
+                ..Adding::default()
             },
         )
         .unwrap();
@@ -2983,6 +3418,181 @@ mod tests {
         assert!(read_group(&doc).unwrap().trash.is_empty());
         assert!(restore_expense(&doc, &e.id, None).is_err());
         assert!(purge_expense(&doc, &e.id).is_err());
+    }
+
+    #[test]
+    fn the_trash_empties_itself_after_a_month() {
+        let (doc, g) = sample();
+        let (alice, bob) = (&g.participants[0].id, &g.participants[1].id);
+        for title in ["Dinner", "Taxi"] {
+            let splits = vec![split(alice, 1), split(bob, 1)];
+            add_expense(&doc, title, 3000, alice.clone(), splits, None, None).unwrap();
+        }
+        let group = read_group(&doc).unwrap();
+        let (dinner, taxi) = (&group.expenses[0].id, &group.expenses[1].id);
+        add_comment(&doc, dinner, "Was it this much?", Some(bob.as_str())).unwrap();
+        delete_expense(&doc, dinner, None).unwrap();
+        delete_expense(&doc, taxi, None).unwrap();
+        // The dinner was deleted 31 days ago.
+        let long_ago = Utc::now() - chrono::Duration::days(31);
+        child_map(&doc.get_map(TRASH), dinner)
+            .unwrap()
+            .insert("deleted_at", timestamp(long_ago))
+            .unwrap();
+
+        let now = Utc::now();
+        assert!(has_old_trash(&doc, now));
+        empty_old_trash(&doc, now).unwrap();
+        assert!(!has_old_trash(&doc, now));
+        let trash = read_group(&doc).unwrap().trash;
+        assert_eq!(trash.len(), 1);
+        assert_eq!(&trash[0].expense.id, taxi);
+        // Its comments went with it.
+        assert_eq!(doc.get_map(COMMENTS).len(), 0);
+    }
+
+    #[test]
+    fn an_expense_entered_item_by_item() {
+        let (doc, g) = sample();
+        let (alice, bob) = (&g.participants[0].id, &g.participants[1].id);
+        let item = |name: &str, amount_cents: i64, people: &[&String]| ExpenseItem {
+            name: name.to_string(),
+            amount_cents,
+            participants: people.iter().map(|p| p.to_string()).collect(),
+        };
+        let add = |amount: i64, items: Vec<ExpenseItem>| {
+            add_expense_as(
+                &doc,
+                "Groceries",
+                amount,
+                alice.clone(),
+                Vec::new(),
+                None,
+                None,
+                Adding {
+                    items,
+                    ..Adding::default()
+                },
+            )
+        };
+        // The lines must add up to the expense, and each be someone's.
+        assert_eq!(
+            add(3000, vec![item("Wine", 1201, &[bob])]).unwrap_err(),
+            "The items add up to 12.01, not the expense's 30.00"
+        );
+        assert_eq!(
+            add(1201, vec![item("Wine", 1201, &[])]).unwrap_err(),
+            "Each item needs at least one person"
+        );
+
+        // Bob's wine, and bread for both: the odd cent goes to the first on the line.
+        let items = vec![
+            item(" Wine ", 1200, &[bob]),
+            item("Bread", 301, &[alice, bob]),
+        ];
+        add(1501, items).unwrap();
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+        assert_eq!(e.items[0].name, "Wine");
+        assert_eq!(e.splits, [fixed(bob, 1350), fixed(alice, 151)]);
+        assert_eq!(net(&doc, bob), -1350);
+
+        // Editing the lines replaces the splits, and says so.
+        update_expense_as(
+            &doc,
+            &e.id,
+            "Groceries",
+            1501,
+            alice.clone(),
+            Vec::new(),
+            None,
+            None,
+            Editing {
+                by: None,
+                items: vec![item("Wine", 1501, &[alice, bob])],
+            },
+        )
+        .unwrap();
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+        assert_eq!(e.splits, [fixed(alice, 751), fixed(bob, 750)]);
+        assert_eq!(e.history[0].summary, "Items updated");
+
+        // An app version from before changes the split without the lines: they no longer
+        // describe the expense, and are left out.
+        child_map(&doc.get_map(EXPENSES), &e.id)
+            .unwrap()
+            .insert(
+                "splits",
+                splits_value(1501, None, &[split(alice, 1), split(bob, 2)]),
+            )
+            .unwrap();
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+        assert!(e.items.is_empty());
+        assert_eq!(e.splits, [split(alice, 1), split(bob, 2)]);
+    }
+
+    #[test]
+    fn comments_under_an_expense() {
+        let (doc, g) = sample();
+        let (alice, bob) = (&g.participants[0].id, &g.participants[1].id);
+        let splits = vec![split(alice, 1), split(bob, 1)];
+        add_expense(&doc, "Dinner", 3000, alice.clone(), splits, None, None).unwrap();
+        doc.commit();
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+        assert!(add_comment(&doc, &e.id, "  ", None).is_err());
+        assert!(add_comment(&doc, &e.id, &"a".repeat(MAX_COMMENT_CHARS + 1), None).is_err());
+        assert!(add_comment(&doc, "nope", "Hello", None).is_err());
+
+        // Two people comment at once, each on their device: both stay.
+        let other = fork(&doc);
+        add_comment(&doc, &e.id, " Was it this much? ", Some(bob.as_str())).unwrap();
+        add_comment(&other, &e.id, "With the tip", Some(alice.as_str())).unwrap();
+        doc.commit();
+        other.commit();
+        merge(&doc, &other);
+        let comments = read_group(&doc).unwrap().expenses.remove(0).comments;
+        let mut texts: Vec<&str> = comments.iter().map(|c| c.text.as_str()).collect();
+        texts.sort_unstable();
+        assert_eq!(texts, ["Was it this much?", "With the tip"]);
+        let bobs = comments
+            .iter()
+            .find(|c| c.by.as_ref() == Some(bob))
+            .unwrap();
+
+        // They follow the expense to the trash and back.
+        delete_expense(&doc, &e.id, None).unwrap();
+        assert_eq!(read_group(&doc).unwrap().trash[0].expense.comments.len(), 2);
+        restore_expense(&doc, &e.id, None).unwrap();
+
+        delete_comment(&doc, &bobs.id).unwrap();
+        assert!(delete_comment(&doc, &bobs.id).is_err());
+        let comments = read_group(&doc).unwrap().expenses.remove(0).comments;
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].text, "With the tip");
+    }
+
+    #[test]
+    fn ibans_are_checked() {
+        assert_eq!(
+            check_iban(" fr76 3000 6000 0112 3456 7890 189 ").unwrap(),
+            "FR7630006000011234567890189"
+        );
+        assert!(check_iban("GB82WEST12345698765432").is_ok());
+        for wrong in [
+            "",
+            "FR76",
+            "GB82WEST12345698765433",
+            "1234567890123456",
+            "FR76 30é0",
+        ] {
+            assert!(check_iban(wrong).is_err(), "{wrong}");
+        }
+        let (doc, g) = sample();
+        let alice = &g.participants[0].id;
+        set_participant_iban(&doc, alice, Some("de89 3704 0044 0532 0130 00")).unwrap();
+        let iban = read_group(&doc).unwrap().participants.remove(0).iban;
+        assert_eq!(iban.as_deref(), Some("DE89370400440532013000"));
+        set_participant_iban(&doc, alice, None).unwrap();
+        assert_eq!(read_group(&doc).unwrap().participants[0].iban, None);
     }
 
     #[test]

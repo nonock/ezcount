@@ -260,6 +260,7 @@ mod tests {
                     added_by: None,
                     removed_at: None,
                     removed_by: None,
+                    iban: None,
                 },
                 Participant {
                     id: "p2".to_string(),
@@ -270,6 +271,7 @@ mod tests {
                     added_by: None,
                     removed_at: None,
                     removed_by: None,
+                    iban: None,
                 },
                 Participant {
                     id: "p3".to_string(),
@@ -280,6 +282,7 @@ mod tests {
                     added_by: None,
                     removed_at: None,
                     removed_by: None,
+                    iban: None,
                 },
             ],
             expenses: vec![],
@@ -327,6 +330,8 @@ mod tests {
             added_at: None,
             added_by: None,
             recurring: None,
+            items: Vec::new(),
+            comments: Vec::new(),
             original: None,
         });
         // Bob pays 30.00 for Alice & Bob
@@ -358,6 +363,8 @@ mod tests {
             added_at: None,
             added_by: None,
             recurring: None,
+            items: Vec::new(),
+            comments: Vec::new(),
             original: None,
         });
 
@@ -423,6 +430,8 @@ mod tests {
             added_at: None,
             added_by: None,
             recurring: None,
+            items: Vec::new(),
+            comments: Vec::new(),
             original: None,
         });
 
@@ -466,6 +475,8 @@ mod tests {
             added_at: None,
             added_by: None,
             recurring: None,
+            items: Vec::new(),
+            comments: Vec::new(),
             original: None,
         });
 
@@ -528,6 +539,8 @@ mod tests {
             added_at: None,
             added_by: None,
             recurring: None,
+            items: Vec::new(),
+            comments: Vec::new(),
             original: None,
         });
 
@@ -553,6 +566,8 @@ mod tests {
             added_at: None,
             added_by: None,
             recurring: None,
+            items: Vec::new(),
+            comments: Vec::new(),
             original: None,
         });
 
@@ -651,6 +666,8 @@ mod tests {
             added_at: None,
             added_by: None,
             recurring: None,
+            items: Vec::new(),
+            comments: Vec::new(),
             original: None,
         }
     }

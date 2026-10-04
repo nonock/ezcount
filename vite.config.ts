@@ -30,6 +30,9 @@ export default defineConfig(({ mode }) => ({
     ],
   },
   worker: { format: "es" as const },
+  // Loaded only when a PDF is exported: found late, the development server would bundle them
+  // then and reload the page under the user (and the tests).
+  optimizeDeps: { include: ["pdf-lib", "@pdf-lib/fontkit"] },
   // The relay serves the web version from sync-server/web (its Docker build copies it in).
   build: { outDir: mode === "web" ? "sync-server/web" : "dist", emptyOutDir: true },
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

@@ -1,6 +1,8 @@
-//! The background sync loop: `sync::sync_all` right after local edits and on a timer, with
-//! its findings sent to the frontend as events.
+//! The background sync loop: `sync::sync_all_noticing` right after local edits and on a
+//! timer, with its findings sent to the frontend as events and, on Android, shown as
+//! notifications when the app isn't on screen (see `notify`).
 
+use ezcount_core::notices::Notice;
 use ezcount_core::sync::{self, SyncEvent};
 use ezcount_core::AppState;
 use serde::Serialize;
@@ -23,6 +25,20 @@ struct GroupSynced {
     changed: bool,
 }
 
+/// One pass: syncs everything, tells the frontend, and returns what the other members did.
+pub async fn sync_once(app: &AppHandle) -> Vec<Notice> {
+    let state = app.state::<AppState>();
+    sync::sync_all_noticing(&state, |event| {
+        let _ = match event {
+            SyncEvent::Account => app.emit(ACCOUNT_EVENT, ()),
+            SyncEvent::Group { group_id, changed } => {
+                app.emit(SYNC_EVENT, GroupSynced { group_id, changed })
+            }
+        };
+    })
+    .await
+}
+
 pub fn spawn_sync(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -33,15 +49,11 @@ pub fn spawn_sync(app: AppHandle) {
             }
             tokio::time::sleep(DEBOUNCE).await;
 
-            sync::sync_all(&state, |event| {
-                let _ = match event {
-                    SyncEvent::Account => app.emit(ACCOUNT_EVENT, ()),
-                    SyncEvent::Group { group_id, changed } => {
-                        app.emit(SYNC_EVENT, GroupSynced { group_id, changed })
-                    }
-                };
-            })
-            .await;
+            let notices = sync_once(&app).await;
+            #[cfg(target_os = "android")]
+            crate::notify::post(&app, &notices);
+            #[cfg(not(target_os = "android"))]
+            drop(notices);
         }
     });
 }

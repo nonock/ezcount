@@ -1390,6 +1390,7 @@ version = "0.3.0"
 dependencies = [
  "chrono",
  "ezcount-core",
+ "jni",
  "serde",
  "serde_json",
  "specta",

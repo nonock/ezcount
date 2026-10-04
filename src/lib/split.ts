@@ -1,6 +1,6 @@
 // How an expense is divided, as `engine.rs` computes it, to show it before it is saved.
 
-import type { Expense, ExpenseSplit } from "@/types";
+import type { Expense, ExpenseItem, ExpenseSplit, Group } from "@/types";
 
 type Paid = Pick<Expense, "paid_by" | "payers" | "amount_cents" | "original">;
 
@@ -47,6 +47,46 @@ export function paidAmounts(expense: Paid): { id: string; cents: number }[] {
   const there = payers.map((p) => p.amount_cents);
   const here = expense.original ? splitWeighted(expense.amount_cents, there) : there;
   return payers.map((p, i) => ({ id: p.participant_id, cents: here[i] }));
+}
+
+/**
+ * What each person owes of an expense entered line by line, in the order they first appear
+ * (as `doc::items_owed`): a line is shared equally between its people, the cents left over
+ * going to the first ones.
+ */
+export function itemsOwed(
+  items: Pick<ExpenseItem, "amount_cents" | "participants">[]
+): Map<string, number> {
+  const owed = new Map<string, number>();
+  for (const item of items) {
+    const people = item.participants.length;
+    if (people === 0) continue;
+    const each = Math.floor(item.amount_cents / people);
+    const extra = item.amount_cents % people;
+    item.participants.forEach((id, i) => {
+      owed.set(id, (owed.get(id) ?? 0) + each + (i < extra ? 1 : 0));
+    });
+  }
+  return owed;
+}
+
+/**
+ * What the group owes a member (above zero) or the member owes it (below), as
+ * `engine::calculate_balances`: money that came in counts the other way.
+ */
+export function netBalance(group: Group, participantId: string): number {
+  let net = 0;
+  for (const e of group.expenses) {
+    const sign = e.income ? -1 : 1;
+    for (const paid of paidAmounts(e)) {
+      if (paid.id === participantId) net += sign * paid.cents;
+    }
+    const owed = owedAmounts(e.amount_cents, e.original?.amount_cents, e.splits);
+    e.splits.forEach((s, i) => {
+      if (s.participant_id === participantId) net -= sign * owed[i];
+    });
+  }
+  return net;
 }
 
 /** The currency an expense's fixed amounts are in: the one it was paid in. */

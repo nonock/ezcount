@@ -44,6 +44,8 @@ export interface MockExpense {
   added_at?: string | null;
   added_by?: string | null;
   recurring?: string | null;
+  items?: { name: string; amount_cents: number; participants: string[] }[];
+  comments?: { id: string; text: string; created_at: string; by?: string | null }[];
 }
 
 export interface MockRecurringExpense {
@@ -75,6 +77,7 @@ export interface MockGroup {
     name: string;
     removed?: boolean;
     avatar?: string | null;
+    iban?: string | null;
     added_at?: string | null;
     added_by?: string | null;
     removed_at?: string | null;
@@ -103,12 +106,14 @@ export const MOCK_SERVER = "http://localhost:8787";
  * - `__RECOVERY_KEY__`: the account's recovery key; new ones are `MOCK-KEY<n>-AAAA-…`
  * - `__OLD_RELAY__`: sign-up gets no recovery key, like on a relay from before them
  * - `__NATIVE__`: `{ share, scan, save }` features, none by default; shared texts land in
- *   `window.__shared`, saved files in `window.__saved`
+ *   `window.__shared`, saved files in `window.__saved` (with `text`, or `bytes` for a PDF)
  * - `__SCANNED__`: what the camera "scans"
+ * - messages sent from the feedback form land in `window.__feedback`; with `__OLD_RELAY__`
+ *   the relay doesn't take them
  * - `__LINK_SECONDS__`: how long a login link works, 120 by default
  * - `__RATES__`: exchange rates the relay suggests, as `{ "USD/EUR": "0.9234" }`
  * - `__ARCHIVED__`: ids of the groups the user archived
- * - `__PROFILE__`: the account's `{ display_name, avatar }`
+ * - `__PROFILE__`: the account's `{ display_name, avatar, iban }`
  * - `__STORAGE_WARNINGS__`
  */
 export function installTauriMock() {
@@ -122,6 +127,7 @@ export function installTauriMock() {
     server_url: string;
     display_name: string | null;
     avatar: string | null;
+    iban: string | null;
     archived: string[];
     identities: Record<string, string>;
   } | null = null;
@@ -151,6 +157,7 @@ export function installTauriMock() {
           server_url: MOCK_SERVER,
           display_name: w.__PROFILE__?.display_name ?? null,
           avatar: w.__PROFILE__?.avatar ?? null,
+          iban: w.__PROFILE__?.iban ?? null,
           archived: [...(w.__ARCHIVED__ ?? [])],
           identities: w.__SEED_IDENTITIES__ ? { ...w.__SEED_IDENTITIES__ } : identities,
         };
@@ -243,6 +250,53 @@ export function installTauriMock() {
     }
   }
 
+  // What reading a group does first, like api.rs's `keep_up`: the repeated expenses due are
+  // added, and what was deleted more than 30 days ago leaves the trash.
+  function keepUp(group: MockGroup) {
+    addDueExpenses(group);
+    const kept = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+    group.trash = (group.trash ?? []).filter((d) => d.deleted_at > kept);
+  }
+
+  // An IBAN as stored, like doc.rs's `check_iban`.
+  function checkIban(typed: string) {
+    const iban = typed.replace(/\s/g, "").toUpperCase();
+    let rest = 0;
+    for (const c of iban.slice(4) + iban.slice(0, 4)) {
+      const n = Number.parseInt(c, 36);
+      rest = (n > 9 ? rest * 100 + n : rest * 10 + n) % 97;
+    }
+    if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(iban) || rest !== 1) {
+      throw new Error("This IBAN is not valid");
+    }
+    return iban;
+  }
+
+  // The splits of an expense entered line by line, like doc.rs's `items_splits`.
+  function itemsSplits(amountCents: number, original: MockOriginalAmount | null, items: any[]) {
+    const money = (cents: number) => (cents / 100).toFixed(2);
+    const paid = original?.amount_cents ?? amountCents;
+    const total = items.reduce((sum, item) => sum + item.amount_cents, 0);
+    if (items.some((item) => item.participants.length === 0)) {
+      throw new Error("Each item needs at least one person");
+    }
+    if (total !== paid) {
+      throw new Error(`The items add up to ${money(total)}, not the expense's ${money(paid)}`);
+    }
+    const owed = new Map<string, number>();
+    for (const item of items) {
+      const people = item.participants.length;
+      const each = Math.floor(item.amount_cents / people);
+      const extra = item.amount_cents % people;
+      item.participants.forEach((id: string, i: number) => {
+        owed.set(id, (owed.get(id) ?? 0) + each + (i < extra ? 1 : 0));
+      });
+    }
+    return [...owed]
+      .filter(([, cents]) => cents > 0)
+      .map(([participant_id, cents]) => ({ participant_id, shares: 0, fixed_cents: cents }));
+  }
+
   // A stand-in for zxcvbn: longer is stronger, a few common passwords and the username are weak.
   const PICTURE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
   function checkPicture(picture: string | null | undefined) {
@@ -253,7 +307,7 @@ export function installTauriMock() {
     if (picture.length > 200_000) throw new Error("This picture is too big");
   }
 
-  /** Gives a member the profile's name and picture, like `show_profile` in sync.rs. */
+  /** Gives a member the profile's name, picture and IBAN, like `show_profile` in sync.rs. */
   function showProfile(groupId: string, participantId: string) {
     const member = getGroups()
       .find((g) => g.id === groupId)
@@ -261,6 +315,7 @@ export function installTauriMock() {
     if (!member || !account) return;
     if (account.display_name) member.name = account.display_name;
     member.avatar = account.avatar;
+    member.iban = account.iban;
   }
 
   function passwordStrength(password: string, username: string) {
@@ -392,6 +447,7 @@ export function installTauriMock() {
       original: e.original ?? null,
       income: e.income ?? false,
       repeat: e.repeat || null,
+      items: (e.items ?? []).map((item: any) => ({ ...item, name: item.name.trim() })),
     };
   }
 
@@ -545,6 +601,15 @@ export function installTauriMock() {
         case "native_features":
           return { share: false, scan: false, save: false, ...w.__NATIVE__ };
 
+        case "plugin:app|version":
+          return "0.0.0-test";
+
+        case "send_feedback":
+          requireAccount();
+          if (w.__OLD_RELAY__) throw new Error("This sync server doesn't take messages yet");
+          w.__feedback = [...(w.__feedback || []), args];
+          return null;
+
         case "plugin:barcode-scanner|check_permissions":
           return { camera: "granted" };
 
@@ -554,6 +619,14 @@ export function installTauriMock() {
         case "save_download":
           w.__saved = [...(w.__saved || []), { name: args.fileName, text: args.text }];
           return `C:\\Users\\alice\\Downloads\\${args.fileName}`;
+
+        case "save_file":
+          w.__saved = [...(w.__saved || []), { name: args.fileName, bytes: args.data }];
+          return `C:\\Users\\alice\\Downloads\\${args.fileName}`;
+
+        case "share_file":
+          w.__shared = [...(w.__shared || []), args.fileName];
+          return null;
 
         case "share_text":
           w.__shared = [...(w.__shared || []), args.text];
@@ -581,6 +654,7 @@ export function installTauriMock() {
             server_url: args.serverUrl,
             display_name: null,
             avatar: null,
+            iban: null,
             archived: [],
             identities: {},
           };
@@ -600,6 +674,7 @@ export function installTauriMock() {
             server_url: args.serverUrl,
             display_name: null,
             avatar: null,
+            iban: null,
             archived: [],
             identities: {},
           };
@@ -619,6 +694,7 @@ export function installTauriMock() {
             server_url: args.serverUrl,
             display_name: null,
             avatar: null,
+            iban: null,
             archived: [],
             identities: {},
           };
@@ -667,6 +743,7 @@ export function installTauriMock() {
             server_url: params.get("server") || "",
             display_name: null,
             avatar: null,
+            iban: null,
             archived: [],
             identities: {},
           };
@@ -693,7 +770,10 @@ export function installTauriMock() {
             throw new Error("This person is not a member of the group");
           }
           const previous = g.participants.find((x) => x.id === acc.identities[args.groupId]);
-          if (previous && previous.id !== args.participantId) previous.avatar = null;
+          if (previous && previous.id !== args.participantId) {
+            previous.avatar = null;
+            previous.iban = null;
+          }
           acc.identities[args.groupId] = args.participantId;
           showProfile(args.groupId, args.participantId);
           return clone(acc);
@@ -704,8 +784,10 @@ export function installTauriMock() {
           const name = String(args.name).trim();
           if (name.length > 50) throw new Error("This name is too long (50 characters at most)");
           checkPicture(args.avatar);
+          const iban = args.iban?.trim() ? checkIban(args.iban) : null;
           acc.display_name = name || null;
           acc.avatar = args.avatar ?? null;
+          acc.iban = iban;
           for (const [groupId, participantId] of Object.entries(acc.identities)) {
             showProfile(groupId, participantId);
           }
@@ -781,7 +863,7 @@ export function installTauriMock() {
         }
 
         case "get_groups":
-          getGroups().forEach(addDueExpenses);
+          getGroups().forEach(keepUp);
           return clone(getGroups());
 
         case "get_group": {
@@ -790,7 +872,7 @@ export function installTauriMock() {
           }
           const g = getGroups().find((x) => x.id === args.groupId);
           if (!g) throw new Error("Group not found");
-          addDueExpenses(g);
+          keepUp(g);
           return clone(g);
         }
 
@@ -1033,6 +1115,9 @@ export function installTauriMock() {
           args = expenseArgs(args);
           const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
+          if (args.items.length > 0) {
+            args.splits = itemsSplits(args.amountCents, args.original, args.items);
+          }
           checkSplits(args.amountCents, args.original, args.splits);
           const who = paidBy(args);
           const now = new Date().toISOString();
@@ -1062,6 +1147,8 @@ export function installTauriMock() {
             added_at: now,
             added_by: me(g),
             recurring,
+            items: args.items,
+            comments: [],
           };
           g.expenses.unshift(exp);
           if (recurring) {
@@ -1092,6 +1179,9 @@ export function installTauriMock() {
           const exp = g.expenses.find((x) => x.id === args?.expenseId);
           if (!exp) throw new Error("Expense not found");
 
+          if (args.items.length > 0) {
+            args.splits = itemsSplits(args.amountCents, args.original, args.items);
+          }
           checkSplits(args.amountCents, args.original, args.splits);
           const who = paidBy(args);
           const prevTitle = exp.title;
@@ -1120,6 +1210,7 @@ export function installTauriMock() {
           exp.paid_by = who.paid_by;
           exp.payers = who.payers;
           exp.splits = args.splits;
+          exp.items = args.items;
           if (args?.createdAt) {
             exp.created_at = args.createdAt;
           }
@@ -1175,6 +1266,35 @@ export function installTauriMock() {
             throw new Error("This expense is no longer in the trash");
           }
           g.trash = g.trash.filter((d) => d.expense.id !== args.expenseId);
+          return clone(g);
+        }
+
+        case "add_expense_comment": {
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          const exp = g.expenses.find((x) => x.id === args?.expenseId);
+          if (!exp) throw new Error("Expense not found");
+          const text = String(args.text).trim();
+          if (!text) throw new Error("A comment can't be empty");
+          if (text.length > 500) {
+            throw new Error("This comment is too long (500 characters at most)");
+          }
+          exp.comments ??= [];
+          exp.comments.push({
+            id: `com-${Date.now()}-${exp.comments.length}`,
+            text,
+            created_at: new Date().toISOString(),
+            by: me(g),
+          });
+          return clone(g);
+        }
+
+        case "delete_expense_comment": {
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          const exp = g.expenses.find((x) => x.comments?.some((c) => c.id === args?.commentId));
+          if (!exp) throw new Error("This comment no longer exists");
+          exp.comments = exp.comments?.filter((c) => c.id !== args.commentId);
           return clone(g);
         }
 

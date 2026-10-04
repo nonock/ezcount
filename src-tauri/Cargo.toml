@@ -30,7 +30,7 @@ chrono = { version = "0.4", features = ["serde"] }
 specta = { version = "=2.0.0-rc.20", features = ["derive", "chrono"] }
 specta-typescript = "=0.0.7"
 tauri-specta = { version = "=2.0.0-rc.20", features = ["typescript"] }
-tokio = { version = "1.53.1", features = ["time", "sync", "macros"] }
+tokio = { version = "1.53.1", features = ["time", "sync", "macros", "rt"] }
 tauri-plugin-deep-link = "2.4"
 
 [lints.rust]
@@ -54,6 +54,10 @@ opt-level = 3
 
 [profile.dev.package.blake2]
 opt-level = 3
+
+# The periodic job that syncs for notifications calls into the library (`notify.rs`).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-barcode-scanner = "2.4"

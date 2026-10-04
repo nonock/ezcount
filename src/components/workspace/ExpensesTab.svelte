@@ -4,6 +4,7 @@
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import EllipsisIcon from "@lucide/svelte/icons/ellipsis";
   import HandCoinsIcon from "@lucide/svelte/icons/hand-coins";
+  import MessageSquareIcon from "@lucide/svelte/icons/message-square";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import PiggyBankIcon from "@lucide/svelte/icons/piggy-bank";
   import PlusIcon from "@lucide/svelte/icons/plus";
@@ -469,6 +470,7 @@
           {@const isReimbursement = Boolean(e.is_reimbursement)}
           {@const isIncome = Boolean(e.income)}
           {@const editCount = e.history?.length ?? 0}
+          {@const commentCount = e.comments?.length ?? 0}
           {@const totalShares = e.splits.reduce((sum, s) => sum + s.shares, 0)}
           {@const anyFixed = e.splits.some((s) => s.fixed_cents != null)}
           {@const filed = isReimbursement ? null : categoryOf(e.category)}
@@ -524,6 +526,17 @@
                     >
                       <HistoryIcon />
                       {t("expenses.edited", editCount)}
+                    </button>
+                  {/if}
+                  {#if commentCount > 0}
+                    <button
+                      type="button"
+                      class={badgeVariants({ variant: "secondary" })}
+                      onclick={() => (dialogs.comments = e.id)}
+                      aria-label={t("comments.countLabel", commentCount, expenseTitle(e))}
+                    >
+                      <MessageSquareIcon />
+                      {commentCount}
                     </button>
                   {/if}
                 </Item.Title>
@@ -606,6 +619,10 @@
                     <DropdownMenu.Item onSelect={() => dialogs.openExpense(e)}>
                       <PencilIcon />
                       {t("common.edit")}
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => (dialogs.comments = e.id)}>
+                      <MessageSquareIcon />
+                      {t("comments.menu")}
                     </DropdownMenu.Item>
                     {#if editCount > 0}
                       <DropdownMenu.Item onSelect={() => (dialogs.history = e)}>

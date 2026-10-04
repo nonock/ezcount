@@ -24,6 +24,10 @@ class Dialogs {
   /** Adds an expense, or edits `editing`. */
   expense = $state({ open: false, editing: null as Expense | null });
   history = $state<Expense | null>(null);
+  /** The id of the expense whose comments are shown. */
+  comments = $state<string | null>(null);
+  /** How to pay someone back by bank transfer. */
+  pay = $state({ open: false, fromId: "", toId: "", amountCents: 0 });
   reimburse = $state({ open: false, fromId: "", toId: "", amount: "" });
   share = $state(false);
   who = $state(false);
@@ -33,6 +37,8 @@ class Dialogs {
   newRecoveryKey = $state(false);
   /** Shows a code that logs another device in. */
   linkDevice = $state(false);
+  /** An idea or a problem to send to whoever runs the server. */
+  feedback = $state(false);
 
   openJoin(code = "", error: string | null = null) {
     this.join = { open: true, code, error };
@@ -40,6 +46,10 @@ class Dialogs {
 
   openExpense(editing: Expense | null = null) {
     this.expense = { open: true, editing };
+  }
+
+  openPay(fromId: string, toId: string, amountCents: number) {
+    this.pay = { open: true, fromId, toId, amountCents };
   }
 
   openReimburse(prefill: { fromId?: string; toId?: string; amount?: string } = {}) {

@@ -3,8 +3,8 @@
 //! - `groups` (map): group id -> plain map { `server_url`, `secret`, `added_at` }
 //! - `identities` (map): group id -> id of the participant this person is in that group
 //! - `archived` (map): group id -> true, for the groups this person put away
-//! - `profile` (map): `name` and `avatar` (a `data:` URL), what this person shows in their
-//!   groups
+//! - `profile` (map): `name`, `avatar` (a `data:` URL) and `iban`, what this person shows in
+//!   their groups
 //!
 //! The document is synced through the relay like a group, end-to-end encrypted with the
 //! account key, so every device logged into the account sees the same groups and knows who
@@ -106,11 +106,12 @@ pub fn set_archived(doc: &LoroDoc, group_id: &str, archived: bool) -> Res<()> {
     }
 }
 
-/// The name and picture this person shows in their groups.
+/// The name, picture and bank account this person shows in their groups.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Profile {
     pub name: Option<String>,
     pub avatar: Option<String>,
+    pub iban: Option<String>,
 }
 
 /// The profile. Anything unusable in it reads as not set.
@@ -123,11 +124,12 @@ pub fn profile(doc: &LoroDoc) -> Profile {
     Profile {
         name: text("name").filter(|name| !name.trim().is_empty()),
         avatar: text("avatar").filter(|avatar| doc::check_image(avatar).is_ok()),
+        iban: text("iban").and_then(|iban| doc::check_iban(&iban).ok()),
     }
 }
 
-/// Sets the profile. An empty name, or no picture, removes it.
-pub fn set_profile(doc: &LoroDoc, name: &str, avatar: Option<&str>) -> Res<()> {
+/// Sets the profile. An empty name or IBAN, or no picture, removes it.
+pub fn set_profile(doc: &LoroDoc, name: &str, avatar: Option<&str>, iban: Option<&str>) -> Res<()> {
     let name = name.trim();
     if name.chars().count() > MAX_NAME_CHARS {
         return Err(format!(
@@ -137,6 +139,10 @@ pub fn set_profile(doc: &LoroDoc, name: &str, avatar: Option<&str>) -> Res<()> {
     if let Some(avatar) = avatar {
         doc::check_image(avatar)?;
     }
+    let iban = match iban.map(str::trim).filter(|iban| !iban.is_empty()) {
+        Some(iban) => Some(doc::check_iban(iban)?),
+        None => None,
+    };
     let current = profile(doc);
     let map = doc.get_map(PROFILE);
     // Only what changed is written, so a change to the other one elsewhere survives.
@@ -153,6 +159,12 @@ pub fn set_profile(doc: &LoroDoc, name: &str, avatar: Option<&str>) -> Res<()> {
             None => map.delete("avatar").map_err(doc_err)?,
         }
     }
+    if current.iban != iban {
+        match &iban {
+            Some(iban) => map.insert("iban", iban.as_str()).map_err(doc_err)?,
+            None => map.delete("iban").map_err(doc_err)?,
+        }
+    }
     Ok(())
 }
 
@@ -165,17 +177,30 @@ mod tests {
         let doc = LoroDoc::new();
         assert_eq!(profile(&doc), Profile::default());
         let picture = "data:image/png;base64,AAAA";
-        set_profile(&doc, " Alice ", Some(picture)).unwrap();
+        set_profile(
+            &doc,
+            " Alice ",
+            Some(picture),
+            Some("fr76 3000 6000 0112 3456 7890 189"),
+        )
+        .unwrap();
         assert_eq!(
             profile(&doc),
             Profile {
                 name: Some("Alice".into()),
-                avatar: Some(picture.into())
+                avatar: Some(picture.into()),
+                iban: Some("FR7630006000011234567890189".into()),
             }
         );
-        assert!(set_profile(&doc, &"a".repeat(MAX_NAME_CHARS + 1), None).is_err());
-        assert!(set_profile(&doc, "Alice", Some("data:text/html;base64,AAAA")).is_err());
-        set_profile(&doc, "", None).unwrap();
+        assert!(set_profile(&doc, &"a".repeat(MAX_NAME_CHARS + 1), None, None).is_err());
+        assert!(set_profile(&doc, "Alice", Some("data:text/html;base64,AAAA"), None).is_err());
+        // One digit off.
+        let wrong = Some("FR7630006000011234567890188");
+        assert_eq!(
+            set_profile(&doc, "Alice", None, wrong).unwrap_err(),
+            "This IBAN is not valid"
+        );
+        set_profile(&doc, "", None, Some(" ")).unwrap();
         assert_eq!(profile(&doc), Profile::default());
     }
 

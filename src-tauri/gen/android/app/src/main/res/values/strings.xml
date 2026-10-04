@@ -1,4 +1,14 @@
 <resources>
     <string name="app_name">ezcount</string>
     <string name="main_activity_title">ezcount</string>
+    <!-- Notifications of what the other members did (Notifier.kt). -->
+    <string name="notify_channel">Group activity</string>
+    <string name="notify_expense_by">%1$s added %2$s (%3$s)</string>
+    <string name="notify_expense">New expense: %1$s (%2$s)</string>
+    <string name="notify_income_by">%1$s added the income %2$s (%3$s)</string>
+    <string name="notify_income">New income: %1$s (%2$s)</string>
+    <string name="notify_payment">%1$s paid %2$s back %3$s</string>
+    <string name="notify_comment_by">%1$s on %2$s: %3$s</string>
+    <string name="notify_comment">New comment on %1$s: %2$s</string>
+    <string name="notify_many">%1$d new entries</string>
 </resources>

@@ -12,6 +12,9 @@
 #   public *;
 #}
 
+# The background sync calls into the Rust library by this class's name (notify.rs).
+-keep class com.ezvany.ezcount.SyncWorker { *; }
+
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable

@@ -94,7 +94,7 @@ export async function exportGroup() {
   if (!group) return;
   try {
     const csv = await api.exportGroupCsv(group.id);
-    const fileName = `${group.name.replace(/[/:*?"<>|]/g, "_")}.csv`;
+    const fileName = `${fileNameOf(group.name)}.csv`;
     if (isAndroid) {
       // Android's web view can't download what the page makes.
       await api.shareText(csv, fileName);
@@ -103,24 +103,62 @@ export async function exportGroup() {
     // The byte order mark makes Excel read the accents right.
     const text = `\uFEFF${csv}`;
     if (nativeFeatures.save) {
-      const path = await api.saveDownload(fileName, text);
-      toast.success(t("groups.exported"), {
-        description: path,
-        duration: 10_000,
-        action: { label: t("groups.showFile"), onClick: () => revealItemInDir(path) },
-      });
+      saved(await api.saveDownload(fileName, text));
       return;
     }
-    const url = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = fileName;
-    link.click();
-    URL.revokeObjectURL(url);
-    toast.success(t("groups.exported"), { description: t("groups.exportedBrowser", fileName) });
+    download(fileName, new Blob([text], { type: "text/csv" }));
   } catch (err) {
     toast.error(t("groups.exportFailed"), { description: errorMessage(err) });
   }
+}
+
+/**
+ * Saves the open group's summary (balances, who pays whom, expenses) as a PDF file, where
+ * `exportGroup` puts its CSV file. On Android it goes to the share sheet, as a file.
+ */
+export async function exportGroupPdf() {
+  const group = openGroup.group;
+  if (!group) return;
+  try {
+    // The library and its fonts are only loaded when a report is asked for.
+    const { groupReport } = await import("./report");
+    const pdf = await groupReport(group, openGroup.balances, openGroup.settlements);
+    const fileName = `${fileNameOf(group.name)}.pdf`;
+    if (isAndroid) {
+      await api.shareFile(fileName, "application/pdf", pdf);
+    } else if (nativeFeatures.save) {
+      saved(await api.saveFile(fileName, pdf));
+    } else {
+      download(fileName, new Blob([pdf as BlobPart], { type: "application/pdf" }));
+    }
+  } catch (err) {
+    toast.error(t("groups.exportFailed"), { description: errorMessage(err) });
+  }
+}
+
+/** A group's name without what a file name can't hold. */
+function fileNameOf(name: string) {
+  return name.replace(/[/:*?"<>|\\]/g, "_");
+}
+
+/** Says where an exported file went, with a way to it. */
+function saved(path: string) {
+  toast.success(t("groups.exported"), {
+    description: path,
+    duration: 10_000,
+    action: { label: t("groups.showFile"), onClick: () => revealItemInDir(path) },
+  });
+}
+
+/** Hands a file the page made to the browser's downloads. */
+function download(fileName: string, file: Blob) {
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+  toast.success(t("groups.exported"), { description: t("groups.exportedBrowser", fileName) });
 }
 
 /**

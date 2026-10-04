@@ -312,9 +312,49 @@ const FR: Pattern[] = [
     "Évitez les dates et années liées à vous.",
   ],
 
+  // Feedback
+  [/^Write a message first$/, "Écrivez d'abord un message"],
+  [
+    /^This message is too long ((d+) characters at most)$/,
+    (n) => `Ce message est trop long (${n} caractères au plus)`,
+  ],
+  [
+    /^This sync server doesn't take messages yet$/,
+    "Ce serveur de synchronisation ne reçoit pas encore les messages",
+  ],
+  [
+    /^Too many messages were sent from your network: try again later$/,
+    "Trop de messages ont été envoyés depuis votre réseau : réessayez plus tard",
+  ],
+
+  // IBAN, items and comments
+  [/^This IBAN is not valid$/, "Cet IBAN n'est pas valide"],
+  [
+    /^The items add up to (.*), not the expense's (.*)$/,
+    (a, b) => `Les articles totalisent ${a}, pas les ${b} de la dépense`,
+  ],
+  [/^Each item needs at least one person$/, "Chaque article doit être pour au moins une personne"],
+  [/^An item's amount must be above zero$/, "Le montant d'un article doit être supérieur à zéro"],
+  [
+    /^An item's name is too long \((\d+) characters at most\)$/,
+    (n) => `Le nom d'un article est trop long (${n} caractères au plus)`,
+  ],
+  [
+    /^An expense can't have more than (\d+) items$/,
+    (n) => `Une dépense ne peut pas avoir plus de ${n} articles`,
+  ],
+  [/^A participant appears twice on an item$/, "Une personne figure deux fois sur un article"],
+  [/^A comment can't be empty$/, "Un commentaire ne peut pas être vide"],
+  [
+    /^This comment is too long \((\d+) characters at most\)$/,
+    (n) => `Ce commentaire est trop long (${n} caractères au plus)`,
+  ],
+  [/^This comment no longer exists$/, "Ce commentaire n'existe plus"],
+
   // Edit summaries, kept with the expense
   [/^Updated without major changes$/, "Mise à jour sans changement notable"],
   [/^Restored from the trash$/, "Restaurée depuis la corbeille"],
+  [/^Items updated$/, "Articles modifiés"],
   [/^Title changed from '(.*)' to '(.*)'$/, (a, b) => `Titre changé de « ${a} » à « ${b} »`],
   [/^Amount changed from (.*) to (.*)$/, (a, b) => `Montant changé de ${a} à ${b}`],
   [/^Payer changed from (.*) to (.*)$/, (a, b) => `Payeur changé de ${a} à ${b}`],

@@ -70,6 +70,7 @@
 //! and total sizes (413 and 507 past them), and per-client rates of uploads, new documents,
 //! sign-ups and failed logins (429).
 
+mod feedback;
 mod limits;
 mod links;
 mod rates;
@@ -117,6 +118,9 @@ pub struct Settings {
     /// The rate service behind `/v1/rates` ([`DEFAULT_RATES_URL`] is one). Without it the
     /// relay suggests no exchange rates, and makes no requests of its own.
     pub rates_url: Option<String>,
+    /// Lets whoever has it read what people sent from the app's feedback form
+    /// (`GET /v1/feedback`). Without it the messages are kept, and not served.
+    pub admin_token: Option<String>,
 }
 
 pub struct Relay {
@@ -133,6 +137,7 @@ pub struct Relay {
     web_dir: Option<PathBuf>,
     rates: rates::Rates,
     links: links::Links,
+    admin_token: Option<String>,
 }
 
 impl Relay {
@@ -163,6 +168,13 @@ impl Relay {
                  login_hash  BLOB NOT NULL,
                  wrapped_key BLOB NOT NULL,
                  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE IF NOT EXISTS feedback (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 message    TEXT NOT NULL,
+                 contact    TEXT,
+                 app        TEXT,
+                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
              );
              CREATE TABLE IF NOT EXISTS relay_meta (
                  key   TEXT PRIMARY KEY,
@@ -220,6 +232,7 @@ impl Relay {
                 .filter(|dir| dir.join("index.html").is_file()),
             rates: rates::Rates::new(settings.rates_url),
             links: links::Links::default(),
+            admin_token: settings.admin_token.filter(|token| !token.is_empty()),
         }))
     }
 }
@@ -259,7 +272,9 @@ pub fn router(relay: Arc<Relay>) -> Router {
         .route("/v1/accounts/credentials", post(update_credentials))
         .route("/v1/accounts/links", post(links::create))
         .route("/v1/accounts/links/claim", post(links::claim))
-        .route("/v1/rates/{from}/{to}", get(rates::rate));
+        .route("/v1/rates/{from}/{to}", get(rates::rate))
+        .route("/v1/feedback", get(feedback::list).post(feedback::send))
+        .route("/feedback", get(feedback::page));
     if let Some(dir) = &relay.web_dir {
         router = router.fallback_service(web_app(dir));
     }

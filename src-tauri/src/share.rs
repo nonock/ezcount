@@ -1,5 +1,5 @@
-//! Sharing text through Android's share sheet, so an invite can go out through any messaging
-//! app. The Kotlin side is `SharePlugin.kt` in the Android project. Other platforms copy the
+//! Sharing text and files through Android's share sheet, so an invite can go out through any
+//! messaging app, and an exported file be sent or saved. The Kotlin side is `SharePlugin.kt` in the Android project. Other platforms copy the
 //! invite instead; `native_features` tells the frontend which to offer.
 
 use serde::Serialize;
@@ -11,6 +11,13 @@ pub struct Share(PluginHandle<Wry>);
 #[derive(Serialize)]
 struct ShareArgs<'a> {
     text: &'a str,
+    title: &'a str,
+}
+
+#[derive(Serialize)]
+struct ShareFileArgs<'a> {
+    path: &'a str,
+    mime: &'a str,
     title: &'a str,
 }
 
@@ -29,6 +36,20 @@ pub fn share_text(app: &tauri::AppHandle, text: &str, title: &str) -> Result<(),
     app.state::<Share>()
         .0
         .run_mobile_plugin::<serde_json::Value>("shareText", ShareArgs { text, title })
+        .map(|_| ())
+        .map_err(|e| format!("Could not open the share menu: {e}"))
+}
+
+/// Opens the share sheet with the file at `path`, which must be in the app's cache folder.
+pub fn share_file(
+    app: &tauri::AppHandle,
+    path: &str,
+    mime: &str,
+    title: &str,
+) -> Result<(), String> {
+    app.state::<Share>()
+        .0
+        .run_mobile_plugin::<serde_json::Value>("shareFile", ShareFileArgs { path, mime, title })
         .map(|_| ())
         .map_err(|e| format!("Could not open the share menu: {e}"))
 }

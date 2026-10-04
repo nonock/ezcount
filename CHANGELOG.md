@@ -20,7 +20,14 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 - Repeated expenses: "Repeat" in the expense form adds it again every week, month or year (a rent, a subscription). "Repeated expenses", under the same button, lists them and stops them.
 - Income: money that came in for the group (a deposit given back, a refund), shared like an expense. Devices still on an older version don't see it, until they update.
 - "Transfer" in the expense form records money one member gave another.
-- A trash: a deleted expense can be put back, right away with "Undo" or later from "Trash" under that button, by any member.
+- A trash: a deleted expense can be put back, right away with "Undo" or later from "Trash" under that button, by any member. It stays there 30 days.
+- An IBAN in your profile, shown to the members of your groups. "Settle Up" then offers a QR code next to what someone owes you: scanned with a banking app, it fills in the transfer (in euros; the IBAN can be copied in any currency).
+- The group list says what you owe and what you are owed, in each group and over all of them.
+- "Split by item…" in the expense form: enter the lines of a receipt and who each was for, and everyone owes what they took.
+- Comments under an expense, from its menu; the activity lists them.
+- "Export as PDF" in the group's menu: its balances, who should pay whom and its expenses, on a page to print or send.
+- Notifications on Android when another member adds an expense, a payment or a comment while the app isn't on screen. The phone looks for news every 15 minutes at best, so they can come a while after.
+- "Suggest a feature" in the menu: write an idea or a problem, with an e-mail address if you would like an answer. It goes to whoever runs your server.
 - Archive a group: it leaves your list for an "Archived" section, on your devices only, and can come back.
 - Delete a group for everyone. When someone still owes something, every member has to agree first; members on an older version keep the group.
 

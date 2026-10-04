@@ -67,6 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(url) => Some(url.trim().to_string()),
             Err(_) => Some(DEFAULT_RATES_URL.to_string()),
         },
+        admin_token: std::env::var("EZCOUNT_ADMIN_TOKEN").ok(),
     };
 
     println!(
@@ -87,6 +88,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match &settings.rates_url {
         Some(url) => println!("exchange rates from {url}"),
         None => println!("no exchange rates"),
+    }
+    if settings
+        .admin_token
+        .as_deref()
+        .is_some_and(|t| !t.is_empty())
+    {
+        println!("feedback can be read at /feedback with the admin token");
     }
     if let Some(app) = &settings.android_app {
         println!("invite links open the Android app {}", app.package);

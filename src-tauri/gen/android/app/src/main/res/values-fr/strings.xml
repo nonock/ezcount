@@ -1,0 +1,11 @@
+<resources>
+    <string name="notify_channel">Activité des groupes</string>
+    <string name="notify_expense_by">%1$s a ajouté %2$s (%3$s)</string>
+    <string name="notify_expense">Nouvelle dépense : %1$s (%2$s)</string>
+    <string name="notify_income_by">%1$s a ajouté le revenu %2$s (%3$s)</string>
+    <string name="notify_income">Nouveau revenu : %1$s (%2$s)</string>
+    <string name="notify_payment">%1$s a remboursé %3$s à %2$s</string>
+    <string name="notify_comment_by">%1$s sur %2$s : %3$s</string>
+    <string name="notify_comment">Nouveau commentaire sur %1$s : %2$s</string>
+    <string name="notify_many">%1$d nouveautés</string>
+</resources>

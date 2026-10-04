@@ -3,6 +3,8 @@
 
 mod background;
 #[cfg(target_os = "android")]
+mod notify;
+#[cfg(target_os = "android")]
 mod share;
 
 use ezcount_core::models::{
@@ -212,6 +214,29 @@ fn purge_expense(
     api::purge_expense(&state, &group_id, &expense_id)
 }
 
+/// Writes a comment under an expense.
+#[tauri::command]
+#[specta::specta]
+fn add_expense_comment(
+    state: State<AppState>,
+    group_id: String,
+    expense_id: String,
+    text: String,
+) -> Result<Group, String> {
+    api::add_expense_comment(&state, &group_id, &expense_id, &text)
+}
+
+/// Removes a comment from under an expense.
+#[tauri::command]
+#[specta::specta]
+fn delete_expense_comment(
+    state: State<AppState>,
+    group_id: String,
+    comment_id: String,
+) -> Result<Group, String> {
+    api::delete_expense_comment(&state, &group_id, &comment_id)
+}
+
 /// Stops a repeated expense. The ones already added stay.
 #[tauri::command]
 #[specta::specta]
@@ -378,16 +403,18 @@ fn set_identity(
     api::set_identity(&state, &group_id, &participant_id)
 }
 
-/// Sets the name and picture (a `data:` URL) the user shows, in every group where they said
-/// who they are. An empty name keeps the names the groups have.
+/// Sets the name, picture (a `data:` URL) and bank account (an IBAN, to be paid back on) the
+/// user shows, in every group where they said who they are. An empty name keeps the names
+/// the groups have.
 #[tauri::command]
 #[specta::specta]
 fn update_profile(
     state: State<AppState>,
     name: String,
     avatar: Option<String>,
+    iban: Option<String>,
 ) -> Result<AccountInfo, String> {
-    api::update_profile(&state, &name, avatar.as_deref())
+    api::update_profile(&state, &name, avatar.as_deref(), iban.as_deref())
 }
 
 /// Adds the user to a group as a new participant.
@@ -402,6 +429,19 @@ fn add_self(state: State<AppState>, group_id: String, name: String) -> Result<Gr
 #[specta::specta]
 async fn password_strength(password: String, username: String) -> PasswordStrength {
     api::password_strength(&password, &username)
+}
+
+/// Sends an idea or a problem to whoever runs the account's relay. `contact` is how to
+/// answer, when an answer is wanted; `app` says which app it comes from.
+#[tauri::command]
+#[specta::specta]
+async fn send_feedback(
+    state: State<'_, AppState>,
+    message: String,
+    contact: Option<String>,
+    app: Option<String>,
+) -> Result<(), String> {
+    api::send_feedback(&state, &message, contact.as_deref(), app.as_deref()).await
 }
 
 /// What this platform can do natively, beyond the web view.
@@ -424,11 +464,34 @@ async fn save_download(
     file_name: String,
     text: String,
 ) -> Result<String, String> {
-    // The name only: nothing in it may lead out of the folder.
-    let name = std::path::Path::new(&file_name)
+    save_in_downloads(&app, &file_name, text.as_bytes())
+}
+
+/// The same for a file that isn't text, such as a PDF.
+#[tauri::command]
+#[specta::specta]
+async fn save_file(
+    app: tauri::AppHandle,
+    file_name: String,
+    data: Vec<u8>,
+) -> Result<String, String> {
+    save_in_downloads(&app, &file_name, &data)
+}
+
+/// A file name as it is, when nothing in it may lead out of the folder it goes in.
+fn plain_file_name(file_name: &str) -> Result<&std::ffi::OsStr, String> {
+    std::path::Path::new(file_name)
         .file_name()
-        .filter(|name| *name == std::ffi::OsStr::new(&file_name))
-        .ok_or_else(|| "This file name can't be used".to_string())?;
+        .filter(|name| *name == std::ffi::OsStr::new(file_name))
+        .ok_or_else(|| "This file name can't be used".to_string())
+}
+
+fn save_in_downloads(
+    app: &tauri::AppHandle,
+    file_name: &str,
+    contents: &[u8],
+) -> Result<String, String> {
+    let name = plain_file_name(file_name)?;
     let folder = app
         .path()
         .download_dir()
@@ -449,8 +512,36 @@ async fn save_download(
         path = folder.join(numbered);
         copy += 1;
     }
-    std::fs::write(&path, text).map_err(|e| format!("Could not save the file: {e}"))?;
+    std::fs::write(&path, contents).map_err(|e| format!("Could not save the file: {e}"))?;
     Ok(path.display().to_string())
+}
+
+/// Hands a file (a PDF, say) to the system share sheet, to send it or save it. Only where
+/// `native_features().share` is true.
+#[tauri::command]
+#[specta::specta]
+#[allow(unused_variables)]
+async fn share_file(
+    app: tauri::AppHandle,
+    file_name: String,
+    mime: String,
+    data: Vec<u8>,
+) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        // Other apps read it through the app's file provider, which serves its cache folder.
+        let folder = app
+            .path()
+            .app_cache_dir()
+            .map_err(|_| "Could not find a folder for the file".to_string())?
+            .join("shared");
+        std::fs::create_dir_all(&folder).map_err(|e| format!("Could not save the file: {e}"))?;
+        let path = folder.join(plain_file_name(&file_name)?);
+        std::fs::write(&path, data).map_err(|e| format!("Could not save the file: {e}"))?;
+        return share::share_file(&app, &path.display().to_string(), &mime, &file_name);
+    }
+    #[cfg(not(target_os = "android"))]
+    Err("Sharing is not available on this device".to_string())
 }
 
 /// Opens the system share sheet with `text`. Only where `native_features().share` is true.
@@ -495,6 +586,8 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         join_group,
         get_account,
         update_profile,
+        add_expense_comment,
+        delete_expense_comment,
         sign_up,
         log_in,
         log_out,
@@ -502,8 +595,11 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         add_self,
         native_features,
         share_text,
+        share_file,
         save_download,
+        save_file,
         password_strength,
+        send_feedback,
         recover_account,
         change_password,
         replace_recovery_key,
@@ -606,7 +702,7 @@ pub fn run() {
     }
     #[cfg(target_os = "android")]
     {
-        app = app.plugin(share::init());
+        app = app.plugin(share::init()).plugin(notify::init());
     }
 
     #[cfg(windows)]
@@ -654,6 +750,8 @@ pub fn run() {
             eprintln!("[storage] {warning}");
         }
         app.manage(AppState::new(store, warnings)?);
+        #[cfg(target_os = "android")]
+        notify::started(app.handle().clone());
         background::spawn_sync(app.handle().clone());
         Ok(())
     })

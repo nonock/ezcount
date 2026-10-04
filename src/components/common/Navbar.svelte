@@ -1,5 +1,6 @@
 <script lang="ts">
   import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
+  import LightbulbIcon from "@lucide/svelte/icons/lightbulb";
   import MenuIcon from "@lucide/svelte/icons/menu";
   import MonitorIcon from "@lucide/svelte/icons/monitor";
   import MoonIcon from "@lucide/svelte/icons/moon";
@@ -90,6 +91,10 @@
           <DropdownMenu.Item onSelect={() => (dialogs.linkDevice = true)}>
             <SmartphoneIcon />
             {t("menu.linkDevice")}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => (dialogs.feedback = true)}>
+            <LightbulbIcon />
+            {t("menu.suggest")}
           </DropdownMenu.Item>
           <DropdownMenu.Separator />
           <!-- The three themes side by side, the current one raised. -->

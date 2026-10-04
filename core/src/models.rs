@@ -14,6 +14,10 @@ pub struct Participant {
     // "this is me".
     #[serde(default)]
     pub avatar: Option<String>,
+    // The bank account to pay them back on, from the profile of the account that said "this
+    // is me": upper-case, without spaces.
+    #[serde(default)]
+    pub iban: Option<String>,
     // When they were added after the group was made, and by which member (themselves when
     // they joined). Not known for the members the group started with.
     #[serde(default)]
@@ -53,6 +57,26 @@ pub struct OriginalAmount {
     pub amount_cents: i64,
     // Units of the group's currency for one of this currency, as typed: "0.9234".
     pub rate: String,
+}
+
+/// One line of an expense detailed item by item: the people who share it, equally.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct ExpenseItem {
+    pub name: String,
+    // In the currency the expense was paid in.
+    pub amount_cents: i64,
+    pub participants: Vec<String>,
+}
+
+/// What a member wrote under an expense.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct ExpenseComment {
+    pub id: String,
+    pub text: String,
+    pub created_at: DateTime<Utc>,
+    // The member who wrote it, when the app knew who the user was.
+    #[serde(default)]
+    pub by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -111,6 +135,13 @@ pub struct Expense {
     // The repeated expense it comes from.
     #[serde(default)]
     pub recurring: Option<String>,
+    // The expense line by line, when it was entered that way: `splits` then holds what each
+    // person owes of them, as fixed amounts.
+    #[serde(default)]
+    pub items: Vec<ExpenseItem>,
+    // The oldest first.
+    #[serde(default)]
+    pub comments: Vec<ExpenseComment>,
 }
 
 /// An expense someone deleted, kept so it can be put back.
@@ -172,6 +203,9 @@ pub struct ExpenseInput {
     // "week", "month" or "year" to add it again each time, when adding an expense.
     #[serde(default)]
     pub repeat: Option<String>,
+    // The expense line by line. With these, `splits` is worked out from them.
+    #[serde(default)]
+    pub items: Vec<ExpenseItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -277,6 +311,9 @@ pub struct AccountInfo {
     // The name and picture the user shows in their groups, from their profile.
     pub display_name: Option<String>,
     pub avatar: Option<String>,
+    // The bank account the user gives the members of their groups to be paid back on.
+    #[serde(default)]
+    pub iban: Option<String>,
     // The groups the user put away: still theirs, listed apart.
     pub archived: Vec<String>,
     // Group id -> id of the participant the user is in that group.

@@ -10,6 +10,7 @@ pub mod csv_file;
 pub mod doc;
 pub mod engine;
 pub mod models;
+pub mod notices;
 pub mod storage;
 pub mod sync;
 
@@ -72,6 +73,7 @@ impl AppState {
             server_url: session.server_url.clone(),
             display_name: profile.name,
             avatar: profile.avatar,
+            iban: profile.iban,
             archived: account::archived(store.account_doc()?),
             identities: account::identities(store.account_doc()?)?,
         }))

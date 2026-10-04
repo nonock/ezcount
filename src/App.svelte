@@ -16,12 +16,15 @@
   import ActivityDialog from "@/components/modals/ActivityDialog.svelte";
   import AddExpenseModal from "@/components/modals/AddExpenseModal.svelte";
   import ChangePasswordDialog from "@/components/modals/ChangePasswordDialog.svelte";
+  import CommentsDialog from "@/components/modals/CommentsDialog.svelte";
   import CreateGroupModal from "@/components/modals/CreateGroupModal.svelte";
   import EditGroupModal from "@/components/modals/EditGroupModal.svelte";
   import ExpenseHistoryModal from "@/components/modals/ExpenseHistoryModal.svelte";
+  import FeedbackDialog from "@/components/modals/FeedbackDialog.svelte";
   import JoinGroupModal from "@/components/modals/JoinGroupModal.svelte";
   import LinkDeviceDialog from "@/components/modals/LinkDeviceDialog.svelte";
   import MemberModal from "@/components/modals/MemberModal.svelte";
+  import PayDialog from "@/components/modals/PayDialog.svelte";
   import RecordReimbursementModal from "@/components/modals/RecordReimbursementModal.svelte";
   import RecoveryKeyDialog from "@/components/modals/RecoveryKeyDialog.svelte";
   import RecurringDialog from "@/components/modals/RecurringDialog.svelte";
@@ -278,6 +281,7 @@
     <AccountDialog />
     <ChangePasswordDialog />
     <LinkDeviceDialog />
+    <FeedbackDialog />
     <RecoveryKeyDialog
       open={session.newRecoveryKey !== null}
       onClose={() => (session.newRecoveryKey = null)}
@@ -301,6 +305,8 @@
       <AddExpenseModal {group} />
       <RecordReimbursementModal {group} />
       <ExpenseHistoryModal {group} />
+      <CommentsDialog {group} />
+      <PayDialog {group} />
       <MemberModal bind:open={dialogs.addMember} onSubmit={addMember} />
       <MemberModal
         bind:open={dialogs.renameMember.open}

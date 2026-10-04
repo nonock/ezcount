@@ -15,6 +15,7 @@
   import { Spinner } from "@/components/ui/spinner";
   import { logOut } from "@/lib/actions";
   import { i18n, LANGUAGES, type LanguageChoice, t } from "@/lib/i18n/index.svelte";
+  import { formatIban, isIban } from "@/lib/sepa";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { groupList, openGroup } from "@/lib/state/groups.svelte";
   import { session } from "@/lib/state/session.svelte";
@@ -31,30 +32,44 @@
 
   let name = $state("");
   let avatar = $state<string | null>(null);
+  let iban = $state("");
   let saving = $state(false);
   let error = $state<string | null>(null);
 
   $effect.pre(() => {
     if (!dialogs.account) return;
-    const initial = { name: account?.display_name ?? "", avatar: account?.avatar ?? null };
+    const initial = {
+      name: account?.display_name ?? "",
+      avatar: account?.avatar ?? null,
+      iban: formatIban(account?.iban ?? ""),
+    };
     untrack(() => {
       name = initial.name;
       avatar = initial.avatar;
+      iban = initial.iban;
       error = null;
     });
   });
 
+  /** As stored: upper-case, without spaces. */
+  const typedIban = $derived(iban.replace(/\s/g, "").toUpperCase());
   const changed = $derived(
-    name.trim() !== (account?.display_name ?? "") || avatar !== (account?.avatar ?? null)
+    name.trim() !== (account?.display_name ?? "") ||
+      avatar !== (account?.avatar ?? null) ||
+      typedIban !== (account?.iban ?? "")
   );
 
   /** The profile goes onto the user's member in each group, so those are read again. */
   async function saveProfile(e: SubmitEvent) {
     e.preventDefault();
+    if (typedIban && !isIban(typedIban)) {
+      error = t("account.ibanInvalid");
+      return;
+    }
     saving = true;
     error = null;
     try {
-      session.account = await api.updateProfile(name.trim(), avatar);
+      session.account = await api.updateProfile(name.trim(), avatar, typedIban || null);
       await groupList.refresh();
       if (openGroup.group) await openGroup.load(openGroup.group.id);
       toast.success(t("account.saved"));
@@ -97,6 +112,20 @@
               autocomplete="name"
             />
             <Field.Description>{t("account.nameHelp")}</Field.Description>
+          </Field.Field>
+          <Field.Field>
+            <Field.Label for="input-profile-iban">{t("account.iban")}</Field.Label>
+            <Input
+              id="input-profile-iban"
+              bind:value={iban}
+              maxlength={42}
+              placeholder="FR76 …"
+              autocomplete="off"
+              autocapitalize="characters"
+              spellcheck={false}
+              class="font-mono text-sm"
+            />
+            <Field.Description>{t("account.ibanHelp")}</Field.Description>
           </Field.Field>
           {#if error}
             <Field.Error>{error}</Field.Error>

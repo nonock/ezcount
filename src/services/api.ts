@@ -105,6 +105,14 @@ export const api = {
     return unwrap(await commands.purgeExpense(groupId, expenseId));
   },
 
+  async addExpenseComment(groupId: string, expenseId: string, text: string): Promise<Group> {
+    return unwrap(await commands.addExpenseComment(groupId, expenseId, text));
+  },
+
+  async deleteExpenseComment(groupId: string, commentId: string): Promise<Group> {
+    return unwrap(await commands.deleteExpenseComment(groupId, commentId));
+  },
+
   async stopRecurringExpense(groupId: string, recurringId: string): Promise<Group> {
     return unwrap(await commands.stopRecurringExpense(groupId, recurringId));
   },
@@ -195,8 +203,13 @@ export const api = {
     return unwrap(await commands.setIdentity(groupId, participantId));
   },
 
-  async updateProfile(name: string, avatar: string | null): Promise<AccountInfo> {
-    return unwrap(await commands.updateProfile(name, avatar));
+  /** The name, picture and IBAN the user shows the members of their groups. */
+  async updateProfile(
+    name: string,
+    avatar: string | null,
+    iban: string | null
+  ): Promise<AccountInfo> {
+    return unwrap(await commands.updateProfile(name, avatar, iban));
   },
 
   async addSelf(groupId: string, name: string): Promise<Group> {
@@ -216,6 +229,11 @@ export const api = {
     return commands.passwordStrength(password, username);
   },
 
+  /** Sends an idea or a problem to whoever runs the account's server. */
+  async sendFeedback(message: string, contact: string | null, app: string): Promise<void> {
+    unwrap(await commands.sendFeedback(message, contact, app));
+  },
+
   async nativeFeatures(): Promise<NativeFeatures> {
     return commands.nativeFeatures();
   },
@@ -223,6 +241,16 @@ export const api = {
   /** Writes a file into the Downloads folder and returns its path; only where `nativeFeatures().save`. */
   async saveDownload(fileName: string, text: string): Promise<string> {
     return unwrap(await commands.saveDownload(fileName, text));
+  },
+
+  /** The same for a file that isn't text, such as a PDF. */
+  async saveFile(fileName: string, data: Uint8Array): Promise<string> {
+    return unwrap(await commands.saveFile(fileName, Array.from(data)));
+  },
+
+  /** Hands a file to the system share sheet; only where `nativeFeatures().share`. */
+  async shareFile(fileName: string, mime: string, data: Uint8Array): Promise<void> {
+    unwrap(await commands.shareFile(fileName, mime, Array.from(data)));
   },
 
   /** Opens the system share sheet; only where `nativeFeatures().share`. */

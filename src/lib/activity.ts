@@ -6,7 +6,7 @@ import { expenseTitle, formatList, formatMoney } from "@/utils/formatters";
 import { summaryText } from "./i18n/backend";
 import { t } from "./i18n/index.svelte";
 
-export type ActivityAction = "added" | "repeated" | "edited" | "deleted" | "restored";
+export type ActivityAction = "added" | "repeated" | "edited" | "deleted" | "restored" | "commented";
 
 export interface ActivityEvent {
   key: string;
@@ -63,6 +63,16 @@ export function groupActivity(group: Group): ActivityEvent[] {
         detail: restored ? undefined : summaryText(entry.summary),
       });
     });
+    for (const comment of e.comments ?? []) {
+      events.push({
+        key: `comment-${comment.id}`,
+        at: comment.created_at,
+        about: "expense",
+        action: "commented",
+        text: said("commented", comment.by, title),
+        detail: comment.text,
+      });
+    }
   };
 
   group.expenses.forEach(ofExpense);

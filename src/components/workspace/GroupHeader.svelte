@@ -3,6 +3,7 @@
   import ArchiveRestoreIcon from "@lucide/svelte/icons/archive-restore";
   import DownloadIcon from "@lucide/svelte/icons/download";
   import EllipsisVerticalIcon from "@lucide/svelte/icons/ellipsis-vertical";
+  import FileTextIcon from "@lucide/svelte/icons/file-text";
   import LogOutIcon from "@lucide/svelte/icons/log-out";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import TrashIcon from "@lucide/svelte/icons/trash-2";
@@ -15,7 +16,7 @@
   import * as Card from "@/components/ui/card";
   import * as DropdownMenu from "@/components/ui/dropdown-menu";
   import { Separator } from "@/components/ui/separator";
-  import { deleteGroup, exportGroup, leaveGroup, setArchived } from "@/lib/actions";
+  import { deleteGroup, exportGroup, exportGroupPdf, leaveGroup, setArchived } from "@/lib/actions";
   import { backendText } from "@/lib/i18n/backend";
   import { t } from "@/lib/i18n/index.svelte";
   import { paidAmounts } from "@/lib/split";
@@ -120,6 +121,10 @@
           <DropdownMenu.Item onSelect={exportGroup}>
             <DownloadIcon />
             {t("group.export")}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={exportGroupPdf}>
+            <FileTextIcon />
+            {t("group.exportPdf")}
           </DropdownMenu.Item>
           <DropdownMenu.Item onSelect={() => setArchived(!archived)}>
             {#if archived}

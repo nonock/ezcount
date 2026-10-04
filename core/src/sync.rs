@@ -25,6 +25,7 @@ use crate::crypto::{new_recovery_key, CredentialKeys, GroupKeys, LinkKeys, Secre
 use crate::csv_file;
 use crate::doc;
 use crate::models::{Group, LoginLink, PasswordStrength};
+use crate::notices::{self, Notice};
 use crate::storage::{import_remote_update, Session, Store, SyncMeta};
 use crate::AppState;
 
@@ -1270,6 +1271,52 @@ pub async fn suggested_rate(
     Ok(doc::exchange_rate(&answer.rate).ok())
 }
 
+/// Longest message the feedback form sends, in characters.
+pub const MAX_FEEDBACK_CHARS: usize = 2000;
+
+/// Sends an idea or a problem to whoever runs the account's relay, with how to answer
+/// (`contact`) when the user wants an answer, and which app it comes from.
+pub async fn send_feedback(
+    state: &AppState,
+    message: &str,
+    contact: Option<&str>,
+    app: Option<&str>,
+) -> Res<()> {
+    let session = require_session(state)?;
+    let message = message.trim();
+    if message.is_empty() {
+        return Err("Write a message first".to_string());
+    }
+    if message.chars().count() > MAX_FEEDBACK_CHARS {
+        return Err(format!(
+            "This message is too long ({MAX_FEEDBACK_CHARS} characters at most)"
+        ));
+    }
+    let short = |text: Option<&str>| {
+        text.map(|t| t.trim().chars().take(200).collect::<String>())
+            .filter(|t| !t.is_empty())
+    };
+    let body = serde_json::json!({
+        "message": message,
+        "contact": short(contact),
+        "app": short(app),
+    });
+    let response = state
+        .http
+        .post(format!("{}/v1/feedback", session.server_url))
+        .json(&body)
+        .send()
+        .await
+        .map_err(request_err)?;
+    match response.status().as_u16() {
+        200..=299 => Ok(()),
+        // A relay from before the form.
+        404 | 405 => Err("This sync server doesn't take messages yet".to_string()),
+        429 => Err("Too many messages were sent from your network: try again later".to_string()),
+        status => Err(format!("The sync server answered {status} to the message")),
+    }
+}
+
 /// Downloads a shared group from its invite code and adds it to the account.
 pub async fn join_group(state: &AppState, code: &str) -> Res<Group> {
     let invite = parse_invite(code)?;
@@ -1381,7 +1428,8 @@ pub fn set_identity(state: &AppState, group_id: &str, participant_id: &str) -> R
     // The profile follows the user: off the member they said they were before, onto this one.
     if let Some(previous) = previous.filter(|previous| previous != participant_id) {
         let _ = store.update(group_id, |d| {
-            doc::set_participant_avatar(d, &previous, None)
+            doc::set_participant_avatar(d, &previous, None)?;
+            doc::set_participant_iban(d, &previous, None)
         });
     }
     let profile = account::profile(store.account_doc()?);
@@ -1391,8 +1439,8 @@ pub fn set_identity(state: &AppState, group_id: &str, participant_id: &str) -> R
     Ok(())
 }
 
-/// Gives a member of a group the profile's name and picture. Without a name in the profile,
-/// the member keeps theirs.
+/// Gives a member of a group the profile's name, picture and bank account. Without a name in
+/// the profile, the member keeps theirs.
 fn show_profile(
     store: &mut Store,
     group_id: &str,
@@ -1404,17 +1452,23 @@ fn show_profile(
             if let Some(name) = &profile.name {
                 doc::rename_participant(d, participant_id, name)?;
             }
-            doc::set_participant_avatar(d, participant_id, profile.avatar.as_deref())
+            doc::set_participant_avatar(d, participant_id, profile.avatar.as_deref())?;
+            doc::set_participant_iban(d, participant_id, profile.iban.as_deref())
         })
         .map(|_| ())
 }
 
-/// Sets the name and picture the user shows, and gives them to the member they are in each
-/// of their groups, for the other members to see.
-pub fn update_profile(state: &AppState, name: &str, avatar: Option<&str>) -> Res<()> {
+/// Sets the name, picture and bank account the user shows, and gives them to the member they
+/// are in each of their groups, for the other members to see.
+pub fn update_profile(
+    state: &AppState,
+    name: &str,
+    avatar: Option<&str>,
+    iban: Option<&str>,
+) -> Res<()> {
     require_session(state)?;
     let mut store = state.store();
-    store.update_account(|d| account::set_profile(d, name, avatar))?;
+    store.update_account(|d| account::set_profile(d, name, avatar, iban))?;
     let profile = account::profile(store.account_doc()?);
     for (group_id, participant_id) in account::identities(store.account_doc()?)? {
         // A group that is gone, or a member that was removed, doesn't keep the others from
@@ -1454,7 +1508,14 @@ pub enum SyncEvent {
 /// One background pass: the account, then every shared group. The app runs it right after
 /// local edits (`AppState::sync_wakeup`) and on a timer. Failures are kept in each group's
 /// sync state for the interface, and the next pass retries.
-pub async fn sync_all(state: &AppState, mut report: impl FnMut(SyncEvent)) {
+pub async fn sync_all(state: &AppState, report: impl FnMut(SyncEvent)) {
+    sync_all_noticing(state, report).await;
+}
+
+/// `sync_all`, which also returns what the other members did in the groups that received
+/// changes, for the notifications a phone shows.
+pub async fn sync_all_noticing(state: &AppState, mut report: impl FnMut(SyncEvent)) -> Vec<Notice> {
+    let mut notices = Vec::new();
     let account_changed = matches!(sync_account(state).await, Ok(true));
     let groups_changed = match reconcile(state).await {
         Ok(changed) => changed,
@@ -1469,7 +1530,20 @@ pub async fn sync_all(state: &AppState, mut report: impl FnMut(SyncEvent)) {
 
     let ids = state.store().synced_ids();
     for group_id in ids {
+        let before = state.store().group(&group_id).ok();
         let changed = matches!(sync_group(state, &group_id).await, Ok(true));
+        // Read apart: the store stays locked for as long as what it returned is matched on.
+        let after = state.store().group(&group_id);
+        if let (true, Some(before)) = (changed, before) {
+            if let Ok(after) = after {
+                let me = state
+                    .account_info()
+                    .ok()
+                    .flatten()
+                    .and_then(|account| account.identities.get(&group_id).cloned());
+                notices.extend(notices::news(&before, &after, me.as_deref()));
+            }
+        }
         if drop_deleted(state, &group_id) {
             state.sync_wakeup.notify_one();
             report(SyncEvent::Account);
@@ -1477,6 +1551,7 @@ pub async fn sync_all(state: &AppState, mut report: impl FnMut(SyncEvent)) {
         }
         report(SyncEvent::Group { group_id, changed });
     }
+    notices
 }
 
 #[cfg(test)]
@@ -1779,6 +1854,66 @@ mod end_to_end {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn feedback_reaches_who_runs_the_relay() {
+        let dir = std::env::temp_dir().join(format!("ezcount-relay-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let relay = ezcount_sync_server::Relay::open_with(
+            &dir.join("relay.sqlite3"),
+            ezcount_sync_server::Settings {
+                admin_token: Some("s3cret".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(ezcount_sync_server::serve(listener, relay));
+
+        let device = Device::signed_up(&url, "alice").await;
+        let state = &device.state;
+        assert!(send_feedback(state, "  ", None, None).await.is_err());
+        send_feedback(
+            state,
+            " Budgets, please ",
+            Some("alice@example.com"),
+            Some("0.3.0"),
+        )
+        .await
+        .unwrap();
+
+        // Only the admin token reads them.
+        let read = |token: &'static str| {
+            let request = state.http.get(format!("{url}/v1/feedback"));
+            async move { request.bearer_auth(token).send().await.unwrap() }
+        };
+        assert_eq!(read("guess").await.status(), 401);
+        let page = state.http.get(format!("{url}/feedback")).send().await;
+        assert_eq!(page.unwrap().status(), 200);
+        let kept: serde_json::Value = read("s3cret").await.json().await.unwrap();
+        assert_eq!(kept[0]["message"], "Budgets, please");
+        assert_eq!(kept[0]["contact"], "alice@example.com");
+        assert_eq!(kept[0]["app"], "0.3.0");
+
+        // One network can't flood them.
+        for _ in 0..4 {
+            send_feedback(state, "Again", None, None).await.unwrap();
+        }
+        let refused = send_feedback(state, "Again", None, None).await.unwrap_err();
+        assert!(refused.starts_with("Too many messages"), "{refused}");
+
+        // A relay without a token keeps the messages to itself.
+        let (plain, plain_dir) = start_relay().await;
+        let other = Device::signed_up(&plain, "bob").await;
+        send_feedback(&other.state, "Hello", None, None)
+            .await
+            .unwrap();
+        let answer = other.state.http.get(format!("{plain}/v1/feedback"));
+        assert_eq!(answer.send().await.unwrap().status(), 404);
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(plain_dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn the_relay_suggests_exchange_rates() {
         let (rates_url, asked) = start_rate_service();
         let asked = || asked.load(std::sync::atomic::Ordering::SeqCst);
@@ -2003,6 +2138,53 @@ mod end_to_end {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn a_sync_says_what_the_others_did() {
+        let (url, dir) = start_relay().await;
+        let alice = Device::signed_up(&url, "alice").await;
+        let flat = alice.create("Flat", &["Alice", "Bob"]);
+        alice.sync().await;
+        let bob = Device::signed_up(&url, "bob").await;
+        join_group(&bob.state, &alice.invite(&flat.id))
+            .await
+            .unwrap();
+        set_identity(&bob.state, &flat.id, &flat.participants[1].id).unwrap();
+        bob.sync().await;
+
+        // Alice adds a dinner: her own device has nothing to tell her.
+        let me = flat.participants[0].id.clone();
+        let splits = flat
+            .participants
+            .iter()
+            .map(|p| crate::models::ExpenseSplit {
+                participant_id: p.id.clone(),
+                shares: 1,
+                fixed_cents: None,
+            })
+            .collect();
+        let adding = doc::Adding {
+            by: Some(me.as_str()),
+            ..Default::default()
+        };
+        alice.edit(&flat.id, |d| {
+            doc::add_expense_as(d, "Dinner", 3000, me.clone(), splits, None, None, adding)
+        });
+        assert!(sync_all_noticing(&alice.state, |_| {}).await.is_empty());
+
+        // Bob's next sync brings it, once.
+        let told = sync_all_noticing(&bob.state, |_| {}).await;
+        assert_eq!(told.len(), 1, "{told:?}");
+        let notice = &told[0];
+        assert_eq!((notice.kind, notice.group.as_str()), ("expense", "Flat"));
+        assert_eq!(notice.by.as_deref(), Some("Alice"));
+        assert_eq!(
+            (notice.title.as_str(), notice.amount_cents),
+            ("Dinner", 3000)
+        );
+        assert!(sync_all_noticing(&bob.state, |_| {}).await.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn the_profile_shows_in_every_group() {
         let (url, relay_dir) = start_relay().await;
         let picture = "data:image/webp;base64,UklGRg==";
@@ -2011,11 +2193,13 @@ mod end_to_end {
         let flat = alice.create("Flat", &["Al", "Chris"]);
         let me = |group: &Group| group.participants[0].clone();
 
-        update_profile(&alice.state, " Alice M. ", Some(picture)).unwrap();
+        let iban = "DE89370400440532013000";
+        update_profile(&alice.state, " Alice M. ", Some(picture), Some(iban)).unwrap();
         for id in [&trip.id, &flat.id] {
             let group = alice.group(id);
             assert_eq!(me(&group).name, "Alice M.");
             assert_eq!(me(&group).avatar.as_deref(), Some(picture));
+            assert_eq!(me(&group).iban.as_deref(), Some(iban));
             assert_eq!(group.participants[1].avatar, None);
         }
         let info = alice.state.require_account_info().unwrap();
@@ -2046,11 +2230,11 @@ mod end_to_end {
         assert_eq!(group.participants[1].avatar.as_deref(), Some(picture));
 
         // Without a name or a picture, groups keep their names and lose the picture.
-        update_profile(&alice.state, "", None).unwrap();
+        update_profile(&alice.state, "", None, None).unwrap();
         let group = alice.group(&trip.id);
         assert_eq!(me(&group).name, "Alice M.");
         assert_eq!(me(&group).avatar, None);
-        assert!(update_profile(&alice.state, "Alice", Some("not a picture")).is_err());
+        assert!(update_profile(&alice.state, "Alice", Some("not a picture"), None).is_err());
 
         let _ = std::fs::remove_dir_all(relay_dir);
     }

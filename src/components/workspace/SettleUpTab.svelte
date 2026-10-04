@@ -2,6 +2,7 @@
   import CheckIcon from "@lucide/svelte/icons/check";
   import CircleCheckBigIcon from "@lucide/svelte/icons/circle-check-big";
   import PlusIcon from "@lucide/svelte/icons/plus";
+  import QrCodeIcon from "@lucide/svelte/icons/qr-code";
   import Amount from "@/components/common/Amount.svelte";
   import HelpPopover from "@/components/common/HelpPopover.svelte";
   import MemberAvatar from "@/components/common/MemberAvatar.svelte";
@@ -17,6 +18,8 @@
   let { group }: { group: Group } = $props();
 
   const settlements = $derived(openGroup.settlements);
+  /** Someone who gave their IBAN in their profile can be paid by bank transfer. */
+  const hasIban = (id: string) => !!group.participants.find((p) => p.id === id)?.iban;
 </script>
 
 <div class="space-y-3">
@@ -65,6 +68,17 @@
                 currency={group.currency}
                 class="text-base font-semibold"
               />
+              {#if hasIban(s.to_id)}
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onclick={() => dialogs.openPay(s.from_id, s.to_id, s.amount_cents)}
+                  aria-label={t("pay.label", s.to_name)}
+                  title={t("pay.label", s.to_name)}
+                >
+                  <QrCodeIcon />
+                </Button>
+              {/if}
               <Button
                 onclick={() =>
                   dialogs.openReimburse({

@@ -1,12 +1,15 @@
 <script lang="ts">
   import ChartPieIcon from "@lucide/svelte/icons/chart-pie";
   import CoinsIcon from "@lucide/svelte/icons/coins";
+  import ListIcon from "@lucide/svelte/icons/list";
   import MinusIcon from "@lucide/svelte/icons/minus";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import RepeatIcon from "@lucide/svelte/icons/repeat";
+  import UsersIcon from "@lucide/svelte/icons/users";
   import { untrack } from "svelte";
   import DatePicker from "@/components/common/DatePicker.svelte";
   import ExpenseKindTabs, { type ExpenseKind } from "@/components/common/ExpenseKindTabs.svelte";
+  import { Badge } from "@/components/ui/badge";
   import { Button } from "@/components/ui/button";
   import { Checkbox } from "@/components/ui/checkbox";
   import * as Dialog from "@/components/ui/dialog";
@@ -19,15 +22,23 @@
   import { Spinner } from "@/components/ui/spinner";
   import { CATEGORIES, categoryName, categoryOf } from "@/lib/categories";
   import { t } from "@/lib/i18n/index.svelte";
-  import { owedAmounts } from "@/lib/split";
+  import { itemsOwed, owedAmounts } from "@/lib/split";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { cn } from "@/lib/utils";
   import { api } from "@/services/api";
-  import type { ExpenseInput, ExpensePayer, ExpenseSplit, Group, OriginalAmount } from "@/types";
+  import type {
+    ExpenseInput,
+    ExpenseItem,
+    ExpensePayer,
+    ExpenseSplit,
+    Group,
+    OriginalAmount,
+  } from "@/types";
   import { CURRENCIES } from "@/utils/currencies";
   import { errorMessage } from "@/utils/errors";
   import { amountInput, currencySymbol, formatDateInput, formatMoney } from "@/utils/formatters";
+  import ExpenseItemsField, { type ItemState, newItem } from "./ExpenseItemsField.svelte";
   import ReimbursementForm from "./ReimbursementForm.svelte";
 
   /**
@@ -94,6 +105,9 @@
   let payersState = $state<Record<string, PayerState>>({});
   let expenseDate = $state(formatDateInput());
   let splitsState = $state<Record<string, SplitItemState>>({});
+  // Entered line by line, as on a receipt: who owes what comes from the lines.
+  let byItems = $state(false);
+  let itemsState = $state<ItemState[]>([]);
   // A transfer shows the payment form instead, which is shorter. The dialog is centered, so
   // it would move up to shrink: its top is held where it was, and the tabs stay under the
   // finger.
@@ -169,6 +183,11 @@
       }
       payersState = nextPayers;
       income = editing?.income ?? false;
+      const lines = editing?.items ?? [];
+      byItems = lines.length > 0;
+      itemsState = lines.map((item) =>
+        newItem([...item.participants], item.name, amountInput(item.amount_cents))
+      );
       transfer = false;
       heldTop = null;
       repeat = NEVER;
@@ -294,6 +313,23 @@
     amountStr = total > 0 ? amountInput(total) : "";
   }
 
+  /** With lines, the expense's amount is their total, unless several payers already give it. */
+  function totalItems() {
+    if (severalPayers) return;
+    amountStr = itemsCents > 0 ? amountInput(itemsCents) : "";
+  }
+
+  /** The first line starts as the whole expense, for everyone it was split between. */
+  function toggleItems() {
+    byItems = !byItems;
+    if (!byItems) return;
+    if (itemsState.length === 0) {
+      const people = includedParticipants.map((p) => p.id);
+      itemsState.push(newItem(people, "", paidCents > 0 ? amountInput(paidCents) : ""));
+    }
+    totalItems();
+  }
+
   /** Also for someone who joined the group while the dialog is open. */
   function stateOf(id: string): SplitItemState {
     splitsState[id] ??= { included: false, shares: 1, fixed: false, amount: "" };
@@ -338,6 +374,16 @@
         : { participant_id: p.id, shares: state.shares, fixed_cents: null };
     })
   );
+  const items = $derived<ExpenseItem[]>(
+    itemsState.map((item) => ({
+      name: item.name.trim(),
+      amount_cents: toCents(item.amount),
+      participants: item.people,
+    }))
+  );
+  const itemsCents = $derived(items.reduce((sum, item) => sum + item.amount_cents, 0));
+  /** What each person owes of the lines, in `currency`. */
+  const itemsOwe = $derived(itemsOwed(items));
   const totalShares = $derived(splits.reduce((sum, s) => sum + s.shares, 0));
   const fixedCents = $derived(splits.reduce((sum, s) => sum + (s.fixed_cents ?? 0), 0));
   const anyFixed = $derived(splits.some((s) => s.fixed_cents != null));
@@ -361,6 +407,11 @@
     return null;
   });
 
+  /** With several payers the amount is theirs, and the lines have to add up to it. */
+  const itemsMismatch = $derived(
+    t("expense.itemsMismatch", formatMoney(itemsCents, currency), formatMoney(paidCents, currency))
+  );
+
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
     const trimmedTitle = title.trim();
@@ -378,6 +429,14 @@
       error = t("expense.needPayerAmounts");
       return;
     }
+    if (byItems && items.length === 0) {
+      error = t("expense.needItems");
+      return;
+    }
+    if (byItems && items.some((item) => item.amount_cents <= 0)) {
+      error = t("expense.needItemAmounts");
+      return;
+    }
     if (paidCents <= 0) {
       error = t("expense.needAmount");
       return;
@@ -391,17 +450,28 @@
       return;
     }
     const payer = severalPayers ? payers[0].participant_id : paidBy;
-    if (includedParticipants.length === 0) {
-      error = t("expense.needPeople");
-      return;
-    }
-    if (splits.some((s) => s.fixed_cents != null && s.fixed_cents <= 0)) {
-      error = t("expense.needSetAmounts");
-      return;
-    }
-    if (splitProblem) {
-      error = splitProblem;
-      return;
+    if (byItems) {
+      if (items.some((item) => item.participants.length === 0)) {
+        error = t("expense.needItemPeople");
+        return;
+      }
+      if (itemsCents !== paidCents) {
+        error = itemsMismatch;
+        return;
+      }
+    } else {
+      if (includedParticipants.length === 0) {
+        error = t("expense.needPeople");
+        return;
+      }
+      if (splits.some((s) => s.fixed_cents != null && s.fixed_cents <= 0)) {
+        error = t("expense.needSetAmounts");
+        return;
+      }
+      if (splitProblem) {
+        error = splitProblem;
+        return;
+      }
     }
 
     const original: OriginalAmount | null = foreign
@@ -425,7 +495,9 @@
       amount_cents: amountCents,
       paid_by: payer,
       payers: together,
-      splits,
+      // The lines give the splits.
+      splits: byItems ? [] : splits,
+      items: byItems ? items : [],
       created_at: createdAt,
       original,
       income,
@@ -537,10 +609,14 @@
                   step="0.01"
                   min="0.01"
                   required
-                  readonly={severalPayers}
+                  readonly={severalPayers || byItems}
                   bind:value={amountStr}
                   placeholder="0.00"
-                  aria-describedby={severalPayers ? "expense-amount-is-total" : undefined}
+                  aria-describedby={severalPayers
+                    ? "expense-amount-is-total"
+                    : byItems
+                      ? "expense-amount-is-items"
+                      : undefined}
                   class="tabular-nums read-only:bg-muted"
                 />
               </Field.Field>
@@ -726,119 +802,163 @@
             </Field.Set>
           {/if}
 
-          <Field.Set>
-            <div class="flex items-center justify-between">
-              <Field.Legend variant="label" class="mb-0">{t("common.splitBetween")}</Field.Legend>
-              <Button variant="link" size="sm" onclick={toggleAll}>
-                {allIncluded ? t("expense.deselectAll") : t("expense.selectAll")}
-              </Button>
-            </div>
-            <Field.Description>
-              {t(
-                "expense.people",
-                includedParticipants.length,
-                participants.length
-              )}{#if totalShares > 0},
-                {t("common.parts", totalShares)}
-                {#if restCents > 0}
-                  · {t(
-                    "expense.perPart",
-                    formatMoney(Math.floor(restCents / totalShares), currency)
-                  )}
+          {#if byItems}
+            <Field.Set>
+              <Field.Legend variant="label" class="mb-0">{t("expense.items")}</Field.Legend>
+              <Field.Description id="expense-amount-is-items">
+                {t("expense.itemsHelp")}
+                {#if severalPayers && itemsCents !== paidCents}
+                  <span class="text-destructive">· {itemsMismatch}</span>
                 {/if}
+              </Field.Description>
+              <ExpenseItemsField bind:items={itemsState} {participants} onChange={totalItems} />
+              {#if itemsOwe.size > 0}
+                <ul class="flex flex-wrap gap-1" aria-label={t("expense.itemsOwed")}>
+                  {#each itemsOwe as [id, cents] (id)}
+                    <li>
+                      <Badge variant="secondary" class="font-normal">
+                        {participants.find((p) => p.id === id)?.name}
+                        {formatMoney(cents, currency)}
+                      </Badge>
+                    </li>
+                  {/each}
+                </ul>
               {/if}
-              {#if splitProblem}
-                <span class="text-destructive">· {splitProblem}</span>
-              {/if}
-            </Field.Description>
-
-            <ul class="divide-y rounded-xl border">
-              {#each participants as p (p.id)}
-                {@const state = splitsState[p.id] || {
-                  included: false,
-                  shares: 1,
-                  fixed: false,
-                  amount: "",
-                }}
-                {@const owes = owed.get(p.id) ?? 0}
-                <li
-                  class={cn(
-                    "flex min-h-11 items-center justify-between gap-2 py-1.5 pr-1.5 pl-3 sm:pr-3",
-                    !state.included && "text-muted-foreground"
-                  )}
-                >
-                  <div class="flex min-w-0 items-center gap-2.5">
-                    <Checkbox
-                      id={`split-${p.id}`}
-                      checked={state.included}
-                      onCheckedChange={() => toggleParticipant(p.id)}
-                    />
-                    <Label for={`split-${p.id}`} class="block min-w-0 truncate font-normal"
-                      >{p.name}</Label
-                    >
-                  </div>
-
-                  {#if state.included}
-                    <div class="flex shrink-0 items-center gap-1 sm:gap-1.5">
-                      {#if state.fixed}
-                        <Input
-                          type="number"
-                          inputmode="decimal"
-                          step="0.01"
-                          min="0.01"
-                          bind:value={splitsState[p.id].amount}
-                          placeholder="0.00"
-                          aria-label={t("expense.amountFor", p.name)}
-                          class="h-8 w-24 text-right tabular-nums"
-                        />
-                      {:else}
-                        {#if owes > 0}
-                          <span class="text-sm tabular-nums">{formatMoney(owes, currency)}</span>
-                        {/if}
-                        <div class="flex items-center rounded-md border">
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onclick={() => updateShares(p.id, state.shares - 1)}
-                            disabled={state.shares <= 1}
-                            aria-label={t("expense.fewerParts", p.name)}
-                          >
-                            <MinusIcon />
-                          </Button>
-                          <span class="min-w-12 text-center text-xs sm:min-w-14" aria-live="polite">
-                            {t("common.parts", state.shares)}
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            onclick={() => updateShares(p.id, state.shares + 1)}
-                            aria-label={t("expense.moreParts", p.name)}
-                          >
-                            <PlusIcon />
-                          </Button>
-                        </div>
-                      {/if}
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onclick={() => (splitsState[p.id].fixed = !state.fixed)}
-                        aria-label={state.fixed
-                          ? t("expense.giveParts", p.name)
-                          : t("expense.setAmountFor", p.name)}
-                        title={state.fixed ? t("expense.shareRest") : t("expense.setAmount")}
-                      >
-                        {#if state.fixed}
-                          <ChartPieIcon />
-                        {:else}
-                          <CoinsIcon />
-                        {/if}
-                      </Button>
-                    </div>
+            </Field.Set>
+          {:else}
+            <Field.Set>
+              <div class="flex items-center justify-between">
+                <Field.Legend variant="label" class="mb-0">{t("common.splitBetween")}</Field.Legend>
+                <Button variant="link" size="sm" onclick={toggleAll}>
+                  {allIncluded ? t("expense.deselectAll") : t("expense.selectAll")}
+                </Button>
+              </div>
+              <Field.Description>
+                {t(
+                  "expense.people",
+                  includedParticipants.length,
+                  participants.length
+                )}{#if totalShares > 0},
+                  {t("common.parts", totalShares)}
+                  {#if restCents > 0}
+                    · {t(
+                      "expense.perPart",
+                      formatMoney(Math.floor(restCents / totalShares), currency)
+                    )}
                   {/if}
-                </li>
-              {/each}
-            </ul>
-          </Field.Set>
+                {/if}
+                {#if splitProblem}
+                  <span class="text-destructive">· {splitProblem}</span>
+                {/if}
+              </Field.Description>
+
+              <ul class="divide-y rounded-xl border">
+                {#each participants as p (p.id)}
+                  {@const state = splitsState[p.id] || {
+                    included: false,
+                    shares: 1,
+                    fixed: false,
+                    amount: "",
+                  }}
+                  {@const owes = owed.get(p.id) ?? 0}
+                  <li
+                    class={cn(
+                      "flex min-h-11 items-center justify-between gap-2 py-1.5 pr-1.5 pl-3 sm:pr-3",
+                      !state.included && "text-muted-foreground"
+                    )}
+                  >
+                    <div class="flex min-w-0 items-center gap-2.5">
+                      <Checkbox
+                        id={`split-${p.id}`}
+                        checked={state.included}
+                        onCheckedChange={() => toggleParticipant(p.id)}
+                      />
+                      <Label for={`split-${p.id}`} class="block min-w-0 truncate font-normal"
+                        >{p.name}</Label
+                      >
+                    </div>
+
+                    {#if state.included}
+                      <div class="flex shrink-0 items-center gap-1 sm:gap-1.5">
+                        {#if state.fixed}
+                          <Input
+                            type="number"
+                            inputmode="decimal"
+                            step="0.01"
+                            min="0.01"
+                            bind:value={splitsState[p.id].amount}
+                            placeholder="0.00"
+                            aria-label={t("expense.amountFor", p.name)}
+                            class="h-8 w-24 text-right tabular-nums"
+                          />
+                        {:else}
+                          {#if owes > 0}
+                            <span class="text-sm tabular-nums">{formatMoney(owes, currency)}</span>
+                          {/if}
+                          <div class="flex items-center rounded-md border">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onclick={() => updateShares(p.id, state.shares - 1)}
+                              disabled={state.shares <= 1}
+                              aria-label={t("expense.fewerParts", p.name)}
+                            >
+                              <MinusIcon />
+                            </Button>
+                            <span
+                              class="min-w-12 text-center text-xs sm:min-w-14"
+                              aria-live="polite"
+                            >
+                              {t("common.parts", state.shares)}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onclick={() => updateShares(p.id, state.shares + 1)}
+                              aria-label={t("expense.moreParts", p.name)}
+                            >
+                              <PlusIcon />
+                            </Button>
+                          </div>
+                        {/if}
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onclick={() => (splitsState[p.id].fixed = !state.fixed)}
+                          aria-label={state.fixed
+                            ? t("expense.giveParts", p.name)
+                            : t("expense.setAmountFor", p.name)}
+                          title={state.fixed ? t("expense.shareRest") : t("expense.setAmount")}
+                        >
+                          {#if state.fixed}
+                            <ChartPieIcon />
+                          {:else}
+                            <CoinsIcon />
+                          {/if}
+                        </Button>
+                      </div>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            </Field.Set>
+          {/if}
+
+          <!-- Seldom used: a small button, as for repeating. -->
+          <Button
+            variant="ghost"
+            size="sm"
+            onclick={toggleItems}
+            class="-mt-3 -ml-2 h-7 w-fit font-normal text-muted-foreground"
+          >
+            {#if byItems}
+              <UsersIcon data-icon="inline-start" />
+              {t("expense.byPeople")}
+            {:else}
+              <ListIcon data-icon="inline-start" />
+              {t("expense.byItems")}
+            {/if}
+          </Button>
 
           {#if error}
             <Field.Error>{error}</Field.Error>

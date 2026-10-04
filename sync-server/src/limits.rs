@@ -46,6 +46,10 @@ pub struct Limits {
     pub link_lifetime: Duration,
     /// Login links one client network may try to claim per hour.
     pub link_claims_per_hour: u64,
+    /// Messages one client network may send from the feedback form per hour.
+    pub feedback_per_hour: u64,
+    /// The same for all networks together.
+    pub feedback_per_hour_total: u64,
 }
 
 impl Default for Limits {
@@ -62,6 +66,8 @@ impl Default for Limits {
             rate_lookups_per_hour_total: 600,
             link_lifetime: Duration::from_secs(120),
             link_claims_per_hour: 60,
+            feedback_per_hour: 5,
+            feedback_per_hour_total: 200,
         }
     }
 }

@@ -266,12 +266,35 @@ async getAccount() : Promise<Result<AccountInfo | null, string>> {
 }
 },
 /**
- * Sets the name and picture (a `data:` URL) the user shows, in every group where they said
- * who they are. An empty name keeps the names the groups have.
+ * Sets the name, picture (a `data:` URL) and bank account (an IBAN, to be paid back on) the
+ * user shows, in every group where they said who they are. An empty name keeps the names
+ * the groups have.
  */
-async updateProfile(name: string, avatar: string | null) : Promise<Result<AccountInfo, string>> {
+async updateProfile(name: string, avatar: string | null, iban: string | null) : Promise<Result<AccountInfo, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("update_profile", { name, avatar }) };
+    return { status: "ok", data: await TAURI_INVOKE("update_profile", { name, avatar, iban }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Writes a comment under an expense.
+ */
+async addExpenseComment(groupId: string, expenseId: string, text: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_expense_comment", { groupId, expenseId, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Removes a comment from under an expense.
+ */
+async deleteExpenseComment(groupId: string, commentId: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_expense_comment", { groupId, commentId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -345,6 +368,18 @@ async shareText(text: string, title: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Hands a file (a PDF, say) to the system share sheet, to send it or save it. Only where
+ * `native_features().share` is true.
+ */
+async shareFile(fileName: string, mime: string, data: number[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("share_file", { fileName, mime, data }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Saves `text` as a file named `file_name` in the Downloads folder, next to any file of that
  * name already there, and returns where it is. Only where `native_features().save` is true.
  */
@@ -357,10 +392,33 @@ async saveDownload(fileName: string, text: string) : Promise<Result<string, stri
 }
 },
 /**
+ * The same for a file that isn't text, such as a PDF.
+ */
+async saveFile(fileName: string, data: number[]) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_file", { fileName, data }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * How hard a password is to guess. Signing up requires `acceptable`.
  */
 async passwordStrength(password: string, username: string) : Promise<PasswordStrength> {
     return await TAURI_INVOKE("password_strength", { password, username });
+},
+/**
+ * Sends an idea or a problem to whoever runs the account's relay. `contact` is how to
+ * answer, when an answer is wanted; `app` says which app it comes from.
+ */
+async sendFeedback(message: string, contact: string | null, app: string | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("send_feedback", { message, contact, app }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 },
 /**
  * Sets a new password with the recovery key and logs in. Returns the replacement recovery
@@ -428,17 +486,25 @@ async logInWithLink(link: string) : Promise<Result<AccountInfo, string>> {
 
 /** user-defined types **/
 
-export type AccountInfo = { username: string; server_url: string; display_name: string | null; avatar: string | null; archived: string[]; identities: { [key in string]: string } }
+export type AccountInfo = { username: string; server_url: string; display_name: string | null; avatar: string | null; iban?: string | null; archived: string[]; identities: { [key in string]: string } }
 /**
  * An expense someone deleted, kept so it can be put back.
  */
 export type DeletedExpense = { expense: Expense; deleted_at: string; deleted_by?: string | null }
-export type Expense = { id: string; group_id: string; title: string; category?: string | null; amount_cents: number; original?: OriginalAmount | null; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean; income?: boolean; added_at?: string | null; added_by?: string | null; recurring?: string | null }
+export type Expense = { id: string; group_id: string; title: string; category?: string | null; amount_cents: number; original?: OriginalAmount | null; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean; income?: boolean; added_at?: string | null; added_by?: string | null; recurring?: string | null; items?: ExpenseItem[]; comments?: ExpenseComment[] }
+/**
+ * What a member wrote under an expense.
+ */
+export type ExpenseComment = { id: string; text: string; created_at: string; by?: string | null }
 export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_payers?: ExpensePayer[]; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; previous_category?: string | null; summary: string; edited_by?: string | null }
 /**
  * An expense as the form sends it, to add one or to replace one.
  */
-export type ExpenseInput = { title: string; category?: string | null; amount_cents: number; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at?: string | null; original?: OriginalAmount | null; income?: boolean; repeat?: string | null }
+export type ExpenseInput = { title: string; category?: string | null; amount_cents: number; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at?: string | null; original?: OriginalAmount | null; income?: boolean; repeat?: string | null; items?: ExpenseItem[] }
+/**
+ * One line of an expense detailed item by item: the people who share it, equally.
+ */
+export type ExpenseItem = { name: string; amount_cents: number; participants: string[] }
 /**
  * What one of the several people who paid an expense put in.
  */
@@ -454,7 +520,7 @@ export type NativeFeatures = { share: boolean; scan: boolean; save?: boolean }
  * What an expense paid in another currency than the group's cost there.
  */
 export type OriginalAmount = { currency: string; amount_cents: number; rate: string }
-export type Participant = { id: string; name: string; removed?: boolean; avatar?: string | null; added_at?: string | null; added_by?: string | null; removed_at?: string | null; removed_by?: string | null }
+export type Participant = { id: string; name: string; removed?: boolean; avatar?: string | null; iban?: string | null; added_at?: string | null; added_by?: string | null; removed_at?: string | null; removed_by?: string | null }
 export type ParticipantBalance = { participant_id: string; participant_name: string; paid_cents: number; owed_cents: number; net_cents: number; removed: boolean }
 export type PasswordStrength = { score: number; acceptable: boolean; warning: string | null; suggestions: string[] }
 /**

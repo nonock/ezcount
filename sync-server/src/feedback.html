@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>ezcount feedback</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --line: color-mix(in srgb, currentColor 18%, transparent);
+        --soft: color-mix(in srgb, currentColor 60%, transparent);
+      }
+      body {
+        max-width: 44rem;
+        margin: 0 auto;
+        padding: 1.5rem 1rem 3rem;
+        font: 1rem/1.5 system-ui, sans-serif;
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      form {
+        display: flex;
+        gap: 0.5rem;
+      }
+      input {
+        flex: 1;
+        min-width: 0;
+      }
+      input,
+      button {
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--line);
+        border-radius: 0.5rem;
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      #status {
+        color: var(--soft);
+      }
+      ol {
+        padding: 0;
+        list-style: none;
+      }
+      li {
+        padding: 0.9rem 0;
+        border-top: 1px solid var(--line);
+      }
+      li p {
+        margin: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      li small {
+        display: block;
+        margin-top: 0.3rem;
+        color: var(--soft);
+        overflow-wrap: anywhere;
+      }
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ezcount feedback</h1>
+    <!-- Asked once: the token then stays in this browser. -->
+    <form id="login" hidden>
+      <input id="token" type="password" placeholder="Admin token" autocomplete="current-password" required />
+      <button>Show</button>
+    </form>
+    <p id="status"></p>
+    <ol id="messages"></ol>
+    <p><button id="forget" hidden>Forget the token on this browser</button></p>
+    <script>
+      const KEY = "ezcount-admin-token";
+      const login = document.getElementById("login");
+      const status = document.getElementById("status");
+      const list = document.getElementById("messages");
+      const forget = document.getElementById("forget");
+
+      // The relay's dates are UTC, written "2026-10-04 13:39:00".
+      const when = (text) => new Date(text.replace(" ", "T") + "Z").toLocaleString();
+
+      async function show(token) {
+        status.textContent = "Loading…";
+        list.replaceChildren();
+        let answer;
+        try {
+          answer = await fetch("/v1/feedback", { headers: { Authorization: "Bearer " + token } });
+        } catch {
+          status.textContent = "Could not reach the relay.";
+          return;
+        }
+        if (answer.status === 401) {
+          localStorage.removeItem(KEY);
+          login.hidden = false;
+          forget.hidden = true;
+          status.textContent = "This is not the admin token.";
+          return;
+        }
+        if (!answer.ok) {
+          status.textContent = "The relay answered " + answer.status + ".";
+          return;
+        }
+        const messages = await answer.json();
+        localStorage.setItem(KEY, token);
+        login.hidden = true;
+        forget.hidden = false;
+        status.textContent = messages.length === 0 ? "No message yet." : messages.length + " message(s), the latest first.";
+        for (const message of messages) {
+          // As text, never as markup: anyone can write these.
+          const item = document.createElement("li");
+          const text = document.createElement("p");
+          text.textContent = message.message;
+          const about = document.createElement("small");
+          about.textContent = [when(message.created_at), message.contact, message.app].filter(Boolean).join(" · ");
+          item.append(text, about);
+          list.append(item);
+        }
+      }
+
+      login.addEventListener("submit", (event) => {
+        event.preventDefault();
+        show(document.getElementById("token").value.trim());
+      });
+      forget.addEventListener("click", () => {
+        localStorage.removeItem(KEY);
+        location.reload();
+      });
+
+      const saved = localStorage.getItem(KEY);
+      if (saved) show(saved);
+      else login.hidden = false;
+    </script>
+  </body>
+</html>
