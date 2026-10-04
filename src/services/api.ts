@@ -277,6 +277,11 @@ export const api = {
     unwrap(await commands.shareFile(fileName, mime, Array.from(data)));
   },
 
+  /** Colors Android's status and navigation bars; nothing elsewhere. */
+  async setBarsColor(color: string, dark: boolean): Promise<void> {
+    unwrap(await commands.setBarsColor(color, dark));
+  },
+
   /** Opens the system share sheet; only where `nativeFeatures().share`. */
   async shareText(text: string, title: string): Promise<void> {
     unwrap(await commands.shareText(text, title));

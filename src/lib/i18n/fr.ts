@@ -36,6 +36,9 @@ export const fr: Messages = {
 
   "app.loading": "Chargement d'ezcount",
   "app.groups": "Groupes",
+  "app.backToTop": "Revenir en haut",
+  "app.refreshing": "Mise à jour…",
+  "app.refreshFailed": "Impossible de mettre le groupe à jour",
   "app.nav": "Application",
   "app.loadingGroups": "Chargement des groupes…",
   "app.newGroup": "Nouveau groupe",

@@ -613,6 +613,7 @@ mod tests {
             "native_features",
             "share_text",
             "share_file",
+            "set_bars_color",
             "save_download",
             "save_file",
         ];

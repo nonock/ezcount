@@ -70,6 +70,29 @@ export function itemsOwed(
   return owed;
 }
 
+/** Whether an entry is spending: not a payment between members, not money that came in. */
+export function isSpending(expense: Pick<Expense, "is_reimbursement" | "income">): boolean {
+  return !expense.is_reimbursement && !expense.income;
+}
+
+/** What a group spent, as the Stats tab counts it. */
+export function spentCents(group: Group): number {
+  return group.expenses.filter(isSpending).reduce((sum, e) => sum + e.amount_cents, 0);
+}
+
+/** A member's share of what the group spent, and what they paid of it. */
+export function spendingOf(group: Group, participantId: string): { share: number; paid: number } {
+  let [share, paid] = [0, 0];
+  for (const e of group.expenses.filter(isSpending)) {
+    const owed = owedAmounts(e.amount_cents, e.original?.amount_cents, e.splits);
+    e.splits.forEach((s, i) => {
+      if (s.participant_id === participantId) share += owed[i];
+    });
+    for (const p of paidAmounts(e)) if (p.id === participantId) paid += p.cents;
+  }
+  return { share, paid };
+}
+
 /**
  * What the group owes a member (above zero) or the member owes it (below), as
  * `engine::calculate_balances`: money that came in counts the other way.

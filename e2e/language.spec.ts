@@ -57,8 +57,8 @@ test.describe("on a French device", () => {
     await start(page);
     await expect(page.getByRole("heading", { name: "Vos groupes" })).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "fr");
-    // Thousands are grouped and the currency follows the amount.
-    await expect(page.getByText("1 254,50 €")).toBeVisible();
+    // Thousands are grouped and the currency follows the amount. The payment is not spending.
+    await expect(page.getByText("1 234,50 €")).toBeVisible();
 
     await page.getByRole("button", { name: /Lisbon Trip/ }).click();
     await expect(page.getByRole("tab", { name: /Dépenses/ })).toBeVisible();

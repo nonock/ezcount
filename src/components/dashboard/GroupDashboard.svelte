@@ -11,7 +11,7 @@
   import * as Empty from "@/components/ui/empty";
   import { importGroup } from "@/lib/actions";
   import { t } from "@/lib/i18n/index.svelte";
-  import { netBalance } from "@/lib/split";
+  import { netBalance, spentCents } from "@/lib/split";
   import { session } from "@/lib/state/session.svelte";
   import type { Group } from "@/types";
 
@@ -72,7 +72,7 @@
 />
 
 {#snippet card(group: Group)}
-  {@const totalCents = group.expenses.reduce((sum, e) => sum + e.amount_cents, 0)}
+  {@const totalCents = spentCents(group)}
   {@const members = group.participants.filter((p) => !p.removed).length}
   {@const net = nets.get(group.id) ?? 0}
   <li>

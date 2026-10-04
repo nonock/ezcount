@@ -633,6 +633,9 @@ export function installTauriMock() {
           w.__shared = [...(w.__shared || []), args.fileName];
           return null;
 
+        case "set_bars_color":
+          return null;
+
         case "share_text":
           w.__shared = [...(w.__shared || []), args.text];
           return null;

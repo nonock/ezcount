@@ -19,7 +19,7 @@
   import { deleteGroup, exportGroup, exportGroupPdf, leaveGroup, setArchived } from "@/lib/actions";
   import { backendText } from "@/lib/i18n/backend";
   import { t } from "@/lib/i18n/index.svelte";
-  import { paidAmounts } from "@/lib/split";
+  import { spendingOf, spentCents } from "@/lib/split";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { session } from "@/lib/state/session.svelte";
@@ -30,21 +30,14 @@
   let { group }: { group: Group } = $props();
 
   const activeParticipants = $derived(group.participants.filter((p) => !p.removed));
-  // Money that came in isn't spending.
-  const totalCents = $derived(
-    group.expenses.filter((e) => !e.income).reduce((sum, e) => sum + e.amount_cents, 0)
-  );
+  const totalCents = $derived(spentCents(group));
   const currentUserId = $derived(openGroup.currentUserId);
   const currentUserBalance = $derived(
     openGroup.balances.find((b) => b.participant_id === currentUserId)
   );
-  const userPaidCents = $derived(
-    group.expenses
-      .filter((e) => !e.is_reimbursement && !e.income)
-      .flatMap(paidAmounts)
-      .filter((paid) => paid.id === currentUserId)
-      .reduce((sum, paid) => sum + paid.cents, 0)
-  );
+  // The user's part of the spending, as the Stats tab shows it: payments between members
+  // change the balance, not what was spent.
+  const userSpending = $derived(spendingOf(group, currentUserId ?? ""));
   const me = $derived(group.participants.find((p) => p.id === currentUserId));
   const archived = $derived(session.isArchived(group.id));
   const syncError = $derived(openGroup.syncInfo?.last_error ?? null);
@@ -210,12 +203,12 @@
             <div>
               <dt class="text-xs text-muted-foreground">{t("group.yourExpenses")}</dt>
               <dd>
-                <Amount cents={currentUserBalance?.owed_cents || 0} currency={group.currency} />
+                <Amount cents={userSpending.share} currency={group.currency} />
               </dd>
             </div>
             <div>
               <dt class="text-xs text-muted-foreground">{t("group.paidByYou")}</dt>
-              <dd><Amount cents={userPaidCents} currency={group.currency} /></dd>
+              <dd><Amount cents={userSpending.paid} currency={group.currency} /></dd>
             </div>
           </dl>
         </div>

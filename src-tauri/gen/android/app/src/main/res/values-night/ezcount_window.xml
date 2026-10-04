@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The page background (styles.css), shown behind the system bars until the app sets it. -->
+    <color name="ezcount_window">#191E24</color>
+</resources>

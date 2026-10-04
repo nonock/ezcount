@@ -208,3 +208,24 @@ test("exporting on a computer says where the file went", async ({ page }) => {
   expect(saved[0].name).toBe("Lisbon Trip.csv");
   expect(saved[0].text).toContain("Café du matin");
 });
+
+test("totals count what was spent, not the payments between members", async ({ page }) => {
+  // The payment of 20 from Bob to Alice changes her balance, not her spending.
+  const figure = (label: string) => page.locator("dl > div").filter({ hasText: label });
+  await expect(figure("Your expenses")).toContainText("€49");
+  await expect(figure("Paid by you")).toContainText("€102");
+
+  await page.goBack();
+  await expect(page.getByRole("listitem").filter({ hasText: "Lisbon Trip" })).toContainText("€177");
+});
+
+test("a long page offers to go back to its top", async ({ page }) => {
+  await page.setViewportSize({ width: 400, height: 500 });
+  const top = page.getByRole("button", { name: "Back to top" });
+  await expect(top).toHaveCount(0);
+  await titles(page).last().scrollIntoViewIfNeeded();
+  await page.mouse.wheel(0, 2000);
+  await top.click();
+  await expect(page.getByRole("heading", { name: "Lisbon Trip" })).toBeInViewport();
+  await expect(top).toHaveCount(0);
+});

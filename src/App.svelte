@@ -2,13 +2,14 @@
   import PlusIcon from "@lucide/svelte/icons/plus";
   import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";
   import { listen } from "@tauri-apps/api/event";
-  import { ModeWatcher } from "mode-watcher";
+  import { ModeWatcher, mode } from "mode-watcher";
   import { untrack } from "svelte";
   import { toast } from "svelte-sonner";
   import AuthScreen from "@/components/auth/AuthScreen.svelte";
   import BottomBar from "@/components/common/BottomBar.svelte";
   import ConfirmDialog from "@/components/common/ConfirmDialog.svelte";
   import Navbar from "@/components/common/Navbar.svelte";
+  import PageScroller from "@/components/common/PageScroller.svelte";
   import QrScanOverlay from "@/components/common/QrScanOverlay.svelte";
   import Splash from "@/components/common/Splash.svelte";
   import GroupDashboard from "@/components/dashboard/GroupDashboard.svelte";
@@ -42,6 +43,7 @@
   import { groupList, openGroup } from "@/lib/state/groups.svelte";
   import { navigation } from "@/lib/state/navigation.svelte";
   import { type NewRecoveryKey, session } from "@/lib/state/session.svelte";
+  import { paintSystemBars } from "@/lib/systemBars";
   import { api } from "@/services/api";
   import {
     cancelScan,
@@ -99,6 +101,15 @@
 
   $effect(() => onInviteLink((link) => (pendingInvite = link)));
   $effect(() => navigation.listen());
+
+  // The phone's own bars take the color of the app's, in the theme shown. A frame later, once
+  // the theme's class is on the page.
+  $effect(() => {
+    void mode.current;
+    const surface = session.loggedIn ? "card" : "background";
+    const frame = requestAnimationFrame(() => paintSystemBars(surface));
+    return () => cancelAnimationFrame(frame);
+  });
 
   $effect(() => {
     // Not while the app still finds out whether someone is logged in.
@@ -173,6 +184,10 @@
       toast.info(t("app.removedElsewhere"));
     }
   });
+
+  function refreshFailed(err: unknown) {
+    toast.error(t("app.refreshFailed"), { description: errorMessage(err) });
+  }
 
   // Catch up as soon as the app comes back to the foreground (e.g. reopening it on a phone).
   const isShared = $derived(Boolean(openGroup.syncInfo?.enabled));
@@ -272,7 +287,11 @@
       username={account.username}
     />
 
-    <div class="min-h-0 flex-1 overflow-y-auto max-sm:mb-(--bottom-bar-room)">
+    <!-- Pulling a group down from its top brings it up to date with the other devices. -->
+    <PageScroller
+      class="max-sm:mb-(--bottom-bar-room)"
+      onRefresh={openGroup.group ? () => openGroup.syncNow().catch(refreshFailed) : undefined}
+    >
       <main
         class="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:pb-[max(1.5rem,env(safe-area-inset-bottom))]"
       >
@@ -318,7 +337,7 @@
           <GroupPage group={openGroup.group} />
         {/if}
       </main>
-    </div>
+    </PageScroller>
 
     <CreateGroupModal />
     <JoinGroupModal />

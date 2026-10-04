@@ -368,6 +368,18 @@ async shareText(text: string, title: string) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Colors the phone's status and navigation bars like the app (`#rrggbb`; `dark` for light
+ * icons). Does nothing where the system draws no bars over the app.
+ */
+async setBarsColor(color: string, dark: boolean) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_bars_color", { color, dark }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Hands a file (a PDF, say) to the system share sheet, to send it or save it. Only where
  * `native_features().share` is true.
  */

@@ -4,6 +4,11 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 
 ## Unreleased
 
+### Added
+
+- Pull a group down from its top to bring it up to date with the other devices.
+- A button to go back to the top once you have scrolled far down a page.
+
 ### Changed
 
 - Long lists of expenses stay quick to scroll: days out of view are only drawn when reached.
@@ -11,6 +16,8 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 
 ### Fixed
 
+- "Total spent" on a group and "Your expenses" no longer count the payments between members: they now match the Stats tab.
+- On Android, the status bar and the navigation bar take the app's color, in the light and the dark theme.
 - The relay answers a device catching up on a large group in pages of a few megabytes, instead of holding the whole group in memory.
 
 ## 0.4.0 - 2026-10-04

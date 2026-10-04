@@ -3,6 +3,8 @@
 
 mod background;
 #[cfg(target_os = "android")]
+mod bars;
+#[cfg(target_os = "android")]
 mod notify;
 #[cfg(target_os = "android")]
 mod share;
@@ -582,6 +584,18 @@ async fn share_file(
     Err("Sharing is not available on this device".to_string())
 }
 
+/// Colors the phone's status and navigation bars like the app (`#rrggbb`; `dark` for light
+/// icons). Does nothing where the system draws no bars over the app.
+#[tauri::command]
+#[specta::specta]
+#[allow(unused_variables)]
+async fn set_bars_color(app: tauri::AppHandle, color: String, dark: bool) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    return bars::set_color(&app, &color, dark);
+    #[cfg(not(target_os = "android"))]
+    Ok(())
+}
+
 /// Opens the system share sheet with `text`. Only where `native_features().share` is true.
 #[tauri::command]
 #[specta::specta]
@@ -633,6 +647,7 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         add_self,
         native_features,
         share_text,
+        set_bars_color,
         share_file,
         save_download,
         save_file,
@@ -744,7 +759,10 @@ pub fn run() {
     }
     #[cfg(target_os = "android")]
     {
-        app = app.plugin(share::init()).plugin(notify::init());
+        app = app
+            .plugin(share::init())
+            .plugin(notify::init())
+            .plugin(bars::init());
     }
 
     #[cfg(windows)]
