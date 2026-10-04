@@ -35,7 +35,7 @@
   import { Button } from "@/components/ui/button";
   import { Spinner } from "@/components/ui/spinner";
   import GroupPage from "@/components/workspace/GroupPage.svelte";
-  import { goHome, removeMember } from "@/lib/actions";
+  import { goHome, joinGroup, removeMember } from "@/lib/actions";
   import { backendText } from "@/lib/i18n/backend";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
@@ -50,6 +50,7 @@
     onInviteLink,
   } from "@/services/native.svelte";
   import type { AccountInfo } from "@/types";
+  import { errorMessage } from "@/utils/errors";
 
   interface SyncUpdatedEvent {
     group_id: string;
@@ -57,8 +58,37 @@
   }
 
   let storageWarnings = $state<string[]>([]);
+  /**
+   * An invite that waits for the person to log in or create their account is kept here, so
+   * that closing the app meanwhile (to install it, say) doesn't lose it. For a week: an
+   * older one would join a group long forgotten.
+   */
+  const INVITE_KEY = "ezcount_pending_invite";
+  const INVITE_DAYS = 7;
+
+  function savedInvite(): string | null {
+    try {
+      const saved = JSON.parse(localStorage.getItem(INVITE_KEY) ?? "null");
+      const fresh = saved && Date.now() - saved.at < INVITE_DAYS * 24 * 3600 * 1000;
+      return fresh && typeof saved.link === "string" ? saved.link : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveInvite(link: string | null) {
+    try {
+      if (link) localStorage.setItem(INVITE_KEY, JSON.stringify({ link, at: Date.now() }));
+      else localStorage.removeItem(INVITE_KEY);
+    } catch {
+      // Without storage it only waits while the app stays open.
+    }
+  }
+
   // An invite link the app was opened with, kept until the user is logged in.
-  let pendingInvite = $state<string | null>(null);
+  let pendingInvite = $state<string | null>(savedInvite());
+  // It had to wait for a login: opening it was already the decision to join.
+  let waitedForLogin = savedInvite() !== null;
 
   session.refresh();
   loadNativeFeatures();
@@ -71,11 +101,24 @@
   $effect(() => navigation.listen());
 
   $effect(() => {
-    if (!session.loggedIn || !pendingInvite) return;
+    // Not while the app still finds out whether someone is logged in.
+    if (!pendingInvite || session.account === undefined) return;
     const code = pendingInvite;
+    if (session.account === null) {
+      waitedForLogin = true;
+      saveInvite(code);
+      return;
+    }
     untrack(() => {
-      dialogs.openJoin(code);
       pendingInvite = null;
+      saveInvite(null);
+      if (!waitedForLogin) {
+        dialogs.openJoin(code);
+        return;
+      }
+      // Joined right after logging in or signing up; what goes wrong shows with the invite.
+      waitedForLogin = false;
+      joinGroup(code).catch((err) => dialogs.openJoin(code, errorMessage(err)));
     });
   });
 

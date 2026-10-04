@@ -34,6 +34,7 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 
 ### Changed
 
+- An invite link opened before logging in or creating an account now joins the group right after, without asking again, and is kept if the app is closed in between (for a week).
 - Changes made on other devices no longer move the list while you read it: a "Refresh" button shows them.
 - Deleting an expense no longer asks first, since it can be undone.
 - The expense form shows the currency as its sign (€, $) in a narrower field, leaving the amount more room.

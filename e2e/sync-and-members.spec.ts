@@ -134,9 +134,12 @@ test.describe("Sharing and joining", () => {
     await expect(page.getByRole("heading", { name: "Lisbon Trip" })).toBeVisible();
   });
 
-  test("an invite link opened while logged out waits for the login", async ({ page }) => {
+  test("an invite link opened while logged out joins the group after the login", async ({
+    page,
+  }) => {
     await seed(page, {
       __LOGGED_OUT__: true,
+      __REMOTE_GROUPS__: [tripGroup],
       __OPENED_WITH__:
         "ezcount://join?server=https%3A%2F%2Fsync.example.com&group=group-trip&key=k&v=2",
     });
@@ -145,8 +148,48 @@ test.describe("Sharing and joining", () => {
     await page.getByLabel("Password").fill(MOCK_PASSWORD);
     await page.getByRole("button", { name: "Log In" }).click();
 
+    // Nothing more to confirm: opening the invite was the decision.
+    await expect(page.getByText('Joined "Lisbon Trip"')).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Lisbon Trip" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Join a Group" })).toHaveCount(0);
+  });
+
+  test("an invite that can't be joined after the login says why", async ({ page }) => {
+    await seed(page, {
+      __LOGGED_OUT__: true,
+      __OPENED_WITH__: "https://sync.example.com/join#v=2&g=group-gone&k=k",
+    });
+    await page.goto("/");
+    await page.getByLabel("Username").fill("alice");
+    await page.getByLabel("Password").fill(MOCK_PASSWORD);
+    await page.getByRole("button", { name: "Log In" }).click();
+
     const join = page.getByRole("dialog", { name: "Join a Group" });
-    await expect(join.getByLabel("Invite link")).toHaveValue(/^ezcount:\/\/join\?server=/);
+    await expect(join.getByLabel("Invite link")).toHaveValue(/group-gone/);
+    await expect(join.getByText("The sync server does not know this group")).toBeVisible();
+  });
+
+  test("an invite waits for the login even if the app is closed meanwhile", async ({
+    page,
+    context,
+  }) => {
+    await seed(page, {
+      __LOGGED_OUT__: true,
+      __OPENED_WITH__: "https://sync.example.com/join#v=2&g=group-trip&k=k",
+    });
+    await page.goto("/");
+    await expect(page.getByLabel("Username")).toBeVisible();
+    await page.close();
+
+    // The app opens again, this time without the link.
+    const again = await context.newPage();
+    await again.addInitScript(installTauriMock);
+    await seed(again, { __LOGGED_OUT__: true, __REMOTE_GROUPS__: [tripGroup] });
+    await again.goto("/");
+    await again.getByLabel("Username").fill("alice");
+    await again.getByLabel("Password").fill(MOCK_PASSWORD);
+    await again.getByRole("button", { name: "Log In" }).click();
+    await expect(again.getByRole("heading", { name: "Lisbon Trip" })).toBeVisible();
   });
 
   test("scanning an invite QR code joins the group", async ({ page }) => {
