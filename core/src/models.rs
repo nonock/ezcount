@@ -273,6 +273,15 @@ pub struct LoginLink {
     pub expires_in: u32,
 }
 
+/// What a device that showed a code got from the phone that scanned it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct Received {
+    // The account the device is now logged into, when the code was shown to log in.
+    pub account: Option<AccountInfo>,
+    // The group it joined, when the code was shown to join one.
+    pub group: Option<Group>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct PasswordStrength {
     // 0 (guessed at once) to 4 (very hard to guess), from zxcvbn.

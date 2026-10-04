@@ -312,6 +312,29 @@ const FR: Pattern[] = [
     "Évitez les dates et années liées à vous.",
   ],
 
+  // Codes shown by the device that receives
+  [
+    /^This sync server can't pass things between devices yet$/,
+    "Ce serveur de synchronisation ne sait pas encore faire passer d'un appareil à l'autre",
+  ],
+  [
+    /^This is not a code shown by ezcount to receive something$/,
+    "Ce n'est pas un code affiché par ezcount pour recevoir quelque chose",
+  ],
+  [
+    /^This code is for logging in: scan it from Connect a device$/,
+    "Ce code sert à se connecter : scannez-le depuis « Connecter un appareil »",
+  ],
+  [
+    /^This code is for joining a group: scan it from the group's Invite window$/,
+    "Ce code sert à rejoindre un groupe : scannez-le depuis la fenêtre « Inviter » du groupe",
+  ],
+  [
+    /^The other device uses another sync server than your account$/,
+    "L'autre appareil utilise un autre serveur de synchronisation que votre compte",
+  ],
+  [/^This group is not shared yet$/, "Ce groupe n'est pas encore partagé"],
+
   // Feedback
   [/^Write a message first$/, "Écrivez d'abord un message"],
   [

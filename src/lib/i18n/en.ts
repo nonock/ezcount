@@ -138,6 +138,18 @@ export const en = {
   "link.warning": "Whoever scans it gets into your account: don't share it.",
   "link.expired": "This code has expired.",
   "link.again": "New Code",
+  "link.scan": "Scan the other device's code",
+  "link.sent": "The other device is being logged in",
+  "link.sendFailed": "Could not log the other device in",
+
+  "receive.login": "Connect with your phone",
+  "receive.loginHelp":
+    "On a phone logged into your account, open the menu and “Connect a device”, enter your password and choose “Scan the other device's code”.",
+  "receive.join": "Receive from a phone",
+  "receive.joinHelp":
+    "On a phone that is in the group, open the group, then “Invite” and “Send to a computer”, and scan this code.",
+  "receive.qrAlt": "QR code for a phone to scan",
+  "receive.waiting": "Waiting for the phone…",
 
   "account.intro": "Your groups follow this account on all your devices.",
   "account.picture": "Profile picture",
@@ -238,6 +250,9 @@ export const en = {
   "share.copied": "Invite link copied",
   "share.copyManually": "Select the link and copy it manually",
   "share.share": "Share",
+  "share.sendToComputer": "Send to a computer",
+  "share.sent": (name: string) => `Sent: the other device joins "${name}"`,
+  "share.sendFailed": "Could not send the invite",
   "share.message": (name: string) => `Join "${name}" on ezcount`,
   "share.failed": "Could not share the invite",
 

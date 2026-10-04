@@ -15,6 +15,7 @@ export type {
   Participant,
   ParticipantBalance,
   PasswordStrength,
+  Received,
   RecurringExpense,
   SettlementTransfer,
   SignedIn,

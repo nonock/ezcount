@@ -4,9 +4,16 @@
 //! a ticket derived from that code. The code goes to the other device in the QR code, never
 //! here, so the relay can't read what it keeps. A link works once and for a short time:
 //! a photo of the QR code is worth nothing afterwards. Links are kept in memory only.
+//!
+//! It also works the other way round, for a device that can't scan (a computer): that one
+//! makes the code and shows it, a phone scans it and leaves what the computer is to get under
+//! its ticket (`create` for an account, which asks for the password; `hand_over` for a
+//! group's invite, which anyone holding the code may leave), and the computer asks for it
+//! until it is there (`poll`).
 
 use axum::extract::State;
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -122,6 +129,62 @@ pub(crate) async fn create(
             expires_in: lifetime.as_secs(),
         }),
     ))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct HandOverRequest {
+    ticket: String,
+    /// What the other device is to get, encrypted with the code it showed, in standard base64.
+    data: String,
+}
+
+/// `POST /v1/handoffs`: leaves something for the device that showed a code. No account is
+/// asked for: the ticket comes from that code, which only who saw it has.
+pub(crate) async fn hand_over(
+    State(relay): State<Arc<Relay>>,
+    client: Client,
+    Json(req): Json<HandOverRequest>,
+) -> Result<StatusCode, ApiError> {
+    check_ticket(&req.ticket)?;
+    let data = STANDARD
+        .decode(&req.data)
+        .ok()
+        .filter(|d| !d.is_empty() && d.len() <= MAX_DATA_BYTES)
+        .ok_or(ApiError::BadRequest("invalid data"))?;
+    let limits = &relay.limits;
+    let key = format!("handoff {}", client.0);
+    if !relay
+        .counters
+        .try_add(&key, 1, limits.handoffs_per_hour, HOUR)
+        || !relay.links.put(req.ticket, data, limits.link_lifetime)
+    {
+        return Err(ApiError::TooManyRequests);
+    }
+    Ok(StatusCode::CREATED)
+}
+
+/// `POST /v1/handoffs/claim`: what waits under a ticket, once; 204 while nothing does, for
+/// the device that showed a code and asks until a phone has scanned it.
+pub(crate) async fn poll(
+    State(relay): State<Arc<Relay>>,
+    client: Client,
+    Json(req): Json<ClaimRequest>,
+) -> Result<Response, ApiError> {
+    check_ticket(&req.ticket)?;
+    let polls = format!("handoff-poll {}", client.0);
+    if !relay
+        .counters
+        .try_add(&polls, 1, relay.limits.handoff_polls_per_hour, HOUR)
+    {
+        return Err(ApiError::TooManyRequests);
+    }
+    Ok(match relay.links.take(&req.ticket) {
+        Some(data) => Json(ClaimResponse {
+            data: STANDARD.encode(data),
+        })
+        .into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    })
 }
 
 #[derive(Deserialize)]

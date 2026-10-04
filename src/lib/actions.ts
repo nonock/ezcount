@@ -184,6 +184,47 @@ export async function scanInvite() {
   }
 }
 
+/** The code a device shows to get something from this phone (see `ReceiveCode.svelte`). */
+async function scanReceiveCode(): Promise<string | null> {
+  dialogs.scanning = true;
+  try {
+    return await scanQrCode();
+  } catch (err) {
+    if (!(err instanceof ScanCancelled)) toast.error(errorMessage(err));
+    return null;
+  } finally {
+    dialogs.scanning = false;
+  }
+}
+
+/** Scans the code a computer shows to join a group, and sends it the open group's invite. */
+export async function sendInviteToScanned() {
+  const group = openGroup.group;
+  if (!group) return;
+  dialogs.share = false;
+  const link = await scanReceiveCode();
+  if (!link) return;
+  try {
+    await api.sendGroupInvite(group.id, link);
+    toast.success(t("share.sent", group.name));
+  } catch (err) {
+    toast.error(t("share.sendFailed"), { description: errorMessage(err) });
+  }
+}
+
+/** Scans the code a device shows on its login screen, and logs it into this account. */
+export async function sendLoginToScanned(password: string) {
+  dialogs.linkDevice = false;
+  const link = await scanReceiveCode();
+  if (!link) return;
+  try {
+    await api.sendLogin(link, password);
+    toast.success(t("link.sent"));
+  } catch (err) {
+    toast.error(t("link.sendFailed"), { description: errorMessage(err) });
+  }
+}
+
 export async function leaveGroup() {
   const group = openGroup.group;
   if (!group) return;

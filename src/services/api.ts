@@ -7,6 +7,7 @@ import type {
   NativeFeatures,
   ParticipantBalance,
   PasswordStrength,
+  Received,
   SettlementTransfer,
   SignedIn,
   SyncInfo,
@@ -188,6 +189,29 @@ export const api = {
   /** Logs in with a link scanned from a device that is logged in already. */
   async logInWithLink(link: string): Promise<AccountInfo> {
     return unwrap(await commands.logInWithLink(link));
+  },
+
+  /**
+   * The link a device shows as a QR code for a phone to scan: to be logged into the phone's
+   * account ("login"), or to join one of its groups ("group").
+   */
+  async receiveLink(serverUrl: string, purpose: "login" | "group"): Promise<string> {
+    return unwrap(await commands.receiveLink(serverUrl, purpose));
+  },
+
+  /** Asks once whether a phone scanned the code shown; null while none did. */
+  async receive(link: string): Promise<Received | null> {
+    return unwrap(await commands.receive(link));
+  },
+
+  /** Logs the device showing the scanned code into this account. */
+  async sendLogin(link: string, password: string): Promise<void> {
+    unwrap(await commands.sendLogin(link, password));
+  },
+
+  /** Lets the device showing the scanned code join a group. */
+  async sendGroupInvite(groupId: string, link: string): Promise<void> {
+    unwrap(await commands.sendGroupInvite(groupId, link));
   },
 
   async logIn(serverUrl: string, username: string, password: string): Promise<AccountInfo> {

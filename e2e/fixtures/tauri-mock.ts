@@ -111,6 +111,9 @@ export const MOCK_SERVER = "http://localhost:8787";
  * - messages sent from the feedback form land in `window.__feedback`; with `__OLD_RELAY__`
  *   the relay doesn't take them
  * - `__LINK_SECONDS__`: how long a login link works, 120 by default
+ * - `__PHONE_SCANS__`: a phone scans the code this device shows (to log in, or to join the
+ *   first of `__REMOTE_GROUPS__`) once it has been asked for this many times; never when
+ *   left out. What this device sent to a code it scanned lands in `window.__sent`
  * - `__RATES__`: exchange rates the relay suggests, as `{ "USD/EUR": "0.9234" }`
  * - `__ARCHIVED__`: ids of the groups the user archived
  * - `__PROFILE__`: the account's `{ display_name, avatar, iban }`
@@ -138,6 +141,8 @@ export function installTauriMock() {
   let recoveryKey: string | null = null;
   const currentRecoveryKey = () => recoveryKey ?? w.__RECOVERY_KEY__ ?? "";
   let keysIssued = 0;
+  // How many times the code this device shows was asked about.
+  let receiveAsked = 0;
   function nextRecoveryKey() {
     keysIssued += 1;
     recoveryKey = `MOCK-KEY${keysIssued}-AAAA-BBBB-CCCC-DDDD-EEEE-FFFF`;
@@ -724,6 +729,67 @@ export function installTauriMock() {
             link: `ezcount://login?server=${encodeURIComponent(acc.server_url)}&code=mock-code`,
             expires_in: w.__LINK_SECONDS__ ?? 120,
           };
+        }
+
+        case "receive_link": {
+          if (w.__OLD_RELAY__)
+            throw new Error("This sync server can't pass things between devices yet");
+          receiveAsked = 0;
+          return `ezcount://receive?server=${encodeURIComponent(args.serverUrl)}&code=mock-${Date.now()}&for=${args.purpose}`;
+        }
+
+        case "receive": {
+          receiveAsked += 1;
+          if (w.__PHONE_SCANS__ == null || receiveAsked < w.__PHONE_SCANS__) return null;
+          const params = new URL(String(args.link).replace("ezcount://", "https://")).searchParams;
+          if (params.get("for") === "login") {
+            if (getAccount()) throw new Error("This device is already logged in");
+            account = {
+              username: "alice",
+              server_url: params.get("server") || "",
+              display_name: null,
+              avatar: null,
+              iban: null,
+              archived: [],
+              identities: {},
+            };
+            groups = [];
+            return { account: clone(account), group: null };
+          }
+          requireAccount();
+          const remote = (w.__REMOTE_GROUPS__ || [])[0];
+          if (!remote) throw new Error("Group not found");
+          const joined = JSON.parse(JSON.stringify(remote));
+          joined.description ??= "";
+          joined.image ??= null;
+          joined.trash ??= [];
+          joined.recurring ??= [];
+          getGroups().push(joined);
+          return { account: null, group: clone(joined) };
+        }
+
+        case "send_login": {
+          requireAccount();
+          if (!String(args.link).includes("for=login")) {
+            throw new Error(
+              "This code is for joining a group: scan it from the group's Invite window"
+            );
+          }
+          if (args.password !== password) throw new Error("Wrong password");
+          w.__sent = [...(w.__sent || []), { login: true }];
+          return null;
+        }
+
+        case "send_group_invite": {
+          requireAccount();
+          if (!String(args.link).startsWith("ezcount://receive?")) {
+            throw new Error("This is not a code shown by ezcount to receive something");
+          }
+          if (!String(args.link).includes("for=group")) {
+            throw new Error("This code is for logging in: scan it from Connect a device");
+          }
+          w.__sent = [...(w.__sent || []), { group: args.groupId }];
+          return null;
         }
 
         case "log_in_with_link": {

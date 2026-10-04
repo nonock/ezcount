@@ -421,6 +421,52 @@ async sendFeedback(message: string, contact: string | null, app: string | null) 
 }
 },
 /**
+ * The link a device shows as a QR code to get something from a phone that scans it:
+ * `purpose` is "login" to be logged into the phone's account, "group" to join a group.
+ */
+async receiveLink(serverUrl: string, purpose: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("receive_link", { serverUrl, purpose }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Asks once whether a phone scanned the code this device shows (`receive_link`). Nothing
+ * while none did; then the device is logged in, or has joined the group.
+ */
+async receive(link: string) : Promise<Result<Received | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("receive", { link }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Logs the device showing the scanned `link` into this account.
+ */
+async sendLogin(link: string, password: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("send_login", { link, password }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Lets the device showing the scanned `link` join a group.
+ */
+async sendGroupInvite(groupId: string, link: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("send_group_invite", { groupId, link }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Sets a new password with the recovery key and logs in. Returns the replacement recovery
  * key: each one works once.
  */
@@ -523,6 +569,10 @@ export type OriginalAmount = { currency: string; amount_cents: number; rate: str
 export type Participant = { id: string; name: string; removed?: boolean; avatar?: string | null; iban?: string | null; added_at?: string | null; added_by?: string | null; removed_at?: string | null; removed_by?: string | null }
 export type ParticipantBalance = { participant_id: string; participant_name: string; paid_cents: number; owed_cents: number; net_cents: number; removed: boolean }
 export type PasswordStrength = { score: number; acceptable: boolean; warning: string | null; suggestions: string[] }
+/**
+ * What a device that showed a code got from the phone that scanned it.
+ */
+export type Received = { account: AccountInfo | null; group: Group | null }
 /**
  * An expense that comes back every week, month or year: the app adds the next one when its
  * day comes.

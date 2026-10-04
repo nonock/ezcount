@@ -26,6 +26,7 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 - "Split by item…" in the expense form: enter the lines of a receipt and who each was for, and everyone owes what they took.
 - Comments under an expense, from its menu; the activity lists them.
 - "Export as PDF" in the group's menu: its balances, who should pay whom and its expenses, on a page to print or send.
+- A computer can't scan, so it can now show the code instead: "Connect with your phone" on the login screen (scan it from "Connect a device" on a phone that is logged in), and "Receive from a phone" when joining a group (scan it from the group's "Invite" window with "Send to a computer").
 - Notifications on Android when another member adds an expense, a payment or a comment while the app isn't on screen. The phone looks for news every 15 minutes at best, so they can come a while after.
 - "Suggest a feature" in the menu: write an idea or a problem, with an e-mail address if you would like an answer. It goes to whoever runs your server.
 - Archive a group: it leaves your list for an "Archived" section, on your devices only, and can come back.

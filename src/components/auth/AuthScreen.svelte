@@ -1,12 +1,15 @@
 <script lang="ts">
   import KeyRoundIcon from "@lucide/svelte/icons/key-round";
+  import QrCodeIcon from "@lucide/svelte/icons/qr-code";
   import ScanQrCodeIcon from "@lucide/svelte/icons/scan-qr-code";
   import { toast } from "svelte-sonner";
   import LogoMark from "@/components/common/LogoMark.svelte";
+  import ReceiveCode from "@/components/common/ReceiveCode.svelte";
   import Wordmark from "@/components/common/Wordmark.svelte";
   import * as Alert from "@/components/ui/alert";
   import { Button } from "@/components/ui/button";
   import * as Card from "@/components/ui/card";
+  import * as Dialog from "@/components/ui/dialog";
   import * as Field from "@/components/ui/field";
   import { Input } from "@/components/ui/input";
   import { Spinner } from "@/components/ui/spinner";
@@ -17,7 +20,7 @@
   import { cn } from "@/lib/utils";
   import { api } from "@/services/api";
   import { nativeFeatures, ScanCancelled, scanQrCode } from "@/services/native.svelte";
-  import type { AccountInfo } from "@/types";
+  import type { AccountInfo, Received } from "@/types";
   import { errorMessage } from "@/utils/errors";
   import { serverName } from "@/utils/formatters";
   import PasswordStrengthMeter from "./PasswordStrengthMeter.svelte";
@@ -85,6 +88,17 @@
     error = null;
     password = "";
     confirmPassword = "";
+  }
+
+  // Shows a code for a phone that is logged in to scan: for a device that can't scan.
+  let receiving = $state(false);
+
+  /** The phone that scanned the code logged this device into its account. */
+  function received({ account }: Received) {
+    receiving = false;
+    if (!account) return;
+    rememberServer(account.server_url);
+    onAuthenticated(account);
   }
 
   /** Logs in with the code another device of the account shows (its menu: Connect a device). */
@@ -314,6 +328,18 @@
               <Field.Description class="text-center">{t("auth.scanHelp")}</Field.Description>
             {/if}
 
+            {#if mode === "login"}
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submitting}
+                onclick={() => (receiving = true)}
+              >
+                <QrCodeIcon data-icon="inline-start" />
+                {t("receive.login")}
+              </Button>
+            {/if}
+
             {#if mode === "recover"}
               <Button type="button" variant="ghost" onclick={() => switchMode("login")}>
                 {t("auth.backToLogin")}
@@ -337,6 +363,18 @@
         </form>
       </Card.Content>
     </Card.Root>
+
+    <Dialog.Root bind:open={receiving}>
+      <Dialog.Content class="sm:max-w-md">
+        <Dialog.Header>
+          <Dialog.Title>{t("receive.login")}</Dialog.Title>
+          <Dialog.Description>{t("receive.loginHelp")}</Dialog.Description>
+        </Dialog.Header>
+        {#if receiving}
+          <ReceiveCode serverUrl={serverUrl.trim()} purpose="login" onReceived={received} />
+        {/if}
+      </Dialog.Content>
+    </Dialog.Root>
 
     <!-- Before logging in there is no menu to pick the language from. -->
     <div class="flex justify-center gap-4 text-sm text-muted-foreground">

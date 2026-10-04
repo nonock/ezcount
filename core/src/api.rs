@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::models::{
-    AccountInfo, ExpenseInput, Group, LoginLink, ParticipantBalance, PasswordStrength,
+    AccountInfo, ExpenseInput, Group, LoginLink, ParticipantBalance, PasswordStrength, Received,
     SettlementTransfer, SignedIn, SyncInfo,
 };
 use crate::{csv_file, doc, engine, sync, AppState};
@@ -367,6 +367,28 @@ pub async fn log_in_with_link(state: &AppState, link: &str) -> Res<AccountInfo> 
     state.require_account_info()
 }
 
+/// The link a device shows as a QR code to get something from a phone that scans it:
+/// `purpose` is "login" to be logged into the phone's account, "group" to join a group.
+pub fn receive_link(server_url: &str, purpose: &str) -> Res<String> {
+    sync::receive_link(server_url, purpose)
+}
+
+/// Asks once whether a phone scanned the code this device shows (`receive_link`). Nothing
+/// while none did; then the device is logged in, or has joined the group.
+pub async fn receive(state: &AppState, link: &str) -> Res<Option<Received>> {
+    sync::receive(state, link).await
+}
+
+/// Logs the device showing the scanned `link` into this account.
+pub async fn send_login(state: &AppState, link: &str, password: &str) -> Res<()> {
+    sync::send_login(state, link, password).await
+}
+
+/// Lets the device showing the scanned `link` join a group.
+pub async fn send_group_invite(state: &AppState, group_id: &str, link: &str) -> Res<()> {
+    sync::send_group_invite(state, group_id, link).await
+}
+
 /// Removes the account and its groups from this device. Fails while changes are not uploaded,
 /// unless `force` is set.
 pub async fn log_out(state: &AppState, force: bool) -> Res<()> {
@@ -534,6 +556,10 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
         "log_in" => json(log_in(state, &s("serverUrl")?, &s("username")?, &s("password")?).await?),
         "create_login_link" => json(create_login_link(state, &s("password")?).await?),
         "log_in_with_link" => json(log_in_with_link(state, &s("link")?).await?),
+        "receive_link" => json(receive_link(&s("serverUrl")?, &s("purpose")?)?),
+        "receive" => json(receive(state, &s("link")?).await?),
+        "send_login" => json(send_login(state, &s("link")?, &s("password")?).await?),
+        "send_group_invite" => json(send_group_invite(state, &s("groupId")?, &s("link")?).await?),
         "log_out" => json(log_out(state, arg(&args, "force")?).await?),
         "set_identity" => json(set_identity(state, &s("groupId")?, &s("participantId")?)?),
         "update_profile" => json(update_profile(

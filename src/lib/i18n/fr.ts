@@ -143,6 +143,18 @@ export const fr: Messages = {
   "link.warning": "Quiconque le scanne accède à votre compte : ne le partagez pas.",
   "link.expired": "Ce code a expiré.",
   "link.again": "Nouveau code",
+  "link.scan": "Scanner le code de l'autre appareil",
+  "link.sent": "L'autre appareil se connecte",
+  "link.sendFailed": "Impossible de connecter l'autre appareil",
+
+  "receive.login": "Se connecter avec son téléphone",
+  "receive.loginHelp":
+    "Sur un téléphone connecté à votre compte, ouvrez le menu puis « Connecter un appareil », saisissez votre mot de passe et choisissez « Scanner le code de l'autre appareil ».",
+  "receive.join": "Recevoir depuis un téléphone",
+  "receive.joinHelp":
+    "Sur un téléphone déjà dans le groupe, ouvrez le groupe, puis « Inviter » et « Envoyer à un ordinateur », et scannez ce code.",
+  "receive.qrAlt": "QR code à scanner avec un téléphone",
+  "receive.waiting": "En attente du téléphone…",
 
   "account.intro": "Vos groupes suivent ce compte sur tous vos appareils.",
   "account.picture": "Photo de profil",
@@ -246,6 +258,9 @@ export const fr: Messages = {
   "share.copied": "Lien d'invitation copié",
   "share.copyManually": "Sélectionnez le lien et copiez-le à la main",
   "share.share": "Partager",
+  "share.sendToComputer": "Envoyer à un ordinateur",
+  "share.sent": (name) => `Envoyé : l'autre appareil rejoint « ${name} »`,
+  "share.sendFailed": "Impossible d'envoyer l'invitation",
   "share.message": (name) => `Rejoignez « ${name} » sur ezcount`,
   "share.failed": "Impossible de partager l'invitation",
 

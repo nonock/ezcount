@@ -272,6 +272,8 @@ pub fn router(relay: Arc<Relay>) -> Router {
         .route("/v1/accounts/credentials", post(update_credentials))
         .route("/v1/accounts/links", post(links::create))
         .route("/v1/accounts/links/claim", post(links::claim))
+        .route("/v1/handoffs", post(links::hand_over))
+        .route("/v1/handoffs/claim", post(links::poll))
         .route("/v1/rates/{from}/{to}", get(rates::rate))
         .route("/v1/feedback", get(feedback::list).post(feedback::send))
         .route("/feedback", get(feedback::page));

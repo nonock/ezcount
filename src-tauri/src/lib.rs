@@ -9,7 +9,7 @@ mod share;
 
 use ezcount_core::models::{
     AccountInfo, ExpenseInput, Group, LoginLink, NativeFeatures, ParticipantBalance,
-    PasswordStrength, SettlementTransfer, SignedIn, SyncInfo,
+    PasswordStrength, Received, SettlementTransfer, SignedIn, SyncInfo,
 };
 use ezcount_core::storage::Store;
 use ezcount_core::{api, AppState};
@@ -431,6 +431,44 @@ async fn password_strength(password: String, username: String) -> PasswordStreng
     api::password_strength(&password, &username)
 }
 
+/// The link a device shows as a QR code to get something from a phone that scans it:
+/// `purpose` is "login" to be logged into the phone's account, "group" to join a group.
+#[tauri::command]
+#[specta::specta]
+fn receive_link(server_url: String, purpose: String) -> Result<String, String> {
+    api::receive_link(&server_url, &purpose)
+}
+
+/// Asks once whether a phone scanned the code this device shows (`receive_link`). Nothing
+/// while none did; then the device is logged in, or has joined the group.
+#[tauri::command]
+#[specta::specta]
+async fn receive(state: State<'_, AppState>, link: String) -> Result<Option<Received>, String> {
+    api::receive(&state, &link).await
+}
+
+/// Logs the device showing the scanned `link` into this account.
+#[tauri::command]
+#[specta::specta]
+async fn send_login(
+    state: State<'_, AppState>,
+    link: String,
+    password: String,
+) -> Result<(), String> {
+    api::send_login(&state, &link, &password).await
+}
+
+/// Lets the device showing the scanned `link` join a group.
+#[tauri::command]
+#[specta::specta]
+async fn send_group_invite(
+    state: State<'_, AppState>,
+    group_id: String,
+    link: String,
+) -> Result<(), String> {
+    api::send_group_invite(&state, &group_id, &link).await
+}
+
 /// Sends an idea or a problem to whoever runs the account's relay. `contact` is how to
 /// answer, when an answer is wanted; `app` says which app it comes from.
 #[tauri::command]
@@ -600,6 +638,10 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         save_file,
         password_strength,
         send_feedback,
+        receive_link,
+        receive,
+        send_login,
+        send_group_invite,
         recover_account,
         change_password,
         replace_recovery_key,

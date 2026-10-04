@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ScanQrCodeIcon from "@lucide/svelte/icons/scan-qr-code";
   import ShieldAlertIcon from "@lucide/svelte/icons/shield-alert";
   import { untrack } from "svelte";
   import { renderSVG } from "uqr";
@@ -7,9 +8,11 @@
   import * as Field from "@/components/ui/field";
   import { Input } from "@/components/ui/input";
   import { Spinner } from "@/components/ui/spinner";
+  import { sendLoginToScanned } from "@/lib/actions";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { api } from "@/services/api";
+  import { nativeFeatures } from "@/services/native.svelte";
   import { errorMessage } from "@/utils/errors";
 
   /**
@@ -126,6 +129,17 @@
             {/if}
             {expired ? t("link.again") : t("link.show")}
           </Button>
+          {#if nativeFeatures.scan}
+            <!-- For a device that can't scan: it shows a code on its login screen. -->
+            <Button
+              variant="outline"
+              disabled={submitting || !password}
+              onclick={() => sendLoginToScanned(password)}
+            >
+              <ScanQrCodeIcon data-icon="inline-start" />
+              {t("link.scan")}
+            </Button>
+          {/if}
         </Dialog.Footer>
       </form>
     {/if}

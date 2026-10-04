@@ -2,6 +2,7 @@
   import CopyIcon from "@lucide/svelte/icons/copy";
   import LockIcon from "@lucide/svelte/icons/lock";
   import RefreshCwIcon from "@lucide/svelte/icons/refresh-cw";
+  import ScanQrCodeIcon from "@lucide/svelte/icons/scan-qr-code";
   import Share2Icon from "@lucide/svelte/icons/share-2";
   import TriangleAlertIcon from "@lucide/svelte/icons/triangle-alert";
   import { toast } from "svelte-sonner";
@@ -12,6 +13,7 @@
   import * as Field from "@/components/ui/field";
   import { Spinner } from "@/components/ui/spinner";
   import { Textarea } from "@/components/ui/textarea";
+  import { sendInviteToScanned } from "@/lib/actions";
   import { backendText } from "@/lib/i18n/backend";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
@@ -134,6 +136,12 @@
           <CopyIcon data-icon="inline-start" />
           {t("share.copy")}
         </Button>
+        {#if nativeFeatures.scan}
+          <Button variant="outline" onclick={sendInviteToScanned}>
+            <ScanQrCodeIcon data-icon="inline-start" />
+            {t("share.sendToComputer")}
+          </Button>
+        {/if}
         {#if canShare}
           <Button onclick={handleShare}>
             <Share2Icon data-icon="inline-start" />
