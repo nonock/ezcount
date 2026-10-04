@@ -784,10 +784,7 @@ pub fn run() {
             .path()
             .app_data_dir()
             .unwrap_or_else(|_| PathBuf::from("./"));
-        let (store, warnings) = Store::open(
-            &app_data.join("ezcount.sqlite3"),
-            &app_data.join("ezcount_data.json"),
-        )?;
+        let (store, warnings) = Store::open(&app_data.join("ezcount.sqlite3"))?;
         for warning in &warnings {
             eprintln!("[storage] {warning}");
         }

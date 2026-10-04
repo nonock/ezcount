@@ -591,8 +591,7 @@ mod tests {
 
     fn state() -> (AppState, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("ezcount-api-{}", uuid::Uuid::new_v4()));
-        let (store, _) =
-            Store::open(&dir.join("db.sqlite3"), &dir.join("ezcount_data.json")).unwrap();
+        let (store, _) = Store::open(&dir.join("db.sqlite3")).unwrap();
         (AppState::new(store, Vec::new()).unwrap(), dir)
     }
 

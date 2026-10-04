@@ -247,7 +247,8 @@
   }
 </script>
 
-<ModeWatcher modeStorageKey="theme" />
+<!-- The colors are the page's background in each theme (`--background` in styles.css). -->
+<ModeWatcher modeStorageKey="theme" themeColors={{ light: "#f8f8f8", dark: "#191e24" }} />
 <ConfirmDialog />
 <!-- For an invite once logged in, and before that for a code that logs in. -->
 {#if dialogs.scanning}

@@ -82,7 +82,13 @@
     <p class="text-sm font-medium">{t("link.expired")}</p>
     <Button variant="outline" onclick={show} class="w-full">{t("link.again")}</Button>
   {:else if qrCode}
-    <img src={qrCode} alt={t("receive.qrAlt")} class="mx-auto size-56 rounded-lg" />
+    <img
+      src={qrCode}
+      alt={t("receive.qrAlt")}
+      width="224"
+      height="224"
+      class="mx-auto size-56 rounded-lg"
+    />
     <p class="flex items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
       <Spinner />
       {t("receive.waiting")}

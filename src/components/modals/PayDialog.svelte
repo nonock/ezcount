@@ -73,6 +73,8 @@
         <img
           src={qrCode}
           alt={t("pay.qrAlt", recipient.name)}
+          width="208"
+          height="208"
           class="mx-auto size-52 rounded-lg"
           data-testid="transfer-qr"
         />

@@ -45,7 +45,14 @@
     )}
   >
     {#if value}
-      <img src={value} alt="" class="size-full object-cover" data-testid="picture-preview" />
+      <img
+        src={value}
+        alt=""
+        width="256"
+        height="256"
+        class="size-full object-cover"
+        data-testid="picture-preview"
+      />
     {:else}
       {@render placeholder?.()}
     {/if}

@@ -4,6 +4,15 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 
 ## Unreleased
 
+### Changed
+
+- Long lists of expenses stay quick to scroll: days out of view are only drawn when reached.
+- The data file of the very first versions (`ezcount_data.json`, from before the database) is no longer imported at startup. It is left where it is.
+
+### Fixed
+
+- The relay answers a device catching up on a large group in pages of a few megabytes, instead of holding the whole group in memory.
+
 ## 0.4.0 - 2026-10-04
 
 ### Added

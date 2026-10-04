@@ -122,9 +122,9 @@ pub struct Store {
 }
 
 impl Store {
-    /// Opens (or creates) the database and migrates the old JSON file if present.
-    /// Returns warnings about anything that could not be loaded; that data stays on disk.
-    pub fn open(db_path: &Path, legacy_json: &Path) -> Res<(Self, Vec<String>)> {
+    /// Opens (or creates) the database. Returns warnings about anything that could not be
+    /// loaded; that data stays on disk.
+    pub fn open(db_path: &Path) -> Res<(Self, Vec<String>)> {
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Could not create data folder {}: {e}", parent.display()))?;
@@ -132,9 +132,7 @@ impl Store {
         let conn = Connection::open(db_path).map_err(db_err)?;
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;")
             .map_err(db_err)?;
-        let (mut store, mut warnings) = Self::from_connection(conn)?;
-        store.migrate_legacy_json(legacy_json, &mut warnings);
-        Ok((store, warnings))
+        Self::from_connection(conn)
     }
 
     /// In the browser: opens (or creates) `name` in the SQLite VFS the web app registered as
@@ -250,54 +248,6 @@ impl Store {
             }
         }
         Ok(())
-    }
-
-    /// One-time import of the pre-SQLite `ezcount_data.json`. On success the file is renamed,
-    /// not deleted. If it cannot be parsed it is left untouched and a warning is returned.
-    fn migrate_legacy_json(&mut self, path: &Path, warnings: &mut Vec<String>) {
-        if !path.exists() {
-            return;
-        }
-        let groups: Vec<Group> = match fs::read_to_string(path)
-            .map_err(|e| e.to_string())
-            .and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))
-        {
-            Ok(groups) => groups,
-            Err(e) => {
-                warnings.push(format!(
-                    "The old data file {} could not be read ({e}). It was left untouched.",
-                    path.display()
-                ));
-                return;
-            }
-        };
-
-        let result = (|| -> Res<Vec<(String, LoroDoc)>> {
-            let tx = self.conn.unchecked_transaction().map_err(db_err)?;
-            let mut migrated = Vec::new();
-            for group in groups.iter().filter(|g| !self.docs.contains_key(&g.id)) {
-                let doc = doc::doc_from_legacy(group)?;
-                save_snapshot(&tx, &group.id, &doc)?;
-                migrated.push((group.id.clone(), doc));
-            }
-            tx.commit().map_err(db_err)?;
-            Ok(migrated)
-        })();
-
-        match result {
-            Ok(migrated) => {
-                self.docs.extend(migrated);
-                let done = path.with_extension("migrated.json");
-                if let Err(e) = fs::rename(path, &done) {
-                    // Harmless: already-migrated groups are skipped on the next launch.
-                    eprintln!("[storage] could not rename {}: {e}", path.display());
-                }
-            }
-            Err(e) => warnings.push(format!(
-                "The old data file {} could not be migrated ({e}). It was left untouched.",
-                path.display()
-            )),
-        }
     }
 
     // -- Groups --------------------------------------------------------------
@@ -691,11 +641,7 @@ mod tests {
             Self(dir)
         }
         fn open(&self) -> (Store, Vec<String>) {
-            Store::open(
-                &self.0.join("db.sqlite3"),
-                &self.0.join("ezcount_data.json"),
-            )
-            .unwrap()
+            Store::open(&self.0.join("db.sqlite3")).unwrap()
         }
     }
     impl Drop for TempDir {
@@ -725,47 +671,6 @@ mod tests {
         let (store, warnings) = dir.open();
         assert!(warnings.is_empty());
         assert_eq!(store.group(&id).unwrap().participants.len(), 2);
-    }
-
-    #[test]
-    fn migrates_legacy_json_once() {
-        let dir = TempDir::new();
-        let legacy = r#"[{"id":"g1","name":"Old","currency":"EUR","created_at":"2025-01-01T00:00:00Z",
-            "participants":[{"id":"p1","name":"Alice"}],
-            "expenses":[{"id":"e1","group_id":"g1","title":"Tea","amount_cents":250,"paid_by":"p1",
-              "splits":[{"participant_id":"p1","shares":1}],
-              "created_at":"2025-01-02T00:00:00Z","updated_at":"2025-01-02T00:00:00Z"}]}]"#;
-        fs::write(dir.0.join("ezcount_data.json"), legacy).unwrap();
-
-        let (store, warnings) = dir.open();
-        assert!(warnings.is_empty(), "{warnings:?}");
-        let g = store.group("g1").unwrap();
-        assert_eq!(g.participants[0].id, "p1");
-        assert_eq!(g.expenses[0].amount_cents, 250);
-        assert!(!dir.0.join("ezcount_data.json").exists());
-        assert!(dir.0.join("ezcount_data.migrated.json").exists());
-        drop(store);
-
-        let (store, _) = dir.open();
-        assert_eq!(store.groups().len(), 1);
-    }
-
-    #[test]
-    fn unreadable_legacy_json_is_kept_and_reported() {
-        let dir = TempDir::new();
-        let path = dir.0.join("ezcount_data.json");
-        fs::write(&path, "{ not json").unwrap();
-
-        let (mut store, warnings) = dir.open();
-        assert_eq!(warnings.len(), 1);
-        // Creating a group must not touch the old file.
-        store
-            .insert(
-                doc::new_group_doc("New", "EUR", &["A".into()]).unwrap(),
-                None,
-            )
-            .unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap(), "{ not json");
     }
 
     #[test]

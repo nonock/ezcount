@@ -85,7 +85,13 @@
 
     {#if qrCode && !expired}
       <div class="space-y-3">
-        <img src={qrCode} alt={t("link.qrAlt")} class="mx-auto size-56 rounded-lg" />
+        <img
+          src={qrCode}
+          alt={t("link.qrAlt")}
+          width="224"
+          height="224"
+          class="mx-auto size-56 rounded-lg"
+        />
         <p class="text-center text-sm" aria-live="off">
           {t("link.expiresIn", timeLeft)}
         </p>

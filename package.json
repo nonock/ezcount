@@ -34,10 +34,10 @@
     "@internationalized/date": "^3.12.4",
     "@lucide/svelte": "^1.48.0",
     "@pdf-lib/fontkit": "1.1.1",
-    "@tauri-apps/api": "~2.11.1",
-    "@tauri-apps/plugin-barcode-scanner": "~2.4.6",
-    "@tauri-apps/plugin-deep-link": "~2.4.10",
-    "@tauri-apps/plugin-opener": "~2.5.5",
+    "@tauri-apps/api": "~2.12.0",
+    "@tauri-apps/plugin-barcode-scanner": "~2.5.0",
+    "@tauri-apps/plugin-deep-link": "~2.5.0",
+    "@tauri-apps/plugin-opener": "~2.6.0",
     "bits-ui": "^2.19.3",
     "clsx": "^2.1.1",
     "dejavu-fonts-ttf": "2.37.3",
@@ -53,16 +53,16 @@
   "devDependencies": {
     "@biomejs/biome": "^2",
     "@playwright/test": "^1.63.0",
-    "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "@sveltejs/vite-plugin-svelte": "^7",
     "@tailwindcss/vite": "^4.3.3",
-    "@tauri-apps/cli": "~2.11.4",
-    "@types/node": "^22.20.3",
-    "lefthook": "^2.1.12",
+    "@tauri-apps/cli": "~2.12.0",
+    "@types/node": "^22.20.4",
+    "lefthook": "^2.1.14",
     "prettier": "^3.9.9",
     "prettier-plugin-svelte": "^4.1.1",
     "svelte-check": "^4.7.6",
     "tailwindcss": "^4.3.3",
-    "typescript": "~5.6.3",
-    "vite": "^6.4.3"
+    "typescript": "^6",
+    "vite": "^8"
   }
 }

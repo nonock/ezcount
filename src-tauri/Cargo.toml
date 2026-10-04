@@ -22,8 +22,8 @@ tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
 ezcount-core = { path = "../core" }
-tauri = { version = "2.11", features = [] }
-tauri-plugin-opener = "2.5"
+tauri = { version = "2.12", features = [] }
+tauri-plugin-opener = "~2.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
@@ -31,7 +31,7 @@ specta = { version = "=2.0.0-rc.20", features = ["derive", "chrono"] }
 specta-typescript = "=0.0.7"
 tauri-specta = { version = "=2.0.0-rc.20", features = ["typescript"] }
 tokio = { version = "1.53.1", features = ["time", "sync", "macros", "rt"] }
-tauri-plugin-deep-link = "2.4"
+tauri-plugin-deep-link = "~2.5"
 
 [lints.rust]
 linker_messages = "allow"
@@ -60,7 +60,7 @@ opt-level = 3
 jni = "0.21"
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
-tauri-plugin-barcode-scanner = "2.4"
+tauri-plugin-barcode-scanner = "~2.5"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

@@ -448,7 +448,11 @@
   {/if}
 
   {#each dateGroups as dg (dg.dateKey)}
-    <section aria-labelledby={`date-header-${dg.dateKey}`} class="space-y-2">
+    <!-- Days out of view aren't laid out or painted until scrolled to: long lists stay quick. -->
+    <section
+      aria-labelledby={`date-header-${dg.dateKey}`}
+      class="space-y-2 [contain-intrinsic-size:auto_8rem] [content-visibility:auto]"
+    >
       <div id={`date-header-${dg.dateKey}`} class="flex items-center justify-between px-1 text-sm">
         <span>
           <span class="font-semibold">

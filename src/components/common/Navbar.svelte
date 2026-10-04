@@ -76,6 +76,8 @@
                 <img
                   src={session.account.avatar}
                   alt=""
+                  width="256"
+                  height="256"
                   class="size-full rounded-full object-cover"
                 />
               {:else}

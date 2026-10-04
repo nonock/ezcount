@@ -66,7 +66,7 @@ pub fn post(app: &AppHandle, notices: &[Notice]) {
 /// One sync pass with the data opened for it, for a process that has no app running.
 fn sync_alone(data_dir: &str) -> Result<Vec<Notice>, String> {
     let dir = Path::new(data_dir);
-    let (store, _) = Store::open(&dir.join("ezcount.sqlite3"), &dir.join("ezcount_data.json"))?;
+    let (store, _) = Store::open(&dir.join("ezcount.sqlite3"))?;
     let state = AppState::new(store, Vec::new())?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

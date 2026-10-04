@@ -62,6 +62,8 @@
         <img
           src={group.image}
           alt=""
+          width="256"
+          height="256"
           class="size-10 shrink-0 rounded-lg object-cover"
           data-testid="group-picture"
         />
@@ -168,7 +170,13 @@
             )}
           >
             {#if p.avatar}
-              <img src={p.avatar} alt="" class="-ml-1.5 size-5 rounded-full object-cover" />
+              <img
+                src={p.avatar}
+                alt=""
+                width="256"
+                height="256"
+                class="-ml-1.5 size-5 rounded-full object-cover"
+              />
             {/if}
             {p.name}
           </button>

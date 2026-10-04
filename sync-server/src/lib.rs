@@ -101,6 +101,9 @@ use tower_http::set_header::SetResponseHeaderLayer;
 const MAX_UPDATE_BYTES: usize = 8 * 1024 * 1024;
 const DEFAULT_PAGE: u32 = 200;
 const MAX_PAGE: u32 = 1000;
+/// A page of updates also ends at this size, so that answering doesn't hold a whole document
+/// (up to `Limits::max_document_bytes`) in memory at once.
+const MAX_PAGE_BYTES: usize = 4 * 1024 * 1024;
 
 /// How a relay runs. `Default`: no Android app, client addresses taken from the connection,
 /// default limits.
@@ -591,16 +594,27 @@ async fn pull(
         let mut stmt = db.prepare(
             "SELECT seq, data FROM updates WHERE group_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
         )?;
-        let mut updates = stmt
-            .query_map(params![group_id, query.after, limit + 1], |r| {
-                Ok(Update {
-                    seq: r.get(0)?,
-                    data: STANDARD.encode(r.get::<_, Vec<u8>>(1)?),
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let has_more = updates.len() > limit as usize;
-        updates.truncate(limit as usize);
+        let rows = stmt.query_map(params![group_id, query.after, limit + 1], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?;
+        let mut updates = Vec::new();
+        let mut bytes = 0;
+        let mut has_more = false;
+        for row in rows {
+            let (seq, data) = row?;
+            // Always one update, however large: a client couldn't get past an empty page.
+            let full = updates.len() == limit as usize
+                || (!updates.is_empty() && bytes + data.len() > MAX_PAGE_BYTES);
+            if full {
+                has_more = true;
+                break;
+            }
+            bytes += data.len();
+            updates.push(Update {
+                seq,
+                data: STANDARD.encode(data),
+            });
+        }
         Ok(Json(PullResponse {
             updates,
             has_more,

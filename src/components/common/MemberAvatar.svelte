@@ -19,7 +19,13 @@
 
 <Avatar.Root {size} aria-hidden="true">
   {#if member?.avatar}
-    <img src={member.avatar} alt="" class="size-full rounded-full object-cover" />
+    <img
+      src={member.avatar}
+      alt=""
+      width="256"
+      height="256"
+      class="size-full rounded-full object-cover"
+    />
   {:else}
     <Avatar.Fallback class={memberTone(group, participantId)}>
       {(name ?? member?.name ?? "").charAt(0).toUpperCase()}

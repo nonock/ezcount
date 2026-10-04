@@ -87,7 +87,13 @@
       </div>
     {:else}
       <Field.Group>
-        <img src={qrCode} alt={t("share.qrAlt", group.name)} class="mx-auto size-56 rounded-lg" />
+        <img
+          src={qrCode}
+          alt={t("share.qrAlt", group.name)}
+          width="224"
+          height="224"
+          class="mx-auto size-56 rounded-lg"
+        />
         <Field.Field>
           <Field.Label for="share-invite-code">{t("join.link")}</Field.Label>
           <Textarea

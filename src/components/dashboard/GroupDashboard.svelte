@@ -85,6 +85,8 @@
             <img
               src={group.image}
               alt=""
+              width="256"
+              height="256"
               class="size-9 shrink-0 rounded-lg object-cover"
               data-testid="group-picture"
             />

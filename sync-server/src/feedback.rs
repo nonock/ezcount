@@ -9,13 +9,13 @@ use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use rusqlite::params;
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 use crate::limits::{Client, HOUR};
-use crate::{ApiError, Relay};
+use crate::{with_db, ApiError, Relay};
 
 /// Longest message, in characters.
 const MAX_MESSAGE_CHARS: usize = 2000;
@@ -82,16 +82,19 @@ pub(crate) async fn send(
     {
         return Err(ApiError::TooManyRequests);
     }
-    let db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
-    db.execute(
-        "INSERT INTO feedback (message, contact, app) VALUES (?1, ?2, ?3)",
-        params![message, contact, app],
-    )?;
-    db.execute(
-        "DELETE FROM feedback WHERE id <= (SELECT MAX(id) FROM feedback) - ?1",
-        params![MAX_KEPT],
-    )?;
-    Ok(StatusCode::NO_CONTENT)
+    let message = message.to_string();
+    with_db(&relay, move |_, db| {
+        db.execute(
+            "INSERT INTO feedback (message, contact, app) VALUES (?1, ?2, ?3)",
+            params![message, contact, app],
+        )?;
+        db.execute(
+            "DELETE FROM feedback WHERE id <= (SELECT MAX(id) FROM feedback) - ?1",
+            params![MAX_KEPT],
+        )?;
+        Ok(StatusCode::NO_CONTENT)
+    })
+    .await
 }
 
 /// `GET /feedback`: the page that asks for the admin token and lists the messages. It holds
@@ -130,14 +133,13 @@ pub(crate) async fn list(State(relay): State<Arc<Relay>>, headers: HeaderMap) ->
     if Sha256::digest(given.as_bytes()) != Sha256::digest(token.as_bytes()) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    match kept(&relay) {
+    match with_db(&relay, |_, db| Ok(kept(db)?)).await {
         Ok(messages) => Json(messages).into_response(),
-        Err(e) => ApiError::from(e).into_response(),
+        Err(e) => e.into_response(),
     }
 }
 
-fn kept(relay: &Relay) -> rusqlite::Result<Vec<Kept>> {
-    let db = relay.db.lock().unwrap_or_else(|e| e.into_inner());
+fn kept(db: &Connection) -> rusqlite::Result<Vec<Kept>> {
     let mut query = db.prepare(
         "SELECT id, message, contact, app, created_at FROM feedback ORDER BY id DESC LIMIT 1000",
     )?;
