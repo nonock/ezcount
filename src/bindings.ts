@@ -170,6 +170,39 @@ async deleteExpense(groupId: string, expenseId: string) : Promise<Result<Group, 
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Puts a deleted expense back.
+ */
+async restoreExpense(groupId: string, expenseId: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("restore_expense", { groupId, expenseId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Removes a deleted expense from the trash, for good.
+ */
+async purgeExpense(groupId: string, expenseId: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("purge_expense", { groupId, expenseId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stops a repeated expense. The ones already added stay.
+ */
+async stopRecurringExpense(groupId: string, recurringId: string) : Promise<Result<Group, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_recurring_expense", { groupId, recurringId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async recordReimbursement(groupId: string, fromId: string, toId: string, amountCents: number, notes: string | null) : Promise<Result<Group, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("record_reimbursement", { groupId, fromId, toId, amountCents, notes }) };
@@ -396,18 +429,22 @@ async logInWithLink(link: string) : Promise<Result<AccountInfo, string>> {
 /** user-defined types **/
 
 export type AccountInfo = { username: string; server_url: string; display_name: string | null; avatar: string | null; archived: string[]; identities: { [key in string]: string } }
-export type Expense = { id: string; group_id: string; title: string; category?: string | null; amount_cents: number; original?: OriginalAmount | null; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean }
-export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_payers?: ExpensePayer[]; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; previous_category?: string | null; summary: string }
+/**
+ * An expense someone deleted, kept so it can be put back.
+ */
+export type DeletedExpense = { expense: Expense; deleted_at: string; deleted_by?: string | null }
+export type Expense = { id: string; group_id: string; title: string; category?: string | null; amount_cents: number; original?: OriginalAmount | null; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at: string; updated_at: string; history?: ExpenseHistoryEntry[]; is_reimbursement?: boolean; income?: boolean; added_at?: string | null; added_by?: string | null; recurring?: string | null }
+export type ExpenseHistoryEntry = { edited_at: string; previous_title: string; previous_amount_cents: number; previous_paid_by: string; previous_payers?: ExpensePayer[]; previous_splits: ExpenseSplit[]; previous_original?: OriginalAmount | null; previous_category?: string | null; summary: string; edited_by?: string | null }
 /**
  * An expense as the form sends it, to add one or to replace one.
  */
-export type ExpenseInput = { title: string; category?: string | null; amount_cents: number; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at?: string | null; original?: OriginalAmount | null }
+export type ExpenseInput = { title: string; category?: string | null; amount_cents: number; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; created_at?: string | null; original?: OriginalAmount | null; income?: boolean; repeat?: string | null }
 /**
  * What one of the several people who paid an expense put in.
  */
 export type ExpensePayer = { participant_id: string; amount_cents: number }
 export type ExpenseSplit = { participant_id: string; shares: number; fixed_cents?: number | null }
-export type Group = { id: string; name: string; description?: string; image?: string | null; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string; deleted?: boolean; deletion_votes?: string[] }
+export type Group = { id: string; name: string; description?: string; image?: string | null; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string; deleted?: boolean; deletion_votes?: string[]; trash?: DeletedExpense[]; recurring?: RecurringExpense[] }
 /**
  * A link that logs another device into the account, shown as a QR code.
  */
@@ -420,6 +457,11 @@ export type OriginalAmount = { currency: string; amount_cents: number; rate: str
 export type Participant = { id: string; name: string; removed?: boolean; avatar?: string | null; added_at?: string | null; added_by?: string | null; removed_at?: string | null; removed_by?: string | null }
 export type ParticipantBalance = { participant_id: string; participant_name: string; paid_cents: number; owed_cents: number; net_cents: number; removed: boolean }
 export type PasswordStrength = { score: number; acceptable: boolean; warning: string | null; suggestions: string[] }
+/**
+ * An expense that comes back every week, month or year: the app adds the next one when its
+ * day comes.
+ */
+export type RecurringExpense = { id: string; title: string; category?: string | null; amount_cents: number; income?: boolean; paid_by: string; payers?: ExpensePayer[]; splits: ExpenseSplit[]; every: string; next: string; paused?: boolean; added_by?: string | null }
 export type SettlementTransfer = { from_id: string; from_name: string; to_id: string; to_name: string; amount_cents: number }
 /**
  * After signing up or recovering an account.

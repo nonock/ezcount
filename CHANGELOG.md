@@ -16,13 +16,19 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 
 - Categories for expenses (restaurants, groceries, transport…), shown in the list, in the search and as a filter, and kept in CSV files.
 - A "Stats" tab: what the group spent in all, by category, by person and by month.
-- Member history, in the group's menu: who was added or removed, when and by whom (from this version on).
+- Activity, from the button beside "Add Expense": who added, edited, deleted or restored which expense, and who was added to the group or removed from it, when and by whom (from this version on).
+- Repeated expenses: "Repeat" in the expense form adds it again every week, month or year (a rent, a subscription). "Repeated expenses", under the same button, lists them and stops them.
+- Income: money that came in for the group (a deposit given back, a refund), shared like an expense. Devices still on an older version don't see it, until they update.
+- "Transfer" in the expense form records money one member gave another.
+- A trash: a deleted expense can be put back, right away with "Undo" or later from "Trash" under that button, by any member.
 - Archive a group: it leaves your list for an "Archived" section, on your devices only, and can come back.
 - Delete a group for everyone. When someone still owes something, every member has to agree first; members on an older version keep the group.
 
 ### Changed
 
 - Changes made on other devices no longer move the list while you read it: a "Refresh" button shows them.
+- Deleting an expense no longer asks first, since it can be undone.
+- The expense form shows the currency as its sign (€, $) in a narrower field, leaving the amount more room.
 
 - Amounts and dates are written the way the language does (`€1,234.50`, `1 234,50 €`), with smaller cents. Round amounts have no decimals (`€90`).
 - Exporting a group on a computer saves the file in the Downloads folder and says so, with a button to show it.

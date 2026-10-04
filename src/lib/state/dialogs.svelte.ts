@@ -15,8 +15,12 @@ class Dialogs {
   // The member stays set after closing, so the dialog doesn't change while it animates out.
   renameMember = $state({ open: false, member: null as Participant | null });
   editGroup = $state(false);
-  /** Who was added to the group and removed from it. */
-  memberHistory = $state(false);
+  /** What happened in the group: expenses and members added, changed, removed. */
+  activity = $state(false);
+  /** The deleted expenses, to put back. */
+  trash = $state(false);
+  /** The expenses that come back every week, month or year. */
+  recurring = $state(false);
   /** Adds an expense, or edits `editing`. */
   expense = $state({ open: false, editing: null as Expense | null });
   history = $state<Expense | null>(null);

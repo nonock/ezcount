@@ -153,6 +153,10 @@
    are darkened or lightened from daisyUI's where needed to keep WCAG AA contrast. The radii
    are daisyUI 4's rounder ones (daisyUI 5 uses 0.25rem fields and 0.5rem boxes). */
 :root {
+  /* The bar at the bottom of the screen on phones, without the room under it that a phone
+     keeps for its own gestures. The page scrolls above it. */
+  --bottom-bar: 3.6875rem;
+  --bottom-bar-room: calc(var(--bottom-bar) + max(0.375rem, env(safe-area-inset-bottom)));
   --radius-field: 0.5rem;
   --radius-box: 1rem;
   --radius-selector: 0.5rem;

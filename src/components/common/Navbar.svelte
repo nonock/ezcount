@@ -37,9 +37,7 @@
   ] as const;
 </script>
 
-<header
-  class="sticky top-0 z-30 border-b bg-card/80 pt-[env(safe-area-inset-top)] backdrop-blur-lg"
->
+<header class="z-30 shrink-0 border-b bg-card pt-[env(safe-area-inset-top)]">
   <div class="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 px-4">
     <!-- On phones the logo is in the bottom bar, and the header names the app. -->
     <Wordmark class="text-lg sm:hidden" />

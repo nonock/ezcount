@@ -23,6 +23,7 @@ export interface MockExpenseHistoryEntry {
   previous_splits: MockExpenseSplit[];
   previous_original?: MockOriginalAmount | null;
   summary: string;
+  edited_by?: string | null;
 }
 
 export interface MockExpense {
@@ -39,6 +40,28 @@ export interface MockExpense {
   updated_at: string;
   history?: MockExpenseHistoryEntry[];
   is_reimbursement?: boolean;
+  income?: boolean;
+  added_at?: string | null;
+  added_by?: string | null;
+  recurring?: string | null;
+}
+
+export interface MockRecurringExpense {
+  id: string;
+  title: string;
+  category?: string | null;
+  amount_cents: number;
+  income?: boolean;
+  paid_by: string;
+  payers?: { participant_id: string; amount_cents: number }[];
+  splits: MockExpenseSplit[];
+  every: string;
+  // The first one's day, and how many were added (none when left out): `next` follows.
+  start: string;
+  made?: number;
+  next?: string;
+  paused?: boolean;
+  added_by?: string | null;
 }
 
 export interface MockGroup {
@@ -61,6 +84,8 @@ export interface MockGroup {
   created_at: string;
   deleted?: boolean;
   deletion_votes?: string[];
+  trash?: { expense: MockExpense; deleted_at: string; deleted_by?: string | null }[];
+  recurring?: MockRecurringExpense[];
 }
 
 export const MOCK_PASSWORD = "correct horse";
@@ -69,7 +94,8 @@ export const MOCK_SERVER = "http://localhost:8787";
 /**
  * Seeds (set on `window` before the app loads):
  * - `__SEED_GROUPS__`: groups on the device; the user is their first participant
- *   unless `__SEED_IDENTITIES__` (group id -> participant id) says otherwise
+ *   unless `__SEED_IDENTITIES__` (group id -> participant id) says otherwise. A group's
+ *   `recurring` expenses need only their `start`: the ones due are added when it is read
  * - `__LOGGED_OUT__`: start on the login screen
  * - `__REMOTE_GROUPS__`: groups that can be joined with an invite code
  * - `__UNSYNCED__`: log out fails unless forced
@@ -146,11 +172,75 @@ export function installTauriMock() {
       for (const group of seeded) {
         group.description ??= "";
         group.image ??= null;
+        group.trash ??= [];
+        group.recurring ??= [];
       }
       groups = seeded;
       return seeded;
     }
     return groups;
+  }
+
+  /** The participant the user is in a group. */
+  function me(group: MockGroup) {
+    return getAccount()?.identities[group.id] ?? null;
+  }
+
+  // The day of occurrence `n` of a repeated expense, like doc.rs's `occurrence`: the day of
+  // the month is kept, or the month's last.
+  function occurrence(start: string, every: string, n: number) {
+    const date = new Date(start);
+    if (every === "week") {
+      date.setUTCDate(date.getUTCDate() + 7 * n);
+      return date.toISOString();
+    }
+    const day = date.getUTCDate();
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() + (every === "year" ? 12 * n : n));
+    const last = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+    date.setUTCDate(Math.min(day, last));
+    return date.toISOString();
+  }
+
+  // Adds the repeated expenses whose day has come, like doc.rs's `add_due_expenses`.
+  function addDueExpenses(group: MockGroup) {
+    const now = new Date().toISOString();
+    const member = (id: string) => group.participants.some((p) => p.id === id && !p.removed);
+    for (const model of group.recurring ?? []) {
+      model.made ??= 0;
+      model.next = occurrence(model.start, model.every, model.made);
+      model.paused = ![
+        model.paid_by,
+        ...(model.payers ?? []).map((p) => p.participant_id),
+        ...model.splits.map((s) => s.participant_id),
+      ].every(member);
+      while (!model.paused && model.next <= now) {
+        const id = `${model.id}-${model.next.slice(0, 10).replaceAll("-", "")}`;
+        const taken = [...group.expenses, ...(group.trash ?? []).map((d) => d.expense)];
+        if (!taken.some((e) => e.id === id)) {
+          group.expenses.unshift({
+            id,
+            group_id: group.id,
+            title: model.title,
+            category: model.category ?? null,
+            amount_cents: model.amount_cents,
+            income: model.income ?? false,
+            paid_by: model.paid_by,
+            payers: model.payers ?? [],
+            splits: model.splits,
+            created_at: model.next,
+            updated_at: model.next,
+            history: [],
+            is_reimbursement: false,
+            added_at: model.next,
+            added_by: model.added_by ?? null,
+            recurring: model.id,
+          });
+        }
+        model.made += 1;
+        model.next = occurrence(model.start, model.every, model.made);
+      }
+    }
   }
 
   // A stand-in for zxcvbn: longer is stronger, a few common passwords and the username are weak.
@@ -300,6 +390,8 @@ export function installTauriMock() {
       splits: e.splits,
       createdAt: e.created_at ?? null,
       original: e.original ?? null,
+      income: e.income ?? false,
+      repeat: e.repeat || null,
     };
   }
 
@@ -310,6 +402,8 @@ export function installTauriMock() {
     }
 
     for (const exp of group.expenses) {
+      // Money that came in counts the other way.
+      const sign = exp.income ? -1 : 1;
       // Like `engine::paid`: several payers' amounts are in the currency paid.
       const payers = exp.payers ?? [];
       const there = payers.map((p) => p.amount_cents);
@@ -319,12 +413,12 @@ export function installTauriMock() {
         : [{ id: exp.paid_by, cents: exp.amount_cents }];
       for (const { id, cents } of paid) {
         const payer = map.get(id);
-        if (payer) payer.paid += cents;
+        if (payer) payer.paid += sign * cents;
       }
 
       for (const item of splitAmount(exp)) {
         const debtor = map.get(item.pid);
-        if (debtor) debtor.owed += item.base;
+        if (debtor) debtor.owed += sign * item.base;
       }
     }
 
@@ -687,6 +781,7 @@ export function installTauriMock() {
         }
 
         case "get_groups":
+          getGroups().forEach(addDueExpenses);
           return clone(getGroups());
 
         case "get_group": {
@@ -695,6 +790,7 @@ export function installTauriMock() {
           }
           const g = getGroups().find((x) => x.id === args.groupId);
           if (!g) throw new Error("Group not found");
+          addDueExpenses(g);
           return clone(g);
         }
 
@@ -717,6 +813,8 @@ export function installTauriMock() {
             })),
             expenses: [],
             created_at: now,
+            trash: [],
+            recurring: [],
           };
           getGroups().unshift(newGroup);
           acc.identities[newGroup.id] = newGroup.participants[0].id;
@@ -772,9 +870,12 @@ export function installTauriMock() {
                 updated_at: now,
                 history: [],
                 is_reimbursement: cells[5] === "payment",
+                income: cells[5] === "income",
               };
             }),
             created_at: now,
+            trash: [],
+            recurring: [],
           };
           getGroups().unshift(imported);
           return clone(imported);
@@ -793,7 +894,7 @@ export function installTauriMock() {
               money(e.amount_cents),
               g.currency,
               nameOf(e.paid_by),
-              e.is_reimbursement ? "payment" : "expense",
+              e.is_reimbursement ? "payment" : e.income ? "income" : "expense",
               e.original ? money(e.original.amount_cents) : "",
               e.original?.currency ?? "",
               e.original?.rate ?? "",
@@ -936,6 +1037,13 @@ export function installTauriMock() {
           const who = paidBy(args);
           const now = new Date().toISOString();
           const createdAt = args?.createdAt || now;
+          if (args.repeat && !["week", "month", "year"].includes(args.repeat)) {
+            throw new Error("An expense repeats every week, month or year");
+          }
+          if (args.repeat && args.original) {
+            throw new Error("A repeated expense has to be in the group's currency");
+          }
+          const recurring = args.repeat ? `rec-${Date.now()}` : null;
           const exp: MockExpense = {
             id: `exp-${Date.now()}`,
             group_id: args.groupId,
@@ -950,8 +1058,30 @@ export function installTauriMock() {
             updated_at: now,
             history: [],
             is_reimbursement: false,
+            income: args.income,
+            added_at: now,
+            added_by: me(g),
+            recurring,
           };
           g.expenses.unshift(exp);
+          if (recurring) {
+            g.recurring ??= [];
+            g.recurring.push({
+              id: recurring,
+              title: exp.title,
+              category: exp.category,
+              amount_cents: exp.amount_cents,
+              income: exp.income,
+              paid_by: exp.paid_by,
+              payers: exp.payers,
+              splits: exp.splits,
+              every: args.repeat,
+              start: createdAt,
+              made: 1,
+              added_by: me(g),
+            });
+            addDueExpenses(g);
+          }
           return clone(g);
         }
 
@@ -980,6 +1110,7 @@ export function installTauriMock() {
             previous_splits: prevSplits,
             previous_original: exp.original ?? null,
             summary: `Amount changed to ${args.amountCents / 100} • Title updated to ${args.title}`,
+            edited_by: me(g),
           });
 
           exp.title = args.title;
@@ -999,7 +1130,61 @@ export function installTauriMock() {
         case "delete_expense": {
           const g = getGroups().find((x) => x.id === args?.groupId);
           if (!g) throw new Error("Group not found");
-          g.expenses = g.expenses.filter((x) => x.id !== args?.expenseId);
+          const exp = g.expenses.find((x) => x.id === args?.expenseId);
+          if (!exp) throw new Error("Expense not found");
+          g.expenses = g.expenses.filter((x) => x !== exp);
+          g.trash ??= [];
+          g.trash.unshift({
+            expense: exp,
+            deleted_at: new Date().toISOString(),
+            deleted_by: me(g),
+          });
+          return clone(g);
+        }
+
+        case "restore_expense": {
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          const deleted = g.trash?.find((d) => d.expense.id === args?.expenseId);
+          if (!deleted) throw new Error("This expense is no longer in the trash");
+          g.trash = g.trash?.filter((d) => d !== deleted);
+          const exp = deleted.expense;
+          const now = new Date().toISOString();
+          exp.history = exp.history || [];
+          exp.history.push({
+            edited_at: now,
+            previous_title: exp.title,
+            previous_category: exp.category ?? null,
+            previous_amount_cents: exp.amount_cents,
+            previous_paid_by: exp.paid_by,
+            previous_payers: exp.payers ?? [],
+            previous_splits: [...exp.splits],
+            previous_original: exp.original ?? null,
+            summary: "Restored from the trash",
+            edited_by: me(g),
+          });
+          exp.updated_at = now;
+          g.expenses.unshift(exp);
+          return clone(g);
+        }
+
+        case "purge_expense": {
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          if (!g.trash?.some((d) => d.expense.id === args?.expenseId)) {
+            throw new Error("This expense is no longer in the trash");
+          }
+          g.trash = g.trash.filter((d) => d.expense.id !== args.expenseId);
+          return clone(g);
+        }
+
+        case "stop_recurring_expense": {
+          const g = getGroups().find((x) => x.id === args?.groupId);
+          if (!g) throw new Error("Group not found");
+          if (!g.recurring?.some((r) => r.id === args?.recurringId)) {
+            throw new Error("This repeated expense no longer exists");
+          }
+          g.recurring = g.recurring.filter((r) => r.id !== args.recurringId);
           return clone(g);
         }
 
@@ -1020,6 +1205,8 @@ export function installTauriMock() {
             updated_at: now,
             history: [],
             is_reimbursement: true,
+            added_at: now,
+            added_by: me(g),
           });
           return clone(g);
         }

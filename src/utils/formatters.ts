@@ -60,6 +60,20 @@ export function moneyParts(
   };
 }
 
+/** "€" for EUR, "$" for USD; the code itself where the language has no sign for it (CHF). */
+export function currencySymbol(currency: string): string {
+  try {
+    const parts = new Intl.NumberFormat(i18n.locale, {
+      style: "currency",
+      currency,
+      currencyDisplay: "narrowSymbol",
+    }).formatToParts(0);
+    return parts.find((p) => p.type === "currency")?.value ?? currency;
+  } catch {
+    return currency;
+  }
+}
+
 /** An amount as typed in a form: "12.50", and "90" for a round one. */
 export function amountInput(cents: number): string {
   return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2);

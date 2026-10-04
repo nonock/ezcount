@@ -36,6 +36,16 @@ const FR: Pattern[] = [
   ],
   [/^Shares must be at least 1$/, "Il faut au moins 1 part"],
   [/^This category can't be used$/, "Cette catégorie ne peut pas être utilisée"],
+  [/^This expense is no longer in the trash$/, "Cette dépense n'est plus dans la corbeille"],
+  [/^This repeated expense no longer exists$/, "Cette dépense récurrente n'existe plus"],
+  [
+    /^An expense repeats every week, month or year$/,
+    "Une dépense se répète chaque semaine, chaque mois ou chaque année",
+  ],
+  [
+    /^A repeated expense has to be in the group's currency$/,
+    "Une dépense récurrente doit être dans la devise du groupe",
+  ],
   [
     /^The payers of this expense are not valid$/,
     "Les payeurs de cette dépense ne sont pas valides",
@@ -304,6 +314,7 @@ const FR: Pattern[] = [
 
   // Edit summaries, kept with the expense
   [/^Updated without major changes$/, "Mise à jour sans changement notable"],
+  [/^Restored from the trash$/, "Restaurée depuis la corbeille"],
   [/^Title changed from '(.*)' to '(.*)'$/, (a, b) => `Titre changé de « ${a} » à « ${b} »`],
   [/^Amount changed from (.*) to (.*)$/, (a, b) => `Montant changé de ${a} à ${b}`],
   [/^Payer changed from (.*) to (.*)$/, (a, b) => `Payeur changé de ${a} à ${b}`],

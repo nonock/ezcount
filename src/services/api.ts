@@ -97,6 +97,18 @@ export const api = {
     return unwrap(await commands.deleteExpense(groupId, expenseId));
   },
 
+  async restoreExpense(groupId: string, expenseId: string): Promise<Group> {
+    return unwrap(await commands.restoreExpense(groupId, expenseId));
+  },
+
+  async purgeExpense(groupId: string, expenseId: string): Promise<Group> {
+    return unwrap(await commands.purgeExpense(groupId, expenseId));
+  },
+
+  async stopRecurringExpense(groupId: string, recurringId: string): Promise<Group> {
+    return unwrap(await commands.stopRecurringExpense(groupId, recurringId));
+  },
+
   async recordReimbursement(
     groupId: string,
     fromId: string,

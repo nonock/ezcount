@@ -17,11 +17,31 @@ use crate::{csv_file, doc, engine, sync, AppState};
 
 type Res<T> = Result<T, String>;
 
+/// Adds the repeated expenses of a group whose day has come. Reading a group is when the app
+/// does it: there is no one else to.
+fn add_due_expenses(state: &AppState, group_id: &str) {
+    let now = chrono::Utc::now();
+    let due = state
+        .store()
+        .doc(group_id)
+        .is_ok_and(|d| doc::has_due_expenses(d, now));
+    if due {
+        if let Err(e) = state.mutate(group_id, |d| doc::add_due_expenses(d, now).map(|_| ())) {
+            eprintln!("[api] could not add the repeated expenses of {group_id}: {e}");
+        }
+    }
+}
+
 pub fn get_groups(state: &AppState) -> Vec<Group> {
+    let ids = state.store().group_ids();
+    for id in ids {
+        add_due_expenses(state, &id);
+    }
     state.store().groups()
 }
 
 pub fn get_group(state: &AppState, group_id: &str) -> Res<Group> {
+    add_due_expenses(state, group_id);
     state.store().group(group_id)
 }
 
@@ -129,9 +149,12 @@ fn label(expense: &ExpenseInput) -> doc::Label {
     doc::Label::new(&expense.title, expense.category.as_deref())
 }
 
+/// Adds an expense, or money that came in (`income`). With `repeat`, it comes back every
+/// week, month or year.
 pub fn add_expense(state: &AppState, group_id: &str, expense: ExpenseInput) -> Res<Group> {
+    let by = me(state, group_id);
     state.mutate(group_id, |d| {
-        doc::add_expense(
+        doc::add_expense_as(
             d,
             label(&expense),
             expense.amount_cents,
@@ -139,6 +162,11 @@ pub fn add_expense(state: &AppState, group_id: &str, expense: ExpenseInput) -> R
             expense.splits,
             expense.created_at,
             expense.original,
+            doc::Adding {
+                income: expense.income,
+                by: by.as_deref(),
+                repeat: expense.repeat.as_deref(),
+            },
         )
     })
 }
@@ -150,6 +178,7 @@ pub fn update_expense(
     expense_id: &str,
     expense: ExpenseInput,
 ) -> Res<Group> {
+    let by = me(state, group_id);
     state.mutate(group_id, |d| {
         doc::update_expense(
             d,
@@ -160,12 +189,35 @@ pub fn update_expense(
             expense.splits,
             expense.created_at,
             expense.original,
+            by.as_deref(),
         )
     })
 }
 
+/// Moves an expense to the group's trash.
 pub fn delete_expense(state: &AppState, group_id: &str, expense_id: &str) -> Res<Group> {
-    state.mutate(group_id, |d| doc::delete_expense(d, expense_id))
+    let by = me(state, group_id);
+    state.mutate(group_id, |d| {
+        doc::delete_expense(d, expense_id, by.as_deref())
+    })
+}
+
+/// Puts a deleted expense back.
+pub fn restore_expense(state: &AppState, group_id: &str, expense_id: &str) -> Res<Group> {
+    let by = me(state, group_id);
+    state.mutate(group_id, |d| {
+        doc::restore_expense(d, expense_id, by.as_deref())
+    })
+}
+
+/// Removes a deleted expense from the trash, for good.
+pub fn purge_expense(state: &AppState, group_id: &str, expense_id: &str) -> Res<Group> {
+    state.mutate(group_id, |d| doc::purge_expense(d, expense_id))
+}
+
+/// Stops a repeated expense. The ones already added stay.
+pub fn stop_recurring_expense(state: &AppState, group_id: &str, recurring_id: &str) -> Res<Group> {
+    state.mutate(group_id, |d| doc::stop_recurring(d, recurring_id))
 }
 
 pub fn get_balances(state: &AppState, group_id: &str) -> Res<Vec<ParticipantBalance>> {
@@ -186,8 +238,9 @@ pub fn record_reimbursement(
     amount_cents: i64,
     notes: Option<String>,
 ) -> Res<Group> {
+    let by = me(state, group_id);
     state.mutate(group_id, |d| {
-        doc::record_reimbursement(d, from_id, to_id, amount_cents, notes)
+        doc::record_reimbursement(d, from_id, to_id, amount_cents, notes, by.as_deref())
     })
 }
 
@@ -376,6 +429,13 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
             arg(&args, "expense")?,
         )?),
         "delete_expense" => json(delete_expense(state, &s("groupId")?, &s("expenseId")?)?),
+        "restore_expense" => json(restore_expense(state, &s("groupId")?, &s("expenseId")?)?),
+        "purge_expense" => json(purge_expense(state, &s("groupId")?, &s("expenseId")?)?),
+        "stop_recurring_expense" => json(stop_recurring_expense(
+            state,
+            &s("groupId")?,
+            &s("recurringId")?,
+        )?),
         "record_reimbursement" => json(record_reimbursement(
             state,
             &s("groupId")?,

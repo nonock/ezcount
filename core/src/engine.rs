@@ -109,9 +109,12 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
     }
 
     for expense in &group.expenses {
+        // Money that came in counts the other way: who received it holds what the others
+        // share, so both sides are taken off.
+        let sign: i128 = if expense.income { -1 } else { 1 };
         // Payers are credited what they paid, the full amount between them
         for (payer, amount) in paid(expense) {
-            *paid_map.entry(payer.to_string()).or_default() += i128::from(amount);
+            *paid_map.entry(payer.to_string()).or_default() += sign * i128::from(amount);
         }
 
         let owed = owed(
@@ -120,7 +123,7 @@ pub fn calculate_balances(group: &Group) -> Vec<ParticipantBalance> {
             &expense.splits,
         );
         for (s, owed) in expense.splits.iter().zip(owed) {
-            *owed_map.entry(s.participant_id.clone()).or_default() += i128::from(owed);
+            *owed_map.entry(s.participant_id.clone()).or_default() += sign * i128::from(owed);
         }
     }
 
@@ -282,6 +285,8 @@ mod tests {
             expenses: vec![],
             deleted: false,
             deletion_votes: vec![],
+            trash: Vec::new(),
+            recurring: Vec::new(),
         }
     }
 
@@ -318,6 +323,10 @@ mod tests {
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            income: false,
+            added_at: None,
+            added_by: None,
+            recurring: None,
             original: None,
         });
         // Bob pays 30.00 for Alice & Bob
@@ -345,6 +354,10 @@ mod tests {
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            income: false,
+            added_at: None,
+            added_by: None,
+            recurring: None,
             original: None,
         });
 
@@ -406,6 +419,10 @@ mod tests {
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            income: false,
+            added_at: None,
+            added_by: None,
+            recurring: None,
             original: None,
         });
 
@@ -445,6 +462,10 @@ mod tests {
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            income: false,
+            added_at: None,
+            added_by: None,
+            recurring: None,
             original: None,
         });
 
@@ -503,6 +524,10 @@ mod tests {
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            income: false,
+            added_at: None,
+            added_by: None,
+            recurring: None,
             original: None,
         });
 
@@ -524,6 +549,10 @@ mod tests {
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: true,
+            income: false,
+            added_at: None,
+            added_by: None,
+            recurring: None,
             original: None,
         });
 
@@ -576,6 +605,27 @@ mod tests {
         assert_eq!(balances.iter().map(|b| b.net_cents).sum::<i64>(), 0);
     }
 
+    #[test]
+    fn income_is_owed_by_who_received_it() {
+        let mut group = setup_test_group();
+        group
+            .expenses
+            .push(expense("e1", 3000, "p1", &["p1", "p2", "p3"]));
+        // Alice gets a 9.00 refund for the three of them.
+        let mut refund = expense("e2", 900, "p1", &["p1", "p2", "p3"]);
+        refund.income = true;
+        group.expenses.push(refund);
+
+        let balances = calculate_balances(&group);
+        let net = |id: &str| {
+            let b = balances.iter().find(|b| b.participant_id == id).unwrap();
+            b.net_cents
+        };
+        assert_eq!((net("p1"), net("p2"), net("p3")), (1400, -700, -700));
+        let alice = &balances[0];
+        assert_eq!((alice.paid_cents, alice.owed_cents), (2100, 700));
+    }
+
     fn expense(id: &str, amount_cents: i64, paid_by: &str, split_ids: &[&str]) -> Expense {
         Expense {
             id: id.to_string(),
@@ -597,6 +647,10 @@ mod tests {
             updated_at: Utc::now(),
             history: vec![],
             is_reimbursement: false,
+            income: false,
+            added_at: None,
+            added_by: None,
+            recurring: None,
             original: None,
         }
     }

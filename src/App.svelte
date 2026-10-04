@@ -13,6 +13,7 @@
   import Splash from "@/components/common/Splash.svelte";
   import GroupDashboard from "@/components/dashboard/GroupDashboard.svelte";
   import AccountDialog from "@/components/modals/AccountDialog.svelte";
+  import ActivityDialog from "@/components/modals/ActivityDialog.svelte";
   import AddExpenseModal from "@/components/modals/AddExpenseModal.svelte";
   import ChangePasswordDialog from "@/components/modals/ChangePasswordDialog.svelte";
   import CreateGroupModal from "@/components/modals/CreateGroupModal.svelte";
@@ -20,11 +21,12 @@
   import ExpenseHistoryModal from "@/components/modals/ExpenseHistoryModal.svelte";
   import JoinGroupModal from "@/components/modals/JoinGroupModal.svelte";
   import LinkDeviceDialog from "@/components/modals/LinkDeviceDialog.svelte";
-  import MemberHistoryDialog from "@/components/modals/MemberHistoryDialog.svelte";
   import MemberModal from "@/components/modals/MemberModal.svelte";
   import RecordReimbursementModal from "@/components/modals/RecordReimbursementModal.svelte";
   import RecoveryKeyDialog from "@/components/modals/RecoveryKeyDialog.svelte";
+  import RecurringDialog from "@/components/modals/RecurringDialog.svelte";
   import ShareGroupModal from "@/components/modals/ShareGroupModal.svelte";
+  import TrashDialog from "@/components/modals/TrashDialog.svelte";
   import WhoAreYouModal from "@/components/modals/WhoAreYouModal.svelte";
   import * as Alert from "@/components/ui/alert";
   import { Button } from "@/components/ui/button";
@@ -37,7 +39,6 @@
   import { groupList, openGroup } from "@/lib/state/groups.svelte";
   import { navigation } from "@/lib/state/navigation.svelte";
   import { type NewRecoveryKey, session } from "@/lib/state/session.svelte";
-  import { cn } from "@/lib/utils";
   import { api } from "@/services/api";
   import {
     cancelScan,
@@ -213,7 +214,10 @@
   <AuthScreen {onAuthenticated} />
 {:else}
   {@const account = session.account}
-  <div class="flex min-h-screen flex-col">
+  <!-- The page scrolls between the top bar and, on phones, the bottom one: its scrollbar is
+       there, and opening a menu or a dialog (which stops the window from scrolling) moves
+       neither bar. -->
+  <div class="flex h-dvh flex-col">
     <Navbar
       inGroup={openGroup.group !== null}
       onNavigateHome={goHome}
@@ -221,55 +225,53 @@
       username={account.username}
     />
 
-    <main
-      class={cn(
-        "mx-auto w-full max-w-6xl flex-1 space-y-6 px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]",
-        // Room for the bottom bar on phones.
-        "max-sm:pb-[calc(5rem+env(safe-area-inset-bottom))]"
-      )}
-    >
-      {#if storageWarnings.length > 0}
-        <Alert.Root>
-          <TriangleAlertIcon />
-          <Alert.Title>{t("app.storageWarnings")}</Alert.Title>
-          <Alert.Description>
-            <ul class="list-disc pl-4">
-              {#each storageWarnings as warning (warning)}
-                <li>{backendText(warning)}</li>
-              {/each}
-            </ul>
-            <p>{t("app.storageKept")}</p>
-          </Alert.Description>
-          <Alert.Action>
-            <Button variant="ghost" size="sm" onclick={() => (storageWarnings = [])}>
-              {t("common.dismiss")}
-            </Button>
-          </Alert.Action>
-        </Alert.Root>
-      {/if}
+    <div class="min-h-0 flex-1 overflow-y-auto max-sm:mb-(--bottom-bar-room)">
+      <main
+        class="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+      >
+        {#if storageWarnings.length > 0}
+          <Alert.Root>
+            <TriangleAlertIcon />
+            <Alert.Title>{t("app.storageWarnings")}</Alert.Title>
+            <Alert.Description>
+              <ul class="list-disc pl-4">
+                {#each storageWarnings as warning (warning)}
+                  <li>{backendText(warning)}</li>
+                {/each}
+              </ul>
+              <p>{t("app.storageKept")}</p>
+            </Alert.Description>
+            <Alert.Action>
+              <Button variant="ghost" size="sm" onclick={() => (storageWarnings = [])}>
+                {t("common.dismiss")}
+              </Button>
+            </Alert.Action>
+          </Alert.Root>
+        {/if}
 
-      {#if groupList.loading}
-        <div class="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
-          <Spinner />
-          {t("app.loadingGroups")}
-        </div>
-      {:else if !openGroup.group}
-        <GroupDashboard
-          groups={groupList.all}
-          onSelectGroup={(groupId) => navigation.open(groupId)}
-          onOpenCreateGroup={() => (dialogs.createGroup = true)}
-          onOpenJoinGroup={() => dialogs.openJoin()}
-        />
-        <BottomBar home onHome={goHome} class="sm:hidden">
-          <Button onclick={() => (dialogs.createGroup = true)} class="ml-auto">
-            <PlusIcon data-icon="inline-start" />
-            {t("app.newGroup")}
-          </Button>
-        </BottomBar>
-      {:else}
-        <GroupPage group={openGroup.group} />
-      {/if}
-    </main>
+        {#if groupList.loading}
+          <div class="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
+            <Spinner />
+            {t("app.loadingGroups")}
+          </div>
+        {:else if !openGroup.group}
+          <GroupDashboard
+            groups={groupList.all}
+            onSelectGroup={(groupId) => navigation.open(groupId)}
+            onOpenCreateGroup={() => (dialogs.createGroup = true)}
+            onOpenJoinGroup={() => dialogs.openJoin()}
+          />
+          <BottomBar home onHome={goHome} class="sm:hidden">
+            <Button onclick={() => (dialogs.createGroup = true)} class="ml-auto">
+              <PlusIcon data-icon="inline-start" />
+              {t("app.newGroup")}
+            </Button>
+          </BottomBar>
+        {:else}
+          <GroupPage group={openGroup.group} />
+        {/if}
+      </main>
+    </div>
 
     <CreateGroupModal />
     <JoinGroupModal />
@@ -293,7 +295,9 @@
       <ShareGroupModal {group} />
       <WhoAreYouModal {group} />
       <EditGroupModal {group} />
-      <MemberHistoryDialog {group} />
+      <ActivityDialog {group} />
+      <TrashDialog {group} />
+      <RecurringDialog {group} />
       <AddExpenseModal {group} />
       <RecordReimbursementModal {group} />
       <ExpenseHistoryModal {group} />

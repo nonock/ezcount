@@ -72,27 +72,19 @@ test.describe("Removing members", () => {
   });
 });
 
-test.describe("Confirmations", () => {
-  test("deleting an expense asks first, and cancel keeps it", async ({ page }) => {
+test.describe("Deleting", () => {
+  test("deleting an expense doesn't ask, and can be undone", async ({ page }) => {
     await seed(page, { __SEED_GROUPS__: [tripGroup] });
     await page.goto("/");
     await page.getByRole("button", { name: /Lisbon Trip/ }).click();
 
-    const openDelete = async () => {
-      await page.getByRole("button", { name: "Actions for Dinner" }).click();
-      await page.getByRole("menuitem", { name: "Delete" }).click();
-    };
-
-    await openDelete();
-    const confirmDialog = page.getByRole("alertdialog");
-    await expect(confirmDialog).toContainText('Delete "Dinner"?');
-    await confirmDialog.getByRole("button", { name: "Cancel" }).click();
-    await expect(confirmDialog).not.toBeVisible();
-    await expect(page.getByRole("heading", { name: "Dinner", exact: true })).toBeVisible();
-
-    await openDelete();
-    await confirmDialog.getByRole("button", { name: "Delete" }).click();
+    await page.getByRole("button", { name: "Actions for Dinner" }).click();
+    await page.getByRole("menuitem", { name: "Delete" }).click();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
     await expect(page.getByText("No expenses recorded yet")).toBeVisible();
+
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(page.getByRole("heading", { name: "Dinner", exact: true })).toBeVisible();
   });
 });
 

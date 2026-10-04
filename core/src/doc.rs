@@ -7,7 +7,11 @@
 //! - `participants` (map): participant id -> map { `name`, `removed`, `position`, `avatar`,
 //!   `added_at`, `added_by`, `removed_at`, `removed_by` }
 //! - `expenses` (map): expense id -> map { `title`, `category`, `amount_cents`, `paid_by`, `splits`,
-//!   `created_at`, `updated_at`, `is_reimbursement`, `history` (list), `original`, `payers` }
+//!   `created_at`, `updated_at`, `is_reimbursement`, `history` (list), `original`, `payers`,
+//!   `added_at`, `added_by`, `recurring` }
+//! - `trash` (map): expense id -> the expense as above, with `deleted_at` and `deleted_by`
+//! - `recurring` (map): id -> map { `title`, `category`, `amount_cents`, `paid_by`, `payers`,
+//!   `splits`, `every`, `start`, `made`, `added_by` }
 //!
 //! `amount_cents` is always in the group's currency. An expense paid in another one also has
 //! `original` (a plain value: `currency`, `amount_cents`, `rate`). A split is a number of
@@ -19,6 +23,18 @@
 //! currency paid), with the one who paid the most in `paid_by`. App versions from before that
 //! read only `paid_by` and credit them the whole amount; when one of them edits the expense
 //! so that `payers` no longer fits it, `paid_by` alone counts (see `check_payers`).
+//!
+//! Money that came in (`Expense::income`) is stored as an `amount_cents` below zero, the
+//! rest as for an expense. App versions from before leave such an entry out, rather than
+//! count it as money spent.
+//!
+//! Deleting an expense moves it to `trash`, so that app versions from before see it gone and
+//! this one can put it back (`restore_expense`).
+//!
+//! A repeated expense is a model in `recurring`: its occurrence number `n` is due `n` weeks,
+//! months or years (`every`) after `start`, and `made` counts the ones added. Any device adds
+//! the ones due (`add_due_expenses`), under an id made of the model's and the day, so two
+//! devices doing it at once add the same expense, not two.
 //!
 //! A group is deleted for everyone by setting `deleted`: devices stop listing it and drop it
 //! once that is synced. While someone still owes something, that takes every member's
@@ -33,7 +49,7 @@
 //! Plain values are built by hand rather than through serde so that user text can never be
 //! mistaken for a Loro container reference.
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Days, Months, SecondsFormat, Utc};
 use loro::{Container, LoroDoc, LoroList, LoroMap, LoroValue, ValueOrContainer};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -42,7 +58,8 @@ use uuid::Uuid;
 
 use crate::engine;
 use crate::models::{
-    Expense, ExpenseHistoryEntry, ExpensePayer, ExpenseSplit, Group, OriginalAmount, Participant,
+    DeletedExpense, Expense, ExpenseHistoryEntry, ExpensePayer, ExpenseSplit, Group,
+    OriginalAmount, Participant, RecurringExpense,
 };
 
 const META: &str = "meta";
@@ -51,6 +68,12 @@ const EXPENSES: &str = "expenses";
 const HISTORY: &str = "history";
 const ORIGINAL: &str = "original";
 const DELETION: &str = "deletion";
+const TRASH: &str = "trash";
+const RECURRING: &str = "recurring";
+
+/// Most occurrences of one repeated expense added in a pass: a group nobody opened for years
+/// catches up over a few.
+const MAX_DUE: usize = 60;
 
 /// Largest amount of one expense: ten trillion units, enough for any currency, and small
 /// enough that JavaScript numbers hold it exactly.
@@ -197,6 +220,13 @@ fn history_value(entry: &ExpenseHistoryEntry) -> LoroValue {
             previous_original.map_or(LoroValue::Null, original_value),
         ),
         ("summary", entry.summary.as_str().into()),
+        (
+            "edited_by",
+            entry
+                .edited_by
+                .as_deref()
+                .map_or(LoroValue::Null, Into::into),
+        ),
     ])
 }
 
@@ -306,6 +336,8 @@ struct DocHistoryEntry {
     #[serde(default)]
     previous_category: Option<String>,
     summary: String,
+    #[serde(default)]
+    edited_by: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -326,6 +358,155 @@ struct DocExpense {
     is_reimbursement: bool,
     #[serde(default)]
     history: Vec<DocHistoryEntry>,
+    #[serde(default)]
+    added_at: Option<String>,
+    #[serde(default)]
+    added_by: Option<String>,
+    #[serde(default)]
+    recurring: Option<String>,
+    // In the trash only.
+    #[serde(default)]
+    deleted_at: Option<String>,
+    #[serde(default)]
+    deleted_by: Option<String>,
+}
+
+/// A repeated expense as stored.
+#[derive(Deserialize)]
+struct DocRecurring {
+    title: String,
+    #[serde(default)]
+    category: Option<String>,
+    amount_cents: i64,
+    paid_by: String,
+    #[serde(default)]
+    payers: Vec<ExpensePayer>,
+    splits: Vec<DocSplit>,
+    every: String,
+    start: DateTime<Utc>,
+    #[serde(default)]
+    made: i64,
+    #[serde(default)]
+    added_by: Option<String>,
+}
+
+/// A repeated expense and where it is at: its first day, and how many were added.
+struct Repeated {
+    expense: RecurringExpense,
+    start: DateTime<Utc>,
+    made: u32,
+}
+
+/// The day of occurrence `n` of an expense that started on `start`. Counting from the start
+/// keeps the day of the month: the 31st gives the 28th in February, then the 31st again.
+fn occurrence(start: DateTime<Utc>, every: &str, n: u32) -> Option<DateTime<Utc>> {
+    match every {
+        "week" => start.checked_add_days(Days::new(7 * u64::from(n))),
+        "month" => start.checked_add_months(Months::new(n)),
+        "year" => start.checked_add_months(Months::new(n.checked_mul(12)?)),
+        _ => None,
+    }
+}
+
+/// An expense as stored, checked and in the shape the app uses. Synced edits skip
+/// `validate_expense`, and the balance engine relies on these checks.
+fn read_expense(id: String, group_id: &str, mut e: DocExpense) -> Option<Expense> {
+    // Money that came in is stored below zero.
+    let income = e.amount_cents < 0;
+    e.amount_cents = e.amount_cents.saturating_abs();
+    // What the expense cost elsewhere is a note next to its amount: unusable, it is left out
+    // rather than taking the expense with it.
+    e.original = e.original.filter(|o| check_original(o).is_ok());
+    let splits = match e.checked_splits() {
+        Ok(splits) => splits,
+        Err(err) => {
+            eprintln!("[doc] skipping expense {id}: {err}");
+            return None;
+        }
+    };
+    let payers = e.checked_payers();
+    Some(Expense {
+        id,
+        group_id: group_id.to_string(),
+        title: e.title,
+        category: e.category.filter(|c| check_category(c).is_ok()),
+        amount_cents: e.amount_cents,
+        original: e.original,
+        paid_by: e.paid_by,
+        payers,
+        splits,
+        created_at: e.created_at,
+        updated_at: e.updated_at,
+        history: e
+            .history
+            .into_iter()
+            .map(|h| ExpenseHistoryEntry {
+                edited_at: h.edited_at,
+                previous_title: h.previous_title,
+                previous_amount_cents: h.previous_amount_cents.saturating_abs(),
+                previous_paid_by: h.previous_paid_by,
+                previous_payers: h.previous_payers,
+                previous_splits: read_splits(&h.previous_splits, false),
+                previous_original: h.previous_original,
+                previous_category: h.previous_category,
+                summary: h.summary,
+                edited_by: h.edited_by,
+            })
+            .collect(),
+        is_reimbursement: e.is_reimbursement,
+        income,
+        added_at: read_time(e.added_at),
+        added_by: e.added_by,
+        recurring: e.recurring,
+    })
+}
+
+/// The repeated expenses, the next one due first. One naming someone who left is `paused`.
+fn read_recurring(doc: &LoroDoc, participants: &[Participant]) -> Vec<Repeated> {
+    let member = |id: &str| participants.iter().any(|p| p.id == id && !p.removed);
+    let mut repeated: Vec<Repeated> = entries::<DocRecurring>(&doc.get_map(RECURRING), RECURRING)
+        .into_iter()
+        .filter_map(|(id, r)| {
+            let income = r.amount_cents < 0;
+            let amount_cents = r.amount_cents.saturating_abs();
+            let splits = read_splits(&r.splits, false);
+            check_amounts(amount_cents, None, &splits).ok()?;
+            let payers = match check_payers(amount_cents, None, &r.paid_by, &r.payers) {
+                Ok(()) => r.payers,
+                Err(_) => Vec::new(),
+            };
+            let made = u32::try_from(r.made).ok()?;
+            let next = occurrence(r.start, &r.every, made)?;
+            let paused = !(member(&r.paid_by)
+                && payers.iter().all(|p| member(&p.participant_id))
+                && splits.iter().all(|s| member(&s.participant_id)));
+            Some(Repeated {
+                expense: RecurringExpense {
+                    id,
+                    title: r.title,
+                    category: r.category.filter(|c| check_category(c).is_ok()),
+                    amount_cents,
+                    income,
+                    paid_by: r.paid_by,
+                    payers,
+                    splits,
+                    every: r.every,
+                    next,
+                    paused,
+                    added_by: r.added_by,
+                },
+                start: r.start,
+                made,
+            })
+        })
+        .collect();
+    repeated.sort_by(|a, b| {
+        a.expense
+            .next
+            .cmp(&b.expense.next)
+            .then_with(|| a.expense.id.cmp(&b.expense.id))
+    });
+    repeated
 }
 
 impl DocExpense {
@@ -468,56 +649,36 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
     // Concurrent additions can share a position; the id keeps the order stable everywhere.
     participants.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
 
+    let participants: Vec<Participant> = participants.into_iter().map(|(_, p)| p).collect();
+
     let mut expenses: Vec<Expense> = entries::<DocExpense>(&doc.get_map(EXPENSES), EXPENSES)
         .into_iter()
-        // Synced edits skip `validate_expense`, and the balance engine relies on these.
-        .filter_map(|(id, mut e)| {
-            // What the expense cost elsewhere is a note next to its amount: unusable, it is
-            // left out rather than taking the expense with it.
-            e.original = e.original.filter(|o| check_original(o).is_ok());
-            let splits = match e.checked_splits() {
-                Ok(splits) => splits,
-                Err(err) => {
-                    eprintln!("[doc] skipping expense {id}: {err}");
-                    return None;
-                }
-            };
-            let payers = e.checked_payers();
-            Some(Expense {
-                id,
-                group_id: meta.id.clone(),
-                title: e.title,
-                category: e.category.filter(|c| check_category(c).is_ok()),
-                amount_cents: e.amount_cents,
-                original: e.original,
-                paid_by: e.paid_by,
-                payers,
-                splits,
-                created_at: e.created_at,
-                updated_at: e.updated_at,
-                history: e
-                    .history
-                    .into_iter()
-                    .map(|h| ExpenseHistoryEntry {
-                        edited_at: h.edited_at,
-                        previous_title: h.previous_title,
-                        previous_amount_cents: h.previous_amount_cents,
-                        previous_paid_by: h.previous_paid_by,
-                        previous_payers: h.previous_payers,
-                        previous_splits: read_splits(&h.previous_splits, false),
-                        previous_original: h.previous_original,
-                        previous_category: h.previous_category,
-                        summary: h.summary,
-                    })
-                    .collect(),
-                is_reimbursement: e.is_reimbursement,
-            })
-        })
+        .filter_map(|(id, e)| read_expense(id, &meta.id, e))
         .collect();
     expenses.sort_by(|a, b| {
         a.created_at
             .cmp(&b.created_at)
             .then_with(|| a.id.cmp(&b.id))
+    });
+
+    let mut trash: Vec<DeletedExpense> = entries::<DocExpense>(&doc.get_map(TRASH), TRASH)
+        .into_iter()
+        .filter_map(|(id, mut e)| {
+            let deleted_at = read_time(e.deleted_at.take())?;
+            let deleted_by = e.deleted_by.take();
+            Some(DeletedExpense {
+                expense: read_expense(id, &meta.id, e)?,
+                deleted_at,
+                deleted_by,
+            })
+        })
+        // Put back on one device while deleted on another: it is back.
+        .filter(|d| !expenses.iter().any(|e| e.id == d.expense.id))
+        .collect();
+    trash.sort_by(|a, b| {
+        b.deleted_at
+            .cmp(&a.deleted_at)
+            .then_with(|| a.expense.id.cmp(&b.expense.id))
     });
 
     // Votes of people who are still members, in the group's order.
@@ -527,8 +688,12 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
         .collect();
     let deletion_votes = participants
         .iter()
-        .filter(|(_, p)| !p.removed && voted.contains(&p.id))
-        .map(|(_, p)| p.id.clone())
+        .filter(|p| !p.removed && voted.contains(&p.id))
+        .map(|p| p.id.clone())
+        .collect();
+    let recurring = read_recurring(doc, &participants)
+        .into_iter()
+        .map(|r| r.expense)
         .collect();
 
     Ok(Group {
@@ -541,11 +706,13 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
             .collect(),
         image: read_image(meta.image),
         currency: meta.currency,
-        participants: participants.into_iter().map(|(_, p)| p).collect(),
+        participants,
         expenses,
         created_at: meta.created_at,
         deleted: meta.deleted,
         deletion_votes,
+        trash,
+        recurring,
     })
 }
 
@@ -581,17 +748,29 @@ fn insert_participant(doc: &LoroDoc, id: &str, name: &str, removed: bool) -> Res
     Ok(())
 }
 
-fn insert_expense(doc: &LoroDoc, expense: &Expense) -> Res<()> {
-    let e = doc
-        .get_map(EXPENSES)
+/// What an amount is stored as: below zero for money that came in.
+fn stored_amount(amount_cents: i64, income: bool) -> i64 {
+    if income {
+        -amount_cents
+    } else {
+        amount_cents
+    }
+}
+
+/// Writes an expense under its id into `parent`: the expenses, or the trash.
+fn write_expense(parent: &LoroMap, expense: &Expense) -> Res<LoroMap> {
+    let e = parent
         .insert_container(&expense.id, LoroMap::new())
         .map_err(doc_err)?;
     e.insert("title", expense.title.as_str()).map_err(doc_err)?;
     if let Some(category) = &expense.category {
         e.insert("category", category.as_str()).map_err(doc_err)?;
     }
-    e.insert("amount_cents", expense.amount_cents)
-        .map_err(doc_err)?;
+    e.insert(
+        "amount_cents",
+        stored_amount(expense.amount_cents, expense.income),
+    )
+    .map_err(doc_err)?;
     e.insert("paid_by", expense.paid_by.as_str())
         .map_err(doc_err)?;
     if !expense.payers.is_empty() {
@@ -614,13 +793,26 @@ fn insert_expense(doc: &LoroDoc, expense: &Expense) -> Res<()> {
         .map_err(doc_err)?;
     e.insert("is_reimbursement", expense.is_reimbursement)
         .map_err(doc_err)?;
+    if let Some(added_at) = expense.added_at {
+        e.insert("added_at", timestamp(added_at)).map_err(doc_err)?;
+    }
+    if let Some(added_by) = &expense.added_by {
+        e.insert("added_by", added_by.as_str()).map_err(doc_err)?;
+    }
+    if let Some(recurring) = &expense.recurring {
+        e.insert("recurring", recurring.as_str()).map_err(doc_err)?;
+    }
     let history = e
         .insert_container(HISTORY, LoroList::new())
         .map_err(doc_err)?;
     for entry in &expense.history {
         history.push(history_value(entry)).map_err(doc_err)?;
     }
-    Ok(())
+    Ok(e)
+}
+
+fn insert_expense(doc: &LoroDoc, expense: &Expense) -> Res<()> {
+    write_expense(&doc.get_map(EXPENSES), expense).map(|_| ())
 }
 
 fn group_name(name: &str) -> Res<&str> {
@@ -701,6 +893,7 @@ pub struct ImportedExpense {
     pub splits: Vec<(usize, u32, Option<i64>)>,
     pub created_at: DateTime<Utc>,
     pub is_reimbursement: bool,
+    pub income: bool,
 }
 
 /// Creates the document for a group read from a file, with its expenses.
@@ -773,6 +966,10 @@ pub fn imported_group_doc(
                 updated_at: now,
                 history: Vec::new(),
                 is_reimbursement: e.is_reimbursement,
+                income: e.income,
+                added_at: None,
+                added_by: None,
+                recurring: None,
             },
         )?;
     }
@@ -1257,6 +1454,17 @@ fn validate_expense(
     Ok(())
 }
 
+/// What else there is to say about an expense being added.
+#[derive(Default)]
+pub struct Adding<'a> {
+    /// Money that came in rather than out.
+    pub income: bool,
+    /// The member adding it, when the app knows who the user is.
+    pub by: Option<&'a str>,
+    /// "week", "month" or "year": it comes back each time, counting from the day it is paid.
+    pub repeat: Option<&'a str>,
+}
+
 pub fn add_expense(
     doc: &LoroDoc,
     title: impl Into<Label>,
@@ -1265,6 +1473,29 @@ pub fn add_expense(
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
     original: Option<OriginalAmount>,
+) -> Res<()> {
+    add_expense_as(
+        doc,
+        title,
+        amount_cents,
+        paid_by,
+        splits,
+        created_at,
+        original,
+        Adding::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn add_expense_as(
+    doc: &LoroDoc,
+    title: impl Into<Label>,
+    amount_cents: i64,
+    paid_by: impl Into<PaidBy>,
+    splits: Vec<ExpenseSplit>,
+    created_at: Option<DateTime<Utc>>,
+    original: Option<OriginalAmount>,
+    adding: Adding,
 ) -> Res<()> {
     let PaidBy { paid_by, payers } = paid_by.into();
     let Label { title, category } = title.into();
@@ -1283,24 +1514,168 @@ pub fn add_expense(
         &HashSet::new(),
     )?;
     let now = Utc::now();
-    insert_expense(
-        doc,
-        &Expense {
-            id: Uuid::new_v4().to_string(),
-            group_id: group.id,
-            title: title.trim().to_string(),
-            category,
-            amount_cents,
-            original,
-            paid_by,
-            payers,
-            splits,
-            created_at: created_at.unwrap_or(now),
-            updated_at: now,
-            history: Vec::new(),
-            is_reimbursement: false,
-        },
-    )
+    let created_at = created_at.unwrap_or(now);
+    let repeat = adding.repeat.filter(|every| !every.is_empty());
+    if let Some(every) = repeat {
+        if occurrence(created_at, every, 1).is_none() {
+            return Err("An expense repeats every week, month or year".to_string());
+        }
+        // Its rate would be the first day's for good.
+        if original.is_some() {
+            return Err("A repeated expense has to be in the group's currency".to_string());
+        }
+    }
+    let recurring = repeat.map(|_| Uuid::new_v4().to_string());
+    let expense = Expense {
+        id: Uuid::new_v4().to_string(),
+        group_id: group.id,
+        title: title.trim().to_string(),
+        category,
+        amount_cents,
+        original,
+        paid_by,
+        payers,
+        splits,
+        created_at,
+        updated_at: now,
+        history: Vec::new(),
+        is_reimbursement: false,
+        income: adding.income,
+        added_at: Some(now),
+        added_by: adding.by.map(str::to_string),
+        recurring: recurring.clone(),
+    };
+    insert_expense(doc, &expense)?;
+
+    let (Some(id), Some(every)) = (recurring, repeat) else {
+        return Ok(());
+    };
+    let model = doc
+        .get_map(RECURRING)
+        .insert_container(&id, LoroMap::new())
+        .map_err(doc_err)?;
+    model
+        .insert("title", expense.title.as_str())
+        .map_err(doc_err)?;
+    if let Some(category) = &expense.category {
+        model
+            .insert("category", category.as_str())
+            .map_err(doc_err)?;
+    }
+    model
+        .insert(
+            "amount_cents",
+            stored_amount(expense.amount_cents, expense.income),
+        )
+        .map_err(doc_err)?;
+    model
+        .insert("paid_by", expense.paid_by.as_str())
+        .map_err(doc_err)?;
+    if !expense.payers.is_empty() {
+        model
+            .insert("payers", payers_value(&expense.payers))
+            .map_err(doc_err)?;
+    }
+    model
+        .insert(
+            "splits",
+            splits_value(expense.amount_cents, None, &expense.splits),
+        )
+        .map_err(doc_err)?;
+    model.insert("every", every).map_err(doc_err)?;
+    model
+        .insert("start", timestamp(created_at))
+        .map_err(doc_err)?;
+    // The one just added is the first.
+    model.insert("made", 1).map_err(doc_err)?;
+    if let Some(by) = &expense.added_by {
+        model.insert("added_by", by.as_str()).map_err(doc_err)?;
+    }
+    // Started in the past, some are due already.
+    add_due_expenses(doc, now).map(|_| ())
+}
+
+/// Whether a repeated expense has an occurrence to add.
+pub fn has_due_expenses(doc: &LoroDoc, now: DateTime<Utc>) -> bool {
+    let Ok(group) = read_group(doc) else {
+        return false;
+    };
+    !group.deleted && group.recurring.iter().any(|r| !r.paused && r.next <= now)
+}
+
+/// Adds the occurrences of the repeated expenses whose day has come, and says whether there
+/// were any. Each has an id made of its model's and its day, so that devices doing this at
+/// the same time add the same expense.
+pub fn add_due_expenses(doc: &LoroDoc, now: DateTime<Utc>) -> Res<bool> {
+    let group = read_group(doc)?;
+    if group.deleted {
+        return Ok(false);
+    }
+    // One deleted since isn't added again.
+    let mut taken: HashSet<String> = group
+        .expenses
+        .iter()
+        .chain(group.trash.iter().map(|d| &d.expense))
+        .map(|e| e.id.clone())
+        .collect();
+    let models = doc.get_map(RECURRING);
+    let mut added = false;
+    for repeated in read_recurring(doc, &group.participants) {
+        let model = &repeated.expense;
+        if model.paused {
+            continue;
+        }
+        let mut made = repeated.made;
+        let mut next = model.next;
+        while next <= now && (made - repeated.made) as usize <= MAX_DUE {
+            let id = format!("{}-{}", model.id, next.format("%Y%m%d"));
+            if taken.insert(id.clone()) {
+                insert_expense(
+                    doc,
+                    &Expense {
+                        id,
+                        group_id: group.id.clone(),
+                        title: model.title.clone(),
+                        category: model.category.clone(),
+                        amount_cents: model.amount_cents,
+                        original: None,
+                        paid_by: model.paid_by.clone(),
+                        payers: model.payers.clone(),
+                        splits: model.splits.clone(),
+                        created_at: next,
+                        updated_at: next,
+                        history: Vec::new(),
+                        is_reimbursement: false,
+                        income: model.income,
+                        added_at: Some(next),
+                        added_by: model.added_by.clone(),
+                        recurring: Some(model.id.clone()),
+                    },
+                )?;
+            }
+            made += 1;
+            let Some(following) = occurrence(repeated.start, &model.every, made) else {
+                break;
+            };
+            next = following;
+        }
+        if made != repeated.made {
+            if let Some(target) = child_map(&models, &model.id) {
+                target.insert("made", i64::from(made)).map_err(doc_err)?;
+                added = true;
+            }
+        }
+    }
+    Ok(added)
+}
+
+/// Stops a repeated expense: the ones already added stay.
+pub fn stop_recurring(doc: &LoroDoc, recurring_id: &str) -> Res<()> {
+    let models = doc.get_map(RECURRING);
+    if child_map(&models, recurring_id).is_none() {
+        return Err("This repeated expense no longer exists".to_string());
+    }
+    models.delete(recurring_id).map_err(doc_err)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1313,6 +1688,7 @@ pub fn update_expense(
     splits: Vec<ExpenseSplit>,
     created_at: Option<DateTime<Utc>>,
     original: Option<OriginalAmount>,
+    by: Option<&str>,
 ) -> Res<()> {
     let PaidBy { paid_by, payers } = paid_by.into();
     let Label { title, category } = title.into();
@@ -1382,7 +1758,7 @@ pub fn update_expense(
             amount_cents as f64 / 100.0
         ));
         target
-            .insert("amount_cents", amount_cents)
+            .insert("amount_cents", stored_amount(amount_cents, expense.income))
             .map_err(doc_err)?;
     }
     if expense.paid_by != paid_by || expense.payers != payers {
@@ -1488,6 +1864,7 @@ pub fn update_expense(
         previous_original: expense.original.clone(),
         previous_category: expense.category.clone(),
         summary,
+        edited_by: by.map(str::to_string),
     };
     child_list(&target, HISTORY)?
         .push(history_value(&entry))
@@ -1498,12 +1875,60 @@ pub fn update_expense(
     Ok(())
 }
 
-pub fn delete_expense(doc: &LoroDoc, expense_id: &str) -> Res<()> {
+/// Deletes an expense: it goes to the trash, with when and by which member (`by`, when the
+/// app knows who the user is), from where it can be put back.
+pub fn delete_expense(doc: &LoroDoc, expense_id: &str, by: Option<&str>) -> Res<()> {
     let expenses = doc.get_map(EXPENSES);
     if child_map(&expenses, expense_id).is_none() {
         return Err("Expense not found".to_string());
     }
+    // One this version can't read is only removed.
+    let group = read_group(doc)?;
+    if let Some(expense) = group.expenses.iter().find(|e| e.id == expense_id) {
+        let kept = write_expense(&doc.get_map(TRASH), expense)?;
+        kept.insert("deleted_at", timestamp(Utc::now()))
+            .map_err(doc_err)?;
+        if let Some(by) = by {
+            kept.insert("deleted_by", by).map_err(doc_err)?;
+        }
+    }
     expenses.delete(expense_id).map_err(doc_err)
+}
+
+/// Puts a deleted expense back, as it was, and notes it in its history.
+pub fn restore_expense(doc: &LoroDoc, expense_id: &str, by: Option<&str>) -> Res<()> {
+    let group = read_group(doc)?;
+    let deleted = group
+        .trash
+        .iter()
+        .find(|d| d.expense.id == expense_id)
+        .ok_or_else(|| "This expense is no longer in the trash".to_string())?;
+    let now = Utc::now();
+    let mut expense = deleted.expense.clone();
+    expense.history.push(ExpenseHistoryEntry {
+        edited_at: now,
+        previous_title: expense.title.clone(),
+        previous_amount_cents: expense.amount_cents,
+        previous_paid_by: expense.paid_by.clone(),
+        previous_payers: expense.payers.clone(),
+        previous_splits: expense.splits.clone(),
+        previous_original: expense.original.clone(),
+        previous_category: expense.category.clone(),
+        summary: "Restored from the trash".to_string(),
+        edited_by: by.map(str::to_string),
+    });
+    expense.updated_at = now;
+    insert_expense(doc, &expense)?;
+    doc.get_map(TRASH).delete(expense_id).map_err(doc_err)
+}
+
+/// Removes a deleted expense for good.
+pub fn purge_expense(doc: &LoroDoc, expense_id: &str) -> Res<()> {
+    let trash = doc.get_map(TRASH);
+    if child_map(&trash, expense_id).is_none() {
+        return Err("This expense is no longer in the trash".to_string());
+    }
+    trash.delete(expense_id).map_err(doc_err)
 }
 
 /// Records a payment between two people. Removed participants are allowed here, since
@@ -1514,6 +1939,7 @@ pub fn record_reimbursement(
     to_id: String,
     amount_cents: i64,
     notes: Option<String>,
+    by: Option<&str>,
 ) -> Res<()> {
     if amount_cents <= 0 {
         return Err("Reimbursement amount must be greater than zero".to_string());
@@ -1562,6 +1988,10 @@ pub fn record_reimbursement(
             history: Vec::new(),
             is_reimbursement: true,
             original: None,
+            income: false,
+            added_at: Some(now),
+            added_by: by.map(str::to_string),
+            recurring: None,
         },
     )
 }
@@ -1666,6 +2096,7 @@ mod tests {
             e.splits.clone(),
             None,
             None,
+            None,
         )
         .unwrap();
         assert_eq!(net(&doc, bob), -1250);
@@ -1681,7 +2112,7 @@ mod tests {
             read_group(&doc).unwrap().expenses[0].splits,
             [split(alice, 1), split(bob, 1)]
         );
-        delete_expense(&doc, &e.id).unwrap();
+        delete_expense(&doc, &e.id, None).unwrap();
 
         // 50.00 USD at 0.9234: Bob owes 20.00 USD of it, which is 18.47 of the 46.17.
         add(
@@ -1707,6 +2138,7 @@ mod tests {
             4617,
             alice.clone(),
             vec![split(alice, 1), split(bob, 1)],
+            None,
             None,
             None,
         )
@@ -1785,6 +2217,7 @@ mod tests {
             vec![split(bob, 1)],
             None,
             None,
+            None,
         )
         .unwrap();
 
@@ -1848,11 +2281,12 @@ mod tests {
             vec![split(alice, 1), split(bob, 1)],
             None,
             None,
+            None,
         )
         .unwrap();
 
         // And a removed participant can still settle up.
-        record_reimbursement(&doc, bob.clone(), alice.clone(), 100, None).unwrap();
+        record_reimbursement(&doc, bob.clone(), alice.clone(), 100, None, None).unwrap();
     }
 
     #[test]
@@ -1882,6 +2316,7 @@ mod tests {
             vec![split(alice, 1)],
             None,
             None,
+            None,
         )
         .unwrap();
         update_expense(
@@ -1891,6 +2326,7 @@ mod tests {
             1000,
             alice.clone(),
             vec![split(alice, 1)],
+            None,
             None,
             None,
         )
@@ -2057,6 +2493,7 @@ mod tests {
                 vec![split(alice, 1)],
                 None,
                 None,
+                None,
             )
             .unwrap();
             let group = read_group(&doc).unwrap();
@@ -2163,7 +2600,7 @@ mod tests {
             (lone.paid_by.as_str(), lone.payers.len()),
             (bob.as_str(), 0)
         );
-        delete_expense(&doc, &lone.id).unwrap();
+        delete_expense(&doc, &lone.id, None).unwrap();
 
         for (bad, why) in [
             (vec![payer(alice, 3000), payer(bob, 5000)], "not the total"),
@@ -2187,6 +2624,7 @@ mod tests {
                 amount_cents,
                 paid_by,
                 everyone(),
+                None,
                 None,
                 None,
             )
@@ -2295,8 +2733,16 @@ mod tests {
     fn renaming_updates_payment_titles_only() {
         let (doc, g) = sample();
         let (alice, bob) = (g.participants[0].id.clone(), g.participants[1].id.clone());
-        record_reimbursement(&doc, alice.clone(), bob.clone(), 500, None).unwrap();
-        record_reimbursement(&doc, bob.clone(), alice.clone(), 300, Some("cash".into())).unwrap();
+        record_reimbursement(&doc, alice.clone(), bob.clone(), 500, None, None).unwrap();
+        record_reimbursement(
+            &doc,
+            bob.clone(),
+            alice.clone(),
+            300,
+            Some("cash".into()),
+            None,
+        )
+        .unwrap();
         add_expense(
             &doc,
             "Alice's birthday",
@@ -2308,7 +2754,7 @@ mod tests {
         )
         .unwrap();
         // A payment whose title someone rewrote keeps it.
-        record_reimbursement(&doc, alice.clone(), bob.clone(), 100, None).unwrap();
+        record_reimbursement(&doc, alice.clone(), bob.clone(), 100, None, None).unwrap();
         let custom = read_group(&doc)
             .unwrap()
             .expenses
@@ -2322,6 +2768,7 @@ mod tests {
             100,
             alice.clone(),
             custom.splits.clone(),
+            None,
             None,
             None,
         )
@@ -2399,11 +2846,16 @@ mod tests {
                 history: Vec::new(),
                 is_reimbursement: false,
                 original: None,
+                income: false,
+                added_at: None,
+                added_by: None,
+                recurring: None,
             };
             insert_expense(&doc, &expense).unwrap();
         };
         unchecked("Too big", i64::MAX, vec![split(alice, 1)]);
-        unchecked("Negative", -500, vec![split(alice, 1)]);
+        unchecked("Nothing", 0, vec![split(alice, 1)]);
+        unchecked("Too big the other way", i64::MIN, vec![split(alice, 1)]);
         unchecked("Nobody", 500, vec![]);
         unchecked("Zero shares", 500, vec![split(alice, 0)]);
 
@@ -2437,5 +2889,177 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("too large"), "{err}");
+    }
+
+    #[test]
+    fn money_that_came_in_counts_the_other_way() {
+        let (doc, g) = sample();
+        let (alice, bob) = (&g.participants[0].id, &g.participants[1].id);
+        add_expense_as(
+            &doc,
+            "Deposit back",
+            1000,
+            alice.clone(),
+            vec![split(alice, 1), split(bob, 1)],
+            None,
+            None,
+            Adding {
+                income: true,
+                by: Some(bob.as_str()),
+                repeat: None,
+            },
+        )
+        .unwrap();
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+        assert!(e.income);
+        assert_eq!(e.amount_cents, 1000);
+        assert_eq!(e.added_by.as_deref(), Some(bob.as_str()));
+        assert!(e.added_at.is_some());
+        // Alice holds 10.00, of which 5.00 are Bob's.
+        assert_eq!((net(&doc, alice), net(&doc, bob)), (-500, 500));
+        // An app version from before finds an amount below zero, and leaves the entry out.
+        let stored = entries::<DocExpense>(&doc.get_map(EXPENSES), EXPENSES);
+        assert_eq!(stored[0].1.amount_cents, -1000);
+
+        // Editing keeps it money that came in, and says who did.
+        update_expense(
+            &doc,
+            &e.id,
+            "Deposit back",
+            800,
+            alice.clone(),
+            e.splits.clone(),
+            None,
+            None,
+            Some(alice.as_str()),
+        )
+        .unwrap();
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+        assert!(e.income);
+        assert_eq!(e.amount_cents, 800);
+        assert_eq!(e.history[0].previous_amount_cents, 1000);
+        assert_eq!(e.history[0].edited_by.as_deref(), Some(alice.as_str()));
+        assert_eq!(net(&doc, bob), 400);
+    }
+
+    #[test]
+    fn a_deleted_expense_waits_in_the_trash() {
+        let (doc, g) = sample();
+        let (alice, bob) = (&g.participants[0].id, &g.participants[1].id);
+        add_expense(
+            &doc,
+            "Dinner",
+            3000,
+            alice.clone(),
+            vec![split(alice, 1), split(bob, 1)],
+            None,
+            None,
+        )
+        .unwrap();
+        let e = read_group(&doc).unwrap().expenses.remove(0);
+
+        delete_expense(&doc, &e.id, Some(bob.as_str())).unwrap();
+        let group = read_group(&doc).unwrap();
+        assert!(group.expenses.is_empty());
+        assert_eq!(net(&doc, bob), 0);
+        assert_eq!(group.trash.len(), 1);
+        assert_eq!(group.trash[0].expense, e);
+        assert_eq!(group.trash[0].deleted_by.as_deref(), Some(bob.as_str()));
+        // For an app version from before, it is deleted.
+        assert!(child_map(&doc.get_map(EXPENSES), &e.id).is_none());
+
+        restore_expense(&doc, &e.id, Some(alice.as_str())).unwrap();
+        let group = read_group(&doc).unwrap();
+        assert!(group.trash.is_empty());
+        let back = &group.expenses[0];
+        assert_eq!((back.id.as_str(), back.amount_cents), (e.id.as_str(), 3000));
+        let noted = back.history.last().unwrap();
+        assert_eq!(noted.summary, "Restored from the trash");
+        assert_eq!(noted.edited_by.as_deref(), Some(alice.as_str()));
+        assert_eq!(net(&doc, bob), -1500);
+
+        delete_expense(&doc, &e.id, None).unwrap();
+        purge_expense(&doc, &e.id).unwrap();
+        assert!(read_group(&doc).unwrap().trash.is_empty());
+        assert!(restore_expense(&doc, &e.id, None).is_err());
+        assert!(purge_expense(&doc, &e.id).is_err());
+    }
+
+    #[test]
+    fn a_repeated_expense_comes_back_when_due() {
+        let (doc, g) = sample();
+        let (alice, bob) = (&g.participants[0].id, &g.participants[1].id);
+        let at = |text: &str| text.parse::<DateTime<Utc>>().unwrap();
+        let add = |repeat: &'static str, original| {
+            add_expense_as(
+                &doc,
+                Label::new("Rent", Some("housing")),
+                90000,
+                alice.clone(),
+                vec![split(alice, 1), split(bob, 1)],
+                Some(at("2100-01-31T10:00:00Z")),
+                original,
+                Adding {
+                    repeat: Some(repeat),
+                    ..Adding::default()
+                },
+            )
+        };
+        assert!(add("day", None).unwrap_err().contains("every week"));
+        let usd = OriginalAmount {
+            currency: "USD".to_string(),
+            amount_cents: 100000,
+            rate: "0.9".to_string(),
+        };
+        assert!(add("month", Some(usd)).unwrap_err().contains("currency"));
+        assert!(read_group(&doc).unwrap().expenses.is_empty());
+
+        add("month", None).unwrap();
+        let group = read_group(&doc).unwrap();
+        let model = group.recurring[0].clone();
+        assert_eq!(group.expenses[0].recurring.as_ref(), Some(&model.id));
+        assert_eq!((model.every.as_str(), model.amount_cents), ("month", 90000));
+        // The 31st, or the month's last day.
+        assert_eq!(model.next, at("2100-02-28T10:00:00Z"));
+        assert!(!has_due_expenses(&doc, at("2100-02-27T10:00:00Z")));
+        assert!(has_due_expenses(&doc, at("2100-02-28T10:00:00Z")));
+
+        // Two devices add the ones due: the same expenses, not twice each.
+        doc.commit();
+        let other = fork(&doc);
+        assert!(add_due_expenses(&doc, at("2100-03-31T12:00:00Z")).unwrap());
+        assert!(add_due_expenses(&other, at("2100-03-31T12:00:00Z")).unwrap());
+        doc.commit();
+        other.commit();
+        merge(&doc, &other);
+        let group = read_group(&doc).unwrap();
+        let days: Vec<String> = group
+            .expenses
+            .iter()
+            .map(|e| e.created_at.format("%Y-%m-%d").to_string())
+            .collect();
+        assert_eq!(days, ["2100-01-31", "2100-02-28", "2100-03-31"]);
+        assert!(group.expenses.iter().all(|e| e.title == "Rent"
+            && e.category.as_deref() == Some("housing")
+            && e.recurring.as_ref() == Some(&model.id)));
+        assert_eq!(group.recurring[0].next, at("2100-04-30T10:00:00Z"));
+        assert_eq!(net(&doc, bob), -135000);
+
+        // One deleted since isn't added again.
+        delete_expense(&doc, &group.expenses[2].id, None).unwrap();
+        assert!(!add_due_expenses(&doc, at("2100-03-31T12:00:00Z")).unwrap());
+        assert_eq!(read_group(&doc).unwrap().expenses.len(), 2);
+
+        // Bob leaves: nothing more is added for him.
+        remove_participant(&doc, bob, None).unwrap();
+        assert!(read_group(&doc).unwrap().recurring[0].paused);
+        assert!(!has_due_expenses(&doc, at("2101-01-01T00:00:00Z")));
+        assert!(!add_due_expenses(&doc, at("2101-01-01T00:00:00Z")).unwrap());
+
+        stop_recurring(&doc, &model.id).unwrap();
+        let group = read_group(&doc).unwrap();
+        assert!(group.recurring.is_empty());
+        assert_eq!(group.expenses.len(), 2);
+        assert!(stop_recurring(&doc, &model.id).is_err());
     }
 }

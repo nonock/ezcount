@@ -9,6 +9,9 @@
 //! 2026-08-31T09:00:00Z,,10.00,EUR,Bob,payment,,,,,10.00,,
 //! ```
 //!
+//! `Type` is `expense`, `payment` (from one person to another) or `income`: money that came in,
+//! which `Paid by` received and the people share.
+//!
 //! The columns after `Split` are the people of the group, and hold what each one owes of the
 //! line's `Amount`, in the group's currency (for a payment: who received it). They add up to
 //! it.
@@ -53,6 +56,7 @@ const COLUMNS: [&str; 10] = [
 const CATEGORY: &str = "Category";
 const EXPENSE: &str = "expense";
 const PAYMENT: &str = "payment";
+const INCOME: &str = "income";
 const NOT_IN: &str = "-";
 /// Between the payers of an expense several people paid.
 const SEVERAL_PAYERS: &str = " + ";
@@ -168,7 +172,14 @@ pub fn export(group: &Group) -> Res<String> {
                     .collect::<Vec<_>>()
                     .join(SEVERAL_PAYERS)
             },
-            if e.is_reimbursement { PAYMENT } else { EXPENSE }.to_string(),
+            if e.is_reimbursement {
+                PAYMENT
+            } else if e.income {
+                INCOME
+            } else {
+                EXPENSE
+            }
+            .to_string(),
             original.map(|o| cents(o.amount_cents)).unwrap_or_default(),
             original.map(|o| o.currency.clone()).unwrap_or_default(),
             original.map(|o| o.rate.clone()).unwrap_or_default(),
@@ -471,12 +482,13 @@ pub fn import(text: &str) -> Res<ImportedGroup> {
                 (payers[0].0, payers)
             }
         };
-        let is_reimbursement = match cell(5).to_lowercase().as_str() {
-            "" | EXPENSE => false,
-            PAYMENT => true,
+        let (is_reimbursement, income) = match cell(5).to_lowercase().as_str() {
+            "" | EXPENSE => (false, false),
+            PAYMENT => (true, false),
+            INCOME => (false, true),
             other => {
                 return Err(format!(
-                    "Line {line}: the type is \"{other}\", not {EXPENSE} or {PAYMENT}"
+                    "Line {line}: the type is \"{other}\", not {EXPENSE}, {PAYMENT} or {INCOME}"
                 ))
             }
         };
@@ -607,6 +619,7 @@ pub fn import(text: &str) -> Res<ImportedGroup> {
             splits,
             created_at,
             is_reimbursement,
+            income,
         });
     }
 
@@ -812,10 +825,29 @@ mod tests {
             }),
         )
         .unwrap();
-        doc::record_reimbursement(&doc, ids[1].clone(), ids[0].clone(), 250, None).unwrap();
+        doc::record_reimbursement(&doc, ids[1].clone(), ids[0].clone(), 250, None, None).unwrap();
+        // Money that came in: a refund Alice received for the three.
+        doc::add_expense_as(
+            &doc,
+            "Refund",
+            900,
+            ids[0].clone(),
+            vec![split(0, 1), split(1, 1), split(2, 1)],
+            at(6),
+            None,
+            doc::Adding {
+                income: true,
+                ..doc::Adding::default()
+            },
+        )
+        .unwrap();
         let group = doc::read_group(&doc).unwrap();
 
         let file = export(&group).unwrap();
+        assert!(
+            file.contains(",Refund,9.00,CHF,Alice,income,,,,1 1 1,,3.00,3.00,3.00\n"),
+            "{file}"
+        );
         let expected = format!(
             "{HEADER},Category,Alice,Bob,\"'=Carol, \"\"C\"\"\"\n\
              2026-03-01T08:30:00Z,\"Dinner, with \"\"wine\"\"\",10.00,CHF,Alice,expense,,,,1 1 1,,3.34,3.33,3.33\n\

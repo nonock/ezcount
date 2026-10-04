@@ -10,10 +10,16 @@
   import { cn } from "@/lib/utils";
   import type { Group } from "@/types";
 
-  /** What the group spent: in all, by category, by person and by month. Payments don't count. */
+  /**
+   * What the group spent: in all, by category, by person and by month. Payments don't count,
+   * nor does money that came in, which is shown apart.
+   */
   let { group }: { group: Group } = $props();
 
-  const expenses = $derived(group.expenses.filter((e) => !e.is_reimbursement));
+  const expenses = $derived(group.expenses.filter((e) => !e.is_reimbursement && !e.income));
+  const incomeCents = $derived(
+    group.expenses.filter((e) => e.income).reduce((sum, e) => sum + e.amount_cents, 0)
+  );
   const totalCents = $derived(expenses.reduce((sum, e) => sum + e.amount_cents, 0));
   const share = (cents: number) => (totalCents > 0 ? (cents / totalCents) * 100 : 0);
   const percent = (cents: number) =>
@@ -121,6 +127,12 @@
               <Amount cents={Math.round(totalCents / expenses.length)} currency={group.currency} />
             </dd>
           </div>
+          {#if incomeCents > 0}
+            <div>
+              <dt class="text-xs text-muted-foreground">{t("stats.income")}</dt>
+              <dd><Amount cents={incomeCents} currency={group.currency} tone="positive" /></dd>
+            </div>
+          {/if}
         </dl>
       </Card.Content>
     </Card.Root>

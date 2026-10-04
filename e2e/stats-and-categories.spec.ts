@@ -137,7 +137,7 @@ test("statistics count the spending by category, person and month", async ({ pag
   await expect(months.nth(1)).toContainText("€60");
 });
 
-test("member history says who was added and removed, and by whom", async ({ page }) => {
+test("the activity says who was added and removed, and by whom", async ({ page }) => {
   await page.getByRole("button", { name: "Add Member" }).click();
   const add = page.getByRole("dialog", { name: "Add Group Member" });
   await add.getByLabel("Name").fill("Carol");
@@ -148,9 +148,10 @@ test("member history says who was added and removed, and by whom", async ({ page
   await page.getByRole("button", { name: "Remove from group" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Remove" }).click();
 
-  await page.getByRole("button", { name: "Group options" }).click();
-  await page.getByRole("menuitem", { name: "Member history" }).click();
-  const history = page.getByRole("dialog", { name: "Member history" });
+  await page.getByRole("button", { name: "Activity and trash" }).click();
+  await page.getByRole("menuitem", { name: "Activity" }).click();
+  const history = page.getByRole("dialog", { name: "Group activity" });
+  await history.getByRole("tab", { name: "Members" }).click();
   // The latest first, then the members the group started with.
   await expect(history.getByRole("listitem")).toHaveText([
     /Alice removed Carol/,

@@ -69,6 +69,9 @@ pub struct ExpenseHistoryEntry {
     #[serde(default)]
     pub previous_category: Option<String>,
     pub summary: String,
+    // The member who made the change, when the app knew who the user was.
+    #[serde(default)]
+    pub edited_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -95,6 +98,54 @@ pub struct Expense {
     pub history: Vec<ExpenseHistoryEntry>,
     #[serde(default)]
     pub is_reimbursement: bool,
+    // Money that came in for the group (a deposit given back, a refund) rather than out:
+    // `paid_by` received it, and the people of `splits` share it.
+    #[serde(default)]
+    pub income: bool,
+    // When it was written down and by which member, which `created_at` (the day it was paid)
+    // doesn't say. Not known for expenses from before this was kept.
+    #[serde(default)]
+    pub added_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub added_by: Option<String>,
+    // The repeated expense it comes from.
+    #[serde(default)]
+    pub recurring: Option<String>,
+}
+
+/// An expense someone deleted, kept so it can be put back.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct DeletedExpense {
+    pub expense: Expense,
+    pub deleted_at: DateTime<Utc>,
+    #[serde(default)]
+    pub deleted_by: Option<String>,
+}
+
+/// An expense that comes back every week, month or year: the app adds the next one when its
+/// day comes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+pub struct RecurringExpense {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub category: Option<String>,
+    pub amount_cents: i64,
+    #[serde(default)]
+    pub income: bool,
+    pub paid_by: String,
+    #[serde(default)]
+    pub payers: Vec<ExpensePayer>,
+    pub splits: Vec<ExpenseSplit>,
+    // "week", "month" or "year".
+    pub every: String,
+    // The day of the next one.
+    pub next: DateTime<Utc>,
+    // Someone on it left the group: nothing is added until it is stopped.
+    #[serde(default)]
+    pub paused: bool,
+    #[serde(default)]
+    pub added_by: Option<String>,
 }
 
 /// An expense as the form sends it, to add one or to replace one.
@@ -115,6 +166,12 @@ pub struct ExpenseInput {
     pub created_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub original: Option<OriginalAmount>,
+    // Money received rather than spent. Kept as it is when replacing an expense.
+    #[serde(default)]
+    pub income: bool,
+    // "week", "month" or "year" to add it again each time, when adding an expense.
+    #[serde(default)]
+    pub repeat: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -136,6 +193,11 @@ pub struct Group {
     // The members who agreed to delete the group while its balances aren't settled.
     #[serde(default)]
     pub deletion_votes: Vec<String>,
+    // Deleted expenses, the latest first.
+    #[serde(default)]
+    pub trash: Vec<DeletedExpense>,
+    #[serde(default)]
+    pub recurring: Vec<RecurringExpense>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]

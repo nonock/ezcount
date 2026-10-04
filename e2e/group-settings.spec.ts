@@ -237,19 +237,19 @@ test("an expense in another currency, with a set amount for someone", async ({ p
   await dialog.getByLabel("Description").fill("Taxi");
   await dialog.getByLabel("Amount", { exact: true }).fill("50");
   await dialog.getByLabel("Currency", { exact: true }).click();
-  await page.getByRole("option", { name: "USD", exact: true }).click();
+  await page.getByRole("option", { name: /^USD/ }).click();
   // The relay's rate is suggested; one typed in stays, another currency gets its own.
   await expect(dialog.getByLabel("Exchange rate")).toHaveValue("0.9234");
   await expect(dialog.getByText("Suggested rate")).toBeVisible();
   await dialog.getByLabel("Currency", { exact: true }).click();
-  await page.getByRole("option", { name: "GBP", exact: true }).click();
+  await page.getByRole("option", { name: /^GBP/ }).click();
   await expect(dialog.getByLabel("Exchange rate")).toHaveValue("1.15");
   // No suggestion for this one: the field waits for the user.
   await dialog.getByLabel("Currency", { exact: true }).click();
-  await page.getByRole("option", { name: "CHF", exact: true }).click();
+  await page.getByRole("option", { name: /^CHF/ }).click();
   await expect(dialog.getByLabel("Exchange rate")).toHaveValue("");
   await dialog.getByLabel("Currency", { exact: true }).click();
-  await page.getByRole("option", { name: "USD", exact: true }).click();
+  await page.getByRole("option", { name: /^USD/ }).click();
   await expect(dialog.getByLabel("Exchange rate")).toHaveValue("0.9234");
   await expect(dialog.getByText("Counts as €46.17 in the group.")).toBeVisible();
 

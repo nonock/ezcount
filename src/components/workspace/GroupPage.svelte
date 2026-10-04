@@ -43,7 +43,7 @@
   <div
     class="space-y-4 lg:grid lg:grid-cols-[22rem_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0"
   >
-    <div class="space-y-4 lg:sticky lg:top-20">
+    <div class="space-y-4 lg:sticky lg:top-6">
       <GroupHeader {group} />
       <DeletionRequest {group} />
     </div>

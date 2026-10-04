@@ -190,6 +190,39 @@ fn delete_expense(
     api::delete_expense(&state, &group_id, &expense_id)
 }
 
+/// Puts a deleted expense back.
+#[tauri::command]
+#[specta::specta]
+fn restore_expense(
+    state: State<AppState>,
+    group_id: String,
+    expense_id: String,
+) -> Result<Group, String> {
+    api::restore_expense(&state, &group_id, &expense_id)
+}
+
+/// Removes a deleted expense from the trash, for good.
+#[tauri::command]
+#[specta::specta]
+fn purge_expense(
+    state: State<AppState>,
+    group_id: String,
+    expense_id: String,
+) -> Result<Group, String> {
+    api::purge_expense(&state, &group_id, &expense_id)
+}
+
+/// Stops a repeated expense. The ones already added stay.
+#[tauri::command]
+#[specta::specta]
+fn stop_recurring_expense(
+    state: State<AppState>,
+    group_id: String,
+    recurring_id: String,
+) -> Result<Group, String> {
+    api::stop_recurring_expense(&state, &group_id, &recurring_id)
+}
+
 #[tauri::command]
 #[specta::specta]
 fn get_balances(
@@ -450,6 +483,9 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         add_expense,
         update_expense,
         delete_expense,
+        restore_expense,
+        purge_expense,
+        stop_recurring_expense,
         record_reimbursement,
         get_balances,
         get_settlements,

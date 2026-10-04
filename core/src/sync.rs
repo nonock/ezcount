@@ -2830,6 +2830,7 @@ mod end_to_end {
                 vec![split(&alice), split(&bob)],
                 None,
                 None,
+                None,
             )
         });
         b.edit(&gid, |d| {
@@ -2840,6 +2841,7 @@ mod end_to_end {
                 20000,
                 alice.clone(),
                 vec![split(&alice), split(&bob)],
+                None,
                 None,
                 None,
             )

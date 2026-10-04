@@ -1,5 +1,6 @@
 export type {
   AccountInfo,
+  DeletedExpense,
   Expense,
   ExpenseHistoryEntry,
   ExpenseInput,
@@ -12,6 +13,7 @@ export type {
   Participant,
   ParticipantBalance,
   PasswordStrength,
+  RecurringExpense,
   SettlementTransfer,
   SignedIn,
   SyncInfo,

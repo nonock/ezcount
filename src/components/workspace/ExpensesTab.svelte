@@ -5,8 +5,10 @@
   import EllipsisIcon from "@lucide/svelte/icons/ellipsis";
   import HandCoinsIcon from "@lucide/svelte/icons/hand-coins";
   import PencilIcon from "@lucide/svelte/icons/pencil";
+  import PiggyBankIcon from "@lucide/svelte/icons/piggy-bank";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import ReceiptTextIcon from "@lucide/svelte/icons/receipt-text";
+  import RepeatIcon from "@lucide/svelte/icons/repeat";
   import HistoryIcon from "@lucide/svelte/icons/rotate-ccw-clock";
   import SearchIcon from "@lucide/svelte/icons/search";
   import SearchXIcon from "@lucide/svelte/icons/search-x";
@@ -59,11 +61,12 @@
   const payersOf = (e: Expense) => formatList(paidAmounts(e).map((paid) => nameOf(paid.id)));
 
   // What is shown: a search, a kind, a person, and an order. Kept while the group is open.
-  type Kind = "all" | "expenses" | "payments";
+  type Kind = "all" | "expenses" | "income" | "payments";
   type Sort = "newest" | "oldest" | "highest" | "lowest" | "title";
   const KINDS = [
     { value: "all", label: "expenses.all" },
     { value: "expenses", label: "expenses.onlyExpenses" },
+    { value: "income", label: "expenses.onlyIncome" },
     { value: "payments", label: "expenses.onlyPayments" },
   ] as const;
   const SORTS = [
@@ -82,6 +85,11 @@
   /** A category's key, "" for the expenses without one, or any. */
   let category = $state(ANY_CATEGORY);
   let sort = $state<Sort>("newest");
+
+  const kindOf = (e: Expense): Kind =>
+    e.is_reimbursement ? "payments" : e.income ? "income" : "expenses";
+  /** What counts in the totals: payments and money that came in aren't spending. */
+  const isSpending = (e: Expense) => kindOf(e) === "expenses";
 
   const filtering = $derived(
     query.trim() !== "" || kind !== "all" || person !== ANYONE || category !== ANY_CATEGORY
@@ -162,7 +170,7 @@
   const matching = $derived.by(() => {
     const words = plain(query).split(/\s+/).filter(Boolean);
     return group.expenses.filter((e) => {
-      if (kind !== "all" && (kind === "payments") !== Boolean(e.is_reimbursement)) return false;
+      if (kind !== "all" && kindOf(e) !== kind) return false;
       if (
         person !== ANYONE &&
         !paidAmounts(e).some((paid) => paid.id === person) &&
@@ -192,7 +200,7 @@
     return [...matching].sort(order[sort]);
   });
   const matchingCents = $derived(
-    matching.filter((e) => !e.is_reimbursement).reduce((sum, e) => sum + e.amount_cents, 0)
+    matching.filter(isSpending).reduce((sum, e) => sum + e.amount_cents, 0)
   );
 
   // Infinite loading, PAGE_SIZE at a time. GroupPage remakes this tab for each group, so
@@ -233,12 +241,12 @@
       const existing = map.get(key);
       if (existing) {
         existing.items.push(exp);
-        if (!exp.is_reimbursement) existing.totalCents += exp.amount_cents;
+        if (isSpending(exp)) existing.totalCents += exp.amount_cents;
       } else {
         map.set(key, {
           dateKey: key,
           displayDate: formatDateGroupHeader(exp.created_at),
-          totalCents: exp.is_reimbursement ? 0 : exp.amount_cents,
+          totalCents: isSpending(exp) ? exp.amount_cents : 0,
           items: [exp],
         });
       }
@@ -264,6 +272,40 @@
   <div class="flex items-center justify-end gap-3">
     <h2 class="sr-only">{t("expenses.heading")}</h2>
     <div class="flex items-center gap-2">
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>
+          {#snippet child({ props })}
+            <Button
+              {...props}
+              variant="outline"
+              size="icon"
+              aria-label={t("expenses.more")}
+              title={t("expenses.more")}
+            >
+              <HistoryIcon />
+            </Button>
+          {/snippet}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end">
+          <DropdownMenu.Item onSelect={() => (dialogs.activity = true)}>
+            <HistoryIcon />
+            {t("activity.menu")}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => (dialogs.recurring = true)}>
+            <RepeatIcon />
+            {t("recurring.menu")}
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => (dialogs.trash = true)}>
+            <TrashIcon />
+            {t("trash.menu")}
+            {#if (group.trash ?? []).length > 0}
+              <Badge variant="secondary" class="ml-auto tabular-nums">
+                {(group.trash ?? []).length}
+              </Badge>
+            {/if}
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
       {#if hasOutstandingDebt}
         <Button variant="outline" onclick={() => dialogs.openReimburse()}>
           <CheckIcon data-icon="inline-start" />
@@ -425,6 +467,7 @@
       <ul class="divide-y overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
         {#each dg.items as e (e.id)}
           {@const isReimbursement = Boolean(e.is_reimbursement)}
+          {@const isIncome = Boolean(e.income)}
           {@const editCount = e.history?.length ?? 0}
           {@const totalShares = e.splits.reduce((sum, s) => sum + s.shares, 0)}
           {@const anyFixed = e.splits.some((s) => s.fixed_cents != null)}
@@ -434,7 +477,7 @@
               <Item.Media>
                 <Avatar.Root>
                   <Avatar.Fallback
-                    class={isReimbursement
+                    class={isReimbursement || (isIncome && !filed)
                       ? "bg-positive-soft text-positive"
                       : filed
                         ? categoryTone(e.category)
@@ -446,6 +489,8 @@
                     {:else if filed}
                       <filed.icon class="size-4" aria-hidden="true" />
                       <span class="sr-only">{t(filed.label)}</span>
+                    {:else if isIncome}
+                      <PiggyBankIcon class="size-4" aria-hidden="true" />
                     {:else}
                       {e.title.charAt(0).toUpperCase()}
                     {/if}
@@ -460,6 +505,15 @@
                     <Badge variant="outline" class="text-positive"
                       >{t("expenses.reimbursement")}</Badge
                     >
+                  {/if}
+                  {#if isIncome}
+                    <Badge variant="outline" class="text-positive">{t("expenses.income")}</Badge>
+                  {/if}
+                  {#if e.recurring}
+                    <Badge variant="secondary" title={t("expenses.repeated")}>
+                      <RepeatIcon aria-hidden="true" />
+                      <span class="sr-only">{t("expenses.repeated")}</span>
+                    </Badge>
                   {/if}
                   {#if editCount > 0}
                     <button
@@ -492,7 +546,7 @@
                     {#if !byDay}
                       {formatDateGroupHeader(e.created_at)} ·
                     {/if}
-                    {t("common.paidBy")}
+                    {isIncome ? t("common.receivedBy") : t("common.paidBy")}
                     <span class="text-foreground">{payersOf(e)}</span>
                     {#if isForEveryone(e)}
                       · {t("expenses.forEveryone")}
@@ -521,7 +575,7 @@
                   <Amount
                     cents={e.amount_cents}
                     currency={group.currency}
-                    tone={isReimbursement ? "positive" : "neutral"}
+                    tone={isReimbursement || isIncome ? "positive" : "neutral"}
                     class="block text-base font-semibold"
                   />
                   {#if e.original}

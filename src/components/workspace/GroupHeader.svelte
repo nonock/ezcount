@@ -5,7 +5,6 @@
   import EllipsisVerticalIcon from "@lucide/svelte/icons/ellipsis-vertical";
   import LogOutIcon from "@lucide/svelte/icons/log-out";
   import PencilIcon from "@lucide/svelte/icons/pencil";
-  import HistoryIcon from "@lucide/svelte/icons/rotate-ccw-clock";
   import TrashIcon from "@lucide/svelte/icons/trash-2";
   import UserPlusIcon from "@lucide/svelte/icons/user-plus";
   import UserRoundIcon from "@lucide/svelte/icons/user-round";
@@ -30,14 +29,17 @@
   let { group }: { group: Group } = $props();
 
   const activeParticipants = $derived(group.participants.filter((p) => !p.removed));
-  const totalCents = $derived(group.expenses.reduce((sum, e) => sum + e.amount_cents, 0));
+  // Money that came in isn't spending.
+  const totalCents = $derived(
+    group.expenses.filter((e) => !e.income).reduce((sum, e) => sum + e.amount_cents, 0)
+  );
   const currentUserId = $derived(openGroup.currentUserId);
   const currentUserBalance = $derived(
     openGroup.balances.find((b) => b.participant_id === currentUserId)
   );
   const userPaidCents = $derived(
     group.expenses
-      .filter((e) => !e.is_reimbursement)
+      .filter((e) => !e.is_reimbursement && !e.income)
       .flatMap(paidAmounts)
       .filter((paid) => paid.id === currentUserId)
       .reduce((sum, paid) => sum + paid.cents, 0)
@@ -110,14 +112,11 @@
             <UserPlusIcon />
             {t("group.addMember")}
           </DropdownMenu.Item>
-          <DropdownMenu.Item onSelect={() => (dialogs.memberHistory = true)}>
-            <HistoryIcon />
-            {t("members.historyMenu")}
-          </DropdownMenu.Item>
           <DropdownMenu.Item onSelect={() => (dialogs.who = true)}>
             <UserRoundIcon />
             {t("group.changeWho")}
           </DropdownMenu.Item>
+
           <DropdownMenu.Item onSelect={exportGroup}>
             <DownloadIcon />
             {t("group.export")}
