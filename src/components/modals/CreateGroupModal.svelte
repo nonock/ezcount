@@ -8,7 +8,7 @@
   import { Input } from "@/components/ui/input";
   import * as Select from "@/components/ui/select";
   import { Spinner } from "@/components/ui/spinner";
-  import { createGroup } from "@/lib/actions";
+  import { createGroup } from "@/lib/actions/groups";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { session } from "@/lib/state/session.svelte";

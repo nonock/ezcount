@@ -13,7 +13,7 @@
   import * as Select from "@/components/ui/select";
   import { Separator } from "@/components/ui/separator";
   import { Spinner } from "@/components/ui/spinner";
-  import { logOut } from "@/lib/actions";
+  import { logOut } from "@/lib/actions/session";
   import { i18n, LANGUAGES, type LanguageChoice, t } from "@/lib/i18n/index.svelte";
   import { formatIban, isIban } from "@/lib/sepa";
   import { dialogs } from "@/lib/state/dialogs.svelte";

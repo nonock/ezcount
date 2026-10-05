@@ -9,7 +9,7 @@
   import { Badge } from "@/components/ui/badge";
   import { Button } from "@/components/ui/button";
   import * as Tabs from "@/components/ui/tabs";
-  import { goHome } from "@/lib/actions";
+  import { goHome } from "@/lib/actions/groups";
   import { t } from "@/lib/i18n/index.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import { navigation } from "@/lib/state/navigation.svelte";

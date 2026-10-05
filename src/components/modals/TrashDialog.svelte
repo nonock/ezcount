@@ -5,7 +5,7 @@
   import { Button } from "@/components/ui/button";
   import * as Dialog from "@/components/ui/dialog";
   import * as Empty from "@/components/ui/empty";
-  import { purgeExpense, restoreExpense } from "@/lib/actions";
+  import { purgeExpense, restoreExpense } from "@/lib/actions/expenses";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import type { Group } from "@/types";

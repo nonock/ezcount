@@ -9,7 +9,8 @@
   import * as Field from "@/components/ui/field";
   import { Spinner } from "@/components/ui/spinner";
   import { Textarea } from "@/components/ui/textarea";
-  import { joinGroup, scanInvite } from "@/lib/actions";
+  import { joinGroup } from "@/lib/actions/groups";
+  import { scanInvite } from "@/lib/actions/scan";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { groupList } from "@/lib/state/groups.svelte";

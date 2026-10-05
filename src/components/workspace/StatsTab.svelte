@@ -4,9 +4,9 @@
   import MemberAvatar from "@/components/common/MemberAvatar.svelte";
   import * as Card from "@/components/ui/card";
   import * as Empty from "@/components/ui/empty";
-  import { CATEGORIES, categoryName, categoryOf, categoryTone } from "@/lib/categories";
+  import { categoryName, categoryOf, categoryTone } from "@/lib/categories";
   import { i18n, t } from "@/lib/i18n/index.svelte";
-  import { owedAmounts, paidAmounts } from "@/lib/split";
+  import { byCategory, byMonth, byPerson, incomeCents, spending } from "@/lib/stats";
   import { cn } from "@/lib/utils";
   import type { Group } from "@/types";
 
@@ -16,10 +16,8 @@
    */
   let { group }: { group: Group } = $props();
 
-  const expenses = $derived(group.expenses.filter((e) => !e.is_reimbursement && !e.income));
-  const incomeCents = $derived(
-    group.expenses.filter((e) => e.income).reduce((sum, e) => sum + e.amount_cents, 0)
-  );
+  const expenses = $derived(spending(group));
+  const income = $derived(incomeCents(group));
   const totalCents = $derived(expenses.reduce((sum, e) => sum + e.amount_cents, 0));
   const share = (cents: number) => (totalCents > 0 ? (cents / totalCents) * 100 : 0);
   const percent = (cents: number) =>
@@ -27,65 +25,9 @@
       share(cents) / 100
     );
 
-  // Categories in the order they are offered, the biggest first; without a category last.
-  const byCategory = $derived.by(() => {
-    const totals = new Map<string, { cents: number; count: number }>();
-    for (const e of expenses) {
-      const key = categoryOf(e.category)?.key ?? "";
-      const total = totals.get(key) ?? { cents: 0, count: 0 };
-      total.cents += e.amount_cents;
-      total.count += 1;
-      totals.set(key, total);
-    }
-    return [...CATEGORIES.map((c) => c.key as string), ""]
-      .filter((key) => totals.has(key))
-      .map((key) => ({ key, ...(totals.get(key) ?? { cents: 0, count: 0 }) }))
-      .sort((a, b) => b.cents - a.cents);
-  });
-
-  // Each person's share of the spending, and what they paid.
-  const byPerson = $derived.by(() => {
-    const totals = new Map(group.participants.map((p) => [p.id, { share: 0, paid: 0 }]));
-    const of = (id: string) => {
-      let total = totals.get(id);
-      if (!total) {
-        total = { share: 0, paid: 0 };
-        totals.set(id, total);
-      }
-      return total;
-    };
-    for (const e of expenses) {
-      const owed = owedAmounts(e.amount_cents, e.original?.amount_cents, e.splits);
-      e.splits.forEach((s, i) => {
-        of(s.participant_id).share += owed[i];
-      });
-      for (const paid of paidAmounts(e)) of(paid.id).paid += paid.cents;
-    }
-    return group.participants
-      .map((p) => ({ ...p, ...of(p.id) }))
-      .filter((p) => !p.removed || p.share > 0 || p.paid > 0)
-      .sort((a, b) => b.share - a.share);
-  });
-
-  // By calendar month, the latest first.
-  const byMonth = $derived.by(() => {
-    const totals = new Map<string, number>();
-    for (const e of expenses) {
-      const date = new Date(e.created_at);
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-      totals.set(key, (totals.get(key) ?? 0) + e.amount_cents);
-    }
-    const months = [...totals].sort(([a], [b]) => b.localeCompare(a));
-    const most = Math.max(...months.map(([, cents]) => cents), 1);
-    return months.map(([key, cents]) => {
-      const [year, month] = key.split("-").map(Number);
-      const name = new Date(year, month - 1, 1).toLocaleDateString(i18n.locale, {
-        month: "long",
-        year: "numeric",
-      });
-      return { key, name, cents, width: (cents / most) * 100 };
-    });
-  });
+  const categories = $derived(byCategory(expenses));
+  const people = $derived(byPerson(group, expenses));
+  const months = $derived(byMonth(expenses));
 </script>
 
 {#snippet bar(width: number, tone = "")}
@@ -127,10 +69,10 @@
               <Amount cents={Math.round(totalCents / expenses.length)} currency={group.currency} />
             </dd>
           </div>
-          {#if incomeCents > 0}
+          {#if income > 0}
             <div>
               <dt class="text-xs text-muted-foreground">{t("stats.income")}</dt>
-              <dd><Amount cents={incomeCents} currency={group.currency} tone="positive" /></dd>
+              <dd><Amount cents={income} currency={group.currency} tone="positive" /></dd>
             </div>
           {/if}
         </dl>
@@ -143,7 +85,7 @@
       </Card.Header>
       <Card.Content>
         <ul class="space-y-3" data-testid="stats-categories">
-          {#each byCategory as row (row.key)}
+          {#each categories as row (row.key)}
             {@const category = categoryOf(row.key)}
             <li class="space-y-1.5">
               <div class="flex items-center justify-between gap-3 text-sm">
@@ -184,7 +126,7 @@
       </Card.Header>
       <Card.Content>
         <ul class="space-y-3" data-testid="stats-people">
-          {#each byPerson as person (person.id)}
+          {#each people as person (person.id)}
             <li class="space-y-1.5">
               <div class="flex items-center justify-between gap-3 text-sm">
                 <span class="flex min-w-0 items-center gap-2">
@@ -215,7 +157,7 @@
       </Card.Header>
       <Card.Content>
         <ul class="space-y-3" data-testid="stats-months">
-          {#each byMonth as month (month.key)}
+          {#each months as month (month.key)}
             <li class="space-y-1.5">
               <div class="flex items-center justify-between gap-3 text-sm">
                 <span class="first-letter:uppercase">{month.name}</span>

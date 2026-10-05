@@ -1,27 +1,10 @@
-<script lang="ts" module>
-  /** One line of an expense as it is typed. */
-  export interface ItemState {
-    key: number;
-    name: string;
-    // A number once typed in: Svelte binds number inputs as numbers.
-    amount: string | number | null;
-    people: string[];
-  }
-
-  let nextKey = 0;
-
-  export function newItem(people: string[], name = "", amount: ItemState["amount"] = "") {
-    nextKey += 1;
-    return { key: nextKey, name, amount, people } satisfies ItemState;
-  }
-</script>
-
 <script lang="ts">
   import PlusIcon from "@lucide/svelte/icons/plus";
   import XIcon from "@lucide/svelte/icons/x";
   import { badgeVariants } from "@/components/ui/badge";
   import { Button } from "@/components/ui/button";
   import { Input } from "@/components/ui/input";
+  import { type ItemState, newItem } from "@/lib/expenseForm.svelte";
   import { t } from "@/lib/i18n/index.svelte";
   import { cn } from "@/lib/utils";
 

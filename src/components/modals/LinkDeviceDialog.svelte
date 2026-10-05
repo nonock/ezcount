@@ -8,7 +8,7 @@
   import * as Field from "@/components/ui/field";
   import { Input } from "@/components/ui/input";
   import { Spinner } from "@/components/ui/spinner";
-  import { sendLoginToScanned } from "@/lib/actions";
+  import { sendLoginToScanned } from "@/lib/actions/scan";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { api } from "@/services/api";

@@ -62,7 +62,7 @@ export async function groupReport(
   };
 
   /** `text`, cut with an ellipsis when wider than `width`. */
-  const fit = (text: string, font: PDFFont, size: number, width: number) => {
+  const shorten = (text: string, font: PDFFont, size: number, width: number) => {
     let shown = plain(text);
     if (font.widthOfTextAtSize(shown, size) <= width) return shown;
     while (shown.length > 1 && font.widthOfTextAtSize(`${shown}…`, size) > width) {
@@ -77,7 +77,7 @@ export async function groupReport(
     options: { size?: number; font?: PDFFont; color?: ReturnType<typeof rgb>; width?: number } = {}
   ) => {
     const { size = 9.5, font = regular, color = INK, width = inner } = options;
-    page.drawText(fit(content, font, size, width), { x, y, size, font, color });
+    page.drawText(shorten(content, font, size, width), { x, y, size, font, color });
   };
 
   const heading = (content: string) => {
@@ -98,7 +98,7 @@ export async function groupReport(
         const value = typeof cell === "string" ? { text: cell } : cell;
         const font = header || value.bold ? bold : regular;
         const size = header ? 8 : 9.5;
-        const shown = fit(value.text, font, size, widths[i] - 8);
+        const shown = shorten(value.text, font, size, widths[i] - 8);
         const at = columns[i].right ? x + widths[i] - font.widthOfTextAtSize(shown, size) : x;
         page.drawText(shown, {
           x: at,

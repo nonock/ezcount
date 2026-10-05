@@ -16,7 +16,8 @@
   import * as Card from "@/components/ui/card";
   import * as DropdownMenu from "@/components/ui/dropdown-menu";
   import { Separator } from "@/components/ui/separator";
-  import { deleteGroup, exportGroup, exportGroupPdf, leaveGroup, setArchived } from "@/lib/actions";
+  import { exportGroup, exportGroupPdf } from "@/lib/actions/files";
+  import { deleteGroup, leaveGroup, setArchived } from "@/lib/actions/groups";
   import { backendText } from "@/lib/i18n/backend";
   import { t } from "@/lib/i18n/index.svelte";
   import { spendingOf, spentCents } from "@/lib/split";

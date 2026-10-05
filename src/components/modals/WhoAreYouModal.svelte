@@ -8,7 +8,7 @@
   import * as Field from "@/components/ui/field";
   import { Input } from "@/components/ui/input";
   import { Spinner } from "@/components/ui/spinner";
-  import { addSelf, chooseIdentity, skipIdentity } from "@/lib/actions";
+  import { addSelf, chooseIdentity, skipIdentity } from "@/lib/actions/members";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";

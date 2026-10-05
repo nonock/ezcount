@@ -13,7 +13,7 @@
   import * as Field from "@/components/ui/field";
   import { Spinner } from "@/components/ui/spinner";
   import { Textarea } from "@/components/ui/textarea";
-  import { sendInviteToScanned } from "@/lib/actions";
+  import { sendInviteToScanned } from "@/lib/actions/scan";
   import { backendText } from "@/lib/i18n/backend";
   import { t } from "@/lib/i18n/index.svelte";
   import { dialogs } from "@/lib/state/dialogs.svelte";

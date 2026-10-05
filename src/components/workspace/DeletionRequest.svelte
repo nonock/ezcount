@@ -2,7 +2,7 @@
   import TrashIcon from "@lucide/svelte/icons/trash-2";
   import * as Alert from "@/components/ui/alert";
   import { Button } from "@/components/ui/button";
-  import { deleteGroup, refuseDeletion } from "@/lib/actions";
+  import { deleteGroup, refuseDeletion } from "@/lib/actions/groups";
   import { t } from "@/lib/i18n/index.svelte";
   import { openGroup } from "@/lib/state/groups.svelte";
   import type { Group } from "@/types";

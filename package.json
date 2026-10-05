@@ -23,10 +23,11 @@
     "check": "biome check --write . && prettier --write \"src/**/*.svelte\"",
     "fmt:rust": "cargo fmt --manifest-path core/Cargo.toml && cargo fmt --manifest-path src-tauri/Cargo.toml && cargo fmt --manifest-path sync-server/Cargo.toml && cargo fmt --manifest-path web/Cargo.toml",
     "lint:rust": "cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo clippy --manifest-path sync-server/Cargo.toml --all-targets -- -D warnings",
-    "test:rust": "cargo test --manifest-path core/Cargo.toml && cargo test --manifest-path sync-server/Cargo.toml",
+    "test:rust": "cargo test --manifest-path core/Cargo.toml && cargo test --manifest-path sync-server/Cargo.toml && cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "test:web": "playwright test -c playwright.web.config.ts",
-    "verify": "bun run check:tauri && biome check . && prettier --check \"src/**/*.svelte\" && bun run typecheck && bun run lint:rust && bun run lint:wasm && bun run test:rust && bun run test:e2e && bun run build:web && bun run test:web",
+    "verify": "bun run check:tauri && biome check . && prettier --check \"src/**/*.svelte\" && bun run typecheck && bun run test:unit && bun run lint:rust && bun run lint:wasm && bun run test:rust && bun run test:e2e && bun run build:web && bun run test:web",
     "prepare": "lefthook install"
   },
   "dependencies": {
@@ -56,13 +57,16 @@
     "@sveltejs/vite-plugin-svelte": "^7",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "~2.12.0",
+    "@testing-library/svelte": "^5.4.2",
     "@types/node": "^22.20.4",
+    "happy-dom": "^20.14.5",
     "lefthook": "^2.1.14",
     "prettier": "^3.9.9",
     "prettier-plugin-svelte": "^4.1.1",
     "svelte-check": "^4.7.6",
     "tailwindcss": "^4.3.3",
     "typescript": "^6",
-    "vite": "^8"
+    "vite": "^8",
+    "vitest": "^5.0.2"
   }
 }
