@@ -2,7 +2,7 @@
 #
 # pre-commit  fast checks on staged files; formatters fix and re-stage what they touch
 # commit-msg  Conventional Commits subject (feat:, fix(ui):, ...)
-# pre-push    test suites (Rust unit + relay end-to-end, Playwright)
+# pre-push    test suites (Rust unit + relay end-to-end, Vitest, Playwright)
 #
 # Skip once with LEFTHOOK=0 git commit ..., or a single job with LEFTHOOK_EXCLUDE=e2e git push.
 # Personal overrides go in lefthook-local.yml (git-ignored).
@@ -139,6 +139,19 @@ pre-push:
         - "sync-server/**/*.{rs,toml}"
         - "sync-server/Cargo.lock"
       run: cargo test --quiet --manifest-path sync-server/Cargo.toml
+
+    - name: app-tests
+      glob:
+        - "src-tauri/src/**/*.rs"
+        - "src-tauri/Cargo.{toml,lock}"
+      run: cargo test --quiet --manifest-path src-tauri/Cargo.toml
+
+    - name: unit
+      glob:
+        - "src/**/*"
+        - "*.{ts,json}"
+        - "bun.lock"
+      run: bun run test:unit
 
     - name: e2e
       glob:

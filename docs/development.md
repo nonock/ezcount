@@ -8,7 +8,8 @@ bun run tauri dev          # desktop app
 bun run tauri android dev  # Android on a connected phone (see "Android toolchain" below)
 bun run android:apk        # installable arm64 APK in src-tauri/gen/android/app/build/outputs/apk/
 bun run relay              # local sync relay on :8787
-bun run test:rust          # app + relay tests, including end-to-end sync against a real relay
+bun run test:rust          # core, relay and app tests, including end-to-end sync against a real relay
+bun run test:unit          # Vitest: the interface's functions and components (src/**/*.test.ts)
 bun run test:e2e           # Playwright UI tests against a mocked backend
 bun run dev:web            # the web version on :1420, with `bun run relay` running
 bun run build:web          # the web version, into sync-server/web for the relay to serve
@@ -26,7 +27,7 @@ Git hooks ([lefthook](https://lefthook.dev), installed by `bun install`):
 
 - **pre-commit** regenerates `src/bindings.ts` when Rust changes, then in parallel: rustfmt, Biome and Prettier (all fix and re-stage), clippy on the touched crate, and `svelte-check`. Biome lints everything and formats TypeScript, CSS and JSON; Prettier formats the `.svelte` files, whose templates Biome can't format reliably yet. Only jobs whose files are staged run.
 - **commit-msg** requires a [Conventional Commits](https://www.conventionalcommits.org) subject (`feat(ui): …`, `fix: …`).
-- **pre-push** runs the Rust tests and the Playwright suite.
+- **pre-push** runs the Rust tests, the unit tests (Vitest) and the Playwright suite.
 
 Skip them once with `LEFTHOOK=0`. CI (`.github/workflows/ci.yml`) runs the same checks on Linux and builds the relay image. Dependabot proposes weekly updates, waiting 7 days after each release.
 
