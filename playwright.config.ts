@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
+  // Bundles the Tauri mock the tests add to each page.
+  globalSetup: "./e2e/fixtures/build-mock.ts",
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
