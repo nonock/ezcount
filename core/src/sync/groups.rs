@@ -217,6 +217,23 @@ pub(super) fn show_profile(
         .map(|_| ())
 }
 
+/// Takes the user's picture and bank account off the member they are in each of their groups,
+/// for an account that is deleted. Their name stays: the group's accounts are under it.
+pub(super) fn hide_profile(state: &AppState) {
+    let mut store = state.store();
+    let Ok(identities) = store.account_doc().and_then(account::identities) else {
+        return;
+    };
+    for (group_id, participant_id) in identities {
+        // A group that is gone, or a member that was removed, doesn't keep the others from
+        // losing it.
+        let _ = store.update(&group_id, |d| {
+            doc::set_participant_avatar(d, &participant_id, None)?;
+            doc::set_participant_iban(d, &participant_id, None)
+        });
+    }
+}
+
 /// Sets the name, picture and bank account the user shows, and gives them to the member they
 /// are in each of their groups, for the other members to see.
 pub fn update_profile(

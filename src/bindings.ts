@@ -329,6 +329,18 @@ async logOut(force: boolean) : Promise<Result<null, string>> {
 }
 },
 /**
+ * Deletes the account for good, from its relay and from this device. Its groups stay for
+ * their other members, without the user's picture and bank account.
+ */
+async deleteAccount(password: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_account", { password }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Records which participant the user is in a group.
  */
 async setIdentity(groupId: string, participantId: string) : Promise<Result<AccountInfo, string>> {
@@ -544,7 +556,7 @@ async logInWithLink(link: string) : Promise<Result<AccountInfo, string>> {
 
 /** user-defined types **/
 
-export type AccountInfo = { username: string; server_url: string; display_name: string | null; avatar: string | null; iban?: string | null; archived: string[]; identities: { [key in string]: string } }
+export type AccountInfo = { username: string; server_url: string; display_name: string | null; avatar: string | null; iban?: string | null; archived: string[]; identities: { [key in string]: string }; update_required?: boolean }
 /**
  * An expense someone deleted, kept so it can be put back.
  */
@@ -568,7 +580,7 @@ export type ExpenseItem = { name: string; amount_cents: number; participants: st
  */
 export type ExpensePayer = { participant_id: string; amount_cents: number }
 export type ExpenseSplit = { participant_id: string; shares: number; fixed_cents?: number | null }
-export type Group = { id: string; name: string; description?: string; image?: string | null; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string; deleted?: boolean; deletion_votes?: string[]; trash?: DeletedExpense[]; recurring?: RecurringExpense[] }
+export type Group = { id: string; name: string; description?: string; image?: string | null; currency: string; participants: Participant[]; expenses: Expense[]; created_at: string; deleted?: boolean; deletion_votes?: string[]; trash?: DeletedExpense[]; recurring?: RecurringExpense[]; needs_update?: boolean }
 /**
  * A link that logs another device into the account, shown as a QR code.
  */

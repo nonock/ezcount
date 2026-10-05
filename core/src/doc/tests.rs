@@ -57,6 +57,7 @@ mod check;
 mod comments;
 mod edit;
 mod expenses;
+mod format;
 mod group;
 mod items;
 mod participants;

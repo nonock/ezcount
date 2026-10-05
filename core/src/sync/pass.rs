@@ -106,6 +106,10 @@ pub async fn reconcile(state: &AppState) -> Res<bool> {
         if store.session().is_none() {
             return Ok(false);
         }
+        // A list this version of the app may misread adds and removes nothing here.
+        if account::needs_newer_app(store.account_doc()?) {
+            return Ok(false);
+        }
         (account::groups(store.account_doc()?)?, store.group_ids())
     };
     let mut changed = false;
@@ -158,7 +162,9 @@ pub async fn reconcile(state: &AppState) -> Res<bool> {
 /// What a `sync_all` pass found, reported as it goes so the interface can refresh early.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncEvent {
-    /// The account's groups or identities changed on another device.
+    /// The account's groups or identities changed on another device, or the account was
+    /// deleted there and this device logged out, or whether this version of the app is too
+    /// old changed (`AppState::update_required`).
     Account,
     /// One shared group was synced; `changed` if it received changes.
     Group { group_id: String, changed: bool },
@@ -175,7 +181,17 @@ pub async fn sync_all(state: &AppState, report: impl FnMut(SyncEvent)) {
 /// changes, for the notifications a phone shows.
 pub async fn sync_all_noticing(state: &AppState, mut report: impl FnMut(SyncEvent)) -> Vec<Notice> {
     let mut notices = Vec::new();
-    let account_changed = matches!(sync_account(state).await, Ok(true));
+    let was_too_old = state.update_required();
+    let account = sync_account(state).await;
+    // Deleted on another device: the groups below get what this one still had for them,
+    // without the user's profile, then it logs out.
+    let deleted = matches!(&account, Err(e) if e == ACCOUNT_DELETED);
+    if deleted {
+        hide_profile(state);
+    }
+    // Becoming too old for the relay or the account, or no longer being, is news for the
+    // interface too.
+    let account_changed = matches!(account, Ok(true)) || state.update_required() != was_too_old;
     let groups_changed = match reconcile(state).await {
         Ok(changed) => changed,
         Err(e) => {
@@ -209,6 +225,9 @@ pub async fn sync_all_noticing(state: &AppState, mut report: impl FnMut(SyncEven
             continue;
         }
         report(SyncEvent::Group { group_id, changed });
+    }
+    if deleted && leave_deleted_account(state).await {
+        report(SyncEvent::Account);
     }
     notices
 }

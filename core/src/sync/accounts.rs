@@ -333,6 +333,65 @@ pub async fn log_in(state: &AppState, server_url: &str, username: &str, password
     Ok(())
 }
 
+#[derive(Serialize)]
+pub(super) struct DeleteRequest<'a> {
+    pub(super) username: &'a str,
+    pub(super) login_token: &'a str,
+}
+
+pub(super) const NO_DELETION: &str =
+    "This server can't delete accounts yet. Update the ezcount relay.";
+
+/// Deletes the account for good: from its relay, with its profile and its list of groups,
+/// then from this device. The account's other devices log out when they next sync
+/// (`sync_all`). The groups stay for their other members, without the picture and the bank
+/// account the user showed in them.
+pub async fn delete_account(state: &AppState, password: &str) -> Res<()> {
+    let (username, server_url, _, _) = account_credentials(state)?;
+    let keys = password_keys(&username, password).await?;
+    // No sync pass until the device is empty: one would find the account gone halfway.
+    let _guard = state.sync_lock.lock().await;
+    let response = state
+        .http
+        .post(format!("{server_url}/v1/accounts/delete"))
+        .json(&DeleteRequest {
+            username: &username,
+            login_token: &keys.token,
+        })
+        .timeout(REQUEST_TIMEOUT)
+        .send()
+        .await
+        .map_err(request_err)?;
+    match response.status().as_u16() {
+        401 => return Err("Wrong password".to_string()),
+        // A relay that serves the web version answers 405 to a POST it doesn't know.
+        404 | 405 => return Err(NO_DELETION.to_string()),
+        429 => return Err(TOO_MANY_ATTEMPTS.to_string()),
+        _ => check_status(response).await.map(|_| ())?,
+    }
+
+    // The account is gone. Its groups get what this device still had for them, and lose the
+    // profile: as well as it can be done, since there is no account left to try again from.
+    hide_profile(state);
+    let ids = state.store().synced_ids();
+    for id in ids {
+        if let Err(e) = sync_group_inner(state, &id).await {
+            eprintln!("[sync] could not hand group {id} its last changes: {e}");
+        }
+    }
+    state.store().wipe()
+}
+
+/// Logs this device out of an account that was deleted on another one, once its groups have
+/// what it still had for them. Returns whether it did: otherwise the next pass tries again.
+pub(super) async fn leave_deleted_account(state: &AppState) -> bool {
+    let _guard = state.sync_lock.lock().await;
+    let mut store = state.store();
+    // The account's own document has nowhere left to go.
+    let waiting = store.synced_ids().iter().any(|id| store.has_unpushed(id));
+    !waiting && store.wipe().is_ok()
+}
+
 /// Logs out and removes the account's data from this device. Refuses while edits are not
 /// uploaded yet, unless `force` is set.
 pub async fn log_out(state: &AppState, force: bool) -> Res<()> {

@@ -136,6 +136,7 @@ pub async fn invoke(state: &AppState, command: &str, args: &str) -> Res<String> 
         "send_login" => json(send_login(state, &s("link")?, &s("password")?).await?),
         "send_group_invite" => json(send_group_invite(state, &s("groupId")?, &s("link")?).await?),
         "log_out" => json(log_out(state, arg(&args, "force")?).await?),
+        "delete_account" => json(delete_account(state, &s("password")?).await?),
         "set_identity" => json(set_identity(state, &s("groupId")?, &s("participantId")?)?),
         "update_profile" => json(update_profile(
             state,

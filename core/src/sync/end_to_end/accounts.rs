@@ -432,3 +432,134 @@ async fn log_out_keeps_unuploaded_changes_unless_forced() {
 
     let _ = std::fs::remove_dir_all(relay_dir);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_an_account_takes_its_password_and_frees_its_name() {
+    let (url, relay_dir) = start_relay().await;
+    let phone = Device::signed_up(&url, "ann").await;
+    phone.create("Trip", &["Ann", "Bob"]);
+    phone.sync().await;
+
+    let err = delete_account(&phone.state, "not my password")
+        .await
+        .unwrap_err();
+    assert_eq!(err, "Wrong password");
+    assert!(phone.state.store().session().is_some());
+    assert_eq!(phone.group_ids().len(), 1);
+
+    delete_account(&phone.state, PASSWORD).await.unwrap();
+    assert!(phone.state.store().session().is_none());
+    assert!(phone.group_ids().is_empty());
+    assert_eq!(
+        delete_account(&phone.state, PASSWORD).await.unwrap_err(),
+        "You are not logged in"
+    );
+
+    // Nothing is left to log in to, and the name can be taken again, with nothing of before.
+    let other = Device::new();
+    let err = log_in(&other.state, &url, "ann", PASSWORD)
+        .await
+        .unwrap_err();
+    assert_eq!(err, "Wrong username or password");
+    sign_up(&other.state, &url, "ann", PASSWORD).await.unwrap();
+    other.sync().await;
+    assert!(other.group_ids().is_empty());
+
+    let _ = std::fs::remove_dir_all(relay_dir);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deleted_account_leaves_its_groups_to_the_others_without_its_profile() {
+    let (url, relay_dir) = start_relay().await;
+    let ann = Device::signed_up(&url, "ann").await;
+    let trip = ann.create("Trip", &["Ann", "Bob"]);
+    let me = trip.participants[0].id.clone();
+    update_profile(
+        &ann.state,
+        "Ann",
+        Some("data:image/webp;base64,UklGRg=="),
+        Some("DE89370400440532013000"),
+    )
+    .unwrap();
+    ann.sync().await;
+    let bob = Device::signed_up(&url, "bob").await;
+    join_group(&bob.state, &ann.invite(&trip.id)).await.unwrap();
+    let seen = bob.group(&trip.id).participants[0].clone();
+    assert!(seen.avatar.is_some() && seen.iban.is_some());
+
+    // What Ann hadn't uploaded yet goes to the group before her device is emptied.
+    ann.edit(&trip.id, |d| {
+        doc::add_expense(d, "Taxi", 3000, me.clone(), vec![split(&me)], None, None)
+    });
+    delete_account(&ann.state, PASSWORD).await.unwrap();
+
+    bob.sync().await;
+    let group = bob.group(&trip.id);
+    let left = &group.participants[0];
+    assert_eq!(left.name, "Ann");
+    assert_eq!((left.avatar.as_ref(), left.iban.as_ref()), (None, None));
+    assert!(!left.removed);
+    assert_eq!(group.expenses.len(), 1);
+
+    let _ = std::fs::remove_dir_all(relay_dir);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_other_devices_of_a_deleted_account_log_out() {
+    let (url, relay_dir) = start_relay().await;
+    let phone = Device::signed_up(&url, "ann").await;
+    let trip = phone.create("Trip", &["Ann", "Bob"]);
+    let me = trip.participants[0].id.clone();
+    phone.sync().await;
+    let laptop = Device::logged_in(&url, "ann").await;
+    assert_eq!(laptop.group_ids(), vec![trip.id.clone()]);
+    let bob = Device::signed_up(&url, "bob").await;
+    join_group(&bob.state, &phone.invite(&trip.id))
+        .await
+        .unwrap();
+    let (account_id, token) = {
+        let store = laptop.state.store();
+        let id = store.session().unwrap().account_id.clone();
+        let keys = GroupKeys::derive(&store.sync_meta(&id).unwrap().secret).unwrap();
+        (id, keys.auth_token)
+    };
+
+    // The laptop has an expense and a new name for the account that it didn't upload yet.
+    laptop.edit(&trip.id, |d| {
+        doc::add_expense(d, "Taxi", 3000, me.clone(), vec![split(&me)], None, None)
+    });
+    update_profile(&laptop.state, "Ann B.", None, None).unwrap();
+    delete_account(&phone.state, PASSWORD).await.unwrap();
+
+    let mut events = Vec::new();
+    sync_all(&laptop.state, |event| events.push(event)).await;
+    assert!(laptop.state.store().session().is_none());
+    assert!(laptop.group_ids().is_empty());
+    assert_eq!(events.last(), Some(&SyncEvent::Account));
+    // The group got the expense first.
+    bob.sync().await;
+    assert_eq!(bob.group(&trip.id).expenses.len(), 1);
+
+    // The account's document didn't come back with the laptop's changes, and can't.
+    assert_eq!(raw_push(&url, "laptop", &account_id, &token, 10).await, 410);
+    let pulled = reqwest::Client::new()
+        .get(updates_url(&url, &account_id))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pulled.status(), 410);
+    // A group nobody deleted is only unknown, as before.
+    assert_eq!(
+        reqwest::Client::new()
+            .get(updates_url(&url, "no-such-group"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+
+    let _ = std::fs::remove_dir_all(relay_dir);
+}

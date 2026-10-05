@@ -76,7 +76,26 @@ impl AppState {
             iban: profile.iban,
             archived: account::archived(store.account_doc()?),
             identities: account::identities(store.account_doc()?)?,
+            update_required: Self::too_old(&store),
         }))
+    }
+
+    /// Whether this version of the app is too old for its account: the relay no longer
+    /// answers it (`sync::UPDATE_REQUIRED`), or a newer version changed the account in a
+    /// way this one can't follow.
+    pub fn update_required(&self) -> bool {
+        Self::too_old(&self.store())
+    }
+
+    fn too_old(store: &Store) -> bool {
+        let Some(session) = store.session() else {
+            return false;
+        };
+        let refused = store
+            .sync_meta(&session.account_id)
+            .and_then(|meta| meta.last_error.as_deref())
+            == Some(sync::UPDATE_REQUIRED);
+        refused || store.account_doc().is_ok_and(account::needs_newer_app)
     }
 
     pub fn require_account_info(&self) -> Result<AccountInfo, String> {

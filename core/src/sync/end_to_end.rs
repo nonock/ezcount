@@ -89,9 +89,14 @@ impl Drop for Device {
 }
 
 async fn start_relay() -> (String, PathBuf) {
+    start_relay_with(ezcount_sync_server::Settings::default()).await
+}
+
+async fn start_relay_with(settings: ezcount_sync_server::Settings) -> (String, PathBuf) {
     let dir = std::env::temp_dir().join(format!("ezcount-relay-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
-    let relay = ezcount_sync_server::Relay::open(&dir.join("relay.sqlite3")).unwrap();
+    let relay =
+        ezcount_sync_server::Relay::open_with(&dir.join("relay.sqlite3"), settings).unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(ezcount_sync_server::serve(listener, relay));
@@ -154,7 +159,17 @@ impl ReplaceableRelay {
     }
 
     async fn spawn(dir: PathBuf, addr: std::net::SocketAddr, db: &str) -> Self {
-        let relay = ezcount_sync_server::Relay::open(&dir.join(format!("{db}.sqlite3"))).unwrap();
+        Self::spawn_with(dir, addr, db, ezcount_sync_server::Settings::default()).await
+    }
+
+    async fn spawn_with(
+        dir: PathBuf,
+        addr: std::net::SocketAddr,
+        db: &str,
+        settings: ezcount_sync_server::Settings,
+    ) -> Self {
+        let path = dir.join(format!("{db}.sqlite3"));
+        let relay = ezcount_sync_server::Relay::open_with(&path, settings).unwrap();
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let task = tokio::spawn(ezcount_sync_server::serve(listener, relay));
@@ -170,6 +185,13 @@ impl ReplaceableRelay {
         self.task.abort();
         let _ = self.task.await;
         Self::spawn(self.dir, self.addr, "second").await
+    }
+
+    /// The same relay, with its data, run another way: as after a change to its settings.
+    async fn restart_with(self, settings: ezcount_sync_server::Settings) -> Self {
+        self.task.abort();
+        let _ = self.task.await;
+        Self::spawn_with(self.dir, self.addr, "first", settings).await
     }
 }
 
@@ -269,3 +291,4 @@ mod groups;
 mod links;
 mod relay;
 mod services;
+mod versions;

@@ -6,8 +6,21 @@ use super::*;
 /// reqwest has no client-wide timeout).
 pub(super) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The app's version (`package.json`'s, through `build.rs`). Every request to a relay says
+/// it, so that a relay which no longer answers a version this old can say so (426,
+/// `UPDATE_REQUIRED`) rather than fail in ways nobody can read.
+pub const APP_VERSION: &str = env!("EZCOUNT_APP_VERSION");
+
+/// The header the version goes in.
+const VERSION_HEADER: &str = "ezcount-version";
+
 pub fn http_client() -> Res<reqwest::Client> {
-    let builder = reqwest::Client::builder();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        VERSION_HEADER,
+        reqwest::header::HeaderValue::from_static(APP_VERSION),
+    );
+    let builder = reqwest::Client::builder().default_headers(headers);
     // The relay never redirects. Following one could resend tokens elsewhere, or over plain
     // HTTP. In the browser, fetch follows redirects itself, but drops the Authorization header
     // across origins and refuses plain HTTP from an HTTPS page.
@@ -79,7 +92,9 @@ pub(super) async fn check_status(response: reqwest::Response) -> Res<reqwest::Re
         }
         401 | 403 => Err("The sync server rejected this group's key".to_string()),
         404 => Err(NOT_ON_SERVER.to_string()),
+        410 => Err(ACCOUNT_DELETED.to_string()),
         413 => Err("This group has reached the sync server's size limit".to_string()),
+        426 => Err(UPDATE_REQUIRED.to_string()),
         429 => Err(
             "The sync server is getting too many requests from your network. Try again in a while."
                 .to_string(),
@@ -93,6 +108,15 @@ pub(super) async fn check_status(response: reqwest::Response) -> Res<reqwest::Re
 }
 
 pub(super) const NOT_ON_SERVER: &str = "The sync server does not know this group";
+
+/// A relay's answer to an app older than it still serves (its `min_app_version`). As the
+/// account's last sync error, it is what `AppState::update_required` looks for.
+pub const UPDATE_REQUIRED: &str =
+    "This version of ezcount is too old for this server. Update the app.";
+
+/// The relay's answer about the document of an account that was deleted (`delete_account`,
+/// on this device or another): it is gone, and can't be uploaded again.
+pub(super) const ACCOUNT_DELETED: &str = "This account was deleted";
 
 /// A relay from before accounts answers 404 on the account endpoints.
 pub(super) const NO_ACCOUNTS: &str =

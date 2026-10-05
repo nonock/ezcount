@@ -54,6 +54,7 @@ pub fn create_specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         commands::account::sign_up,
         commands::account::log_in,
         commands::account::log_out,
+        commands::account::delete_account,
         commands::account::set_identity,
         commands::account::add_self,
         commands::native::native_features,

@@ -13,6 +13,7 @@
 //! - `trash` (map): expense id -> the expense as above, with `deleted_at` and `deleted_by`
 //! - `recurring` (map): id -> map { `title`, `category`, `amount_cents`, `paid_by`, `payers`,
 //!   `splits`, `every`, `start`, `made`, `added_by` }
+//! - `format` (map): format number -> true, for the formats the group needs (see "Formats")
 //!
 //! `amount_cents` is always in the group's currency. An expense paid in another one also has
 //! `original` (a plain value: `currency`, `amount_cents`, `rate`). A split is a number of
@@ -53,6 +54,19 @@
 //! Pictures (`image`, `avatar`) are `data:` URLs of small images, which the app shrinks before
 //! saving them.
 //!
+//! # Formats
+//!
+//! Everything above was added without breaking the app versions from before: they skip what
+//! they don't know, and what they read still means the same. Do the same whenever it can be
+//! done. A change they could not live with (they would misread the group, or damage it by
+//! editing it) raises the group's format instead: the version that makes it bumps `FORMAT`
+//! and marks the groups it changes that way (`require_format`). A version that only knows an
+//! older format then shows such a group as needing an update (`Group::needs_update`) and
+//! changes nothing in it (`Store::update` refuses), while still syncing it for the others.
+//! Whatever the format, `meta` keeps its `id`, `name`, `currency`, `created_at` and
+//! `deleted` as they are: that much is always read. The account's document works the same
+//! (`account::FORMAT`).
+//!
 //! Every field is its own last-writer-wins register, so concurrent edits to different fields
 //! of one expense both survive a merge. `splits` is stored as a single plain value so an
 //! allocation is always replaced as a whole and never merged into a mix of two edits.
@@ -76,6 +90,7 @@ mod check;
 mod comments;
 mod edit;
 mod expenses;
+mod format;
 mod group;
 mod items;
 mod participants;
@@ -88,6 +103,7 @@ pub use self::check::*;
 pub use self::comments::*;
 pub use self::edit::*;
 pub use self::expenses::*;
+pub use self::format::*;
 pub use self::group::*;
 pub use self::items::*;
 pub use self::participants::*;

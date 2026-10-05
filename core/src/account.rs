@@ -5,6 +5,7 @@
 //! - `archived` (map): group id -> true, for the groups this person put away
 //! - `profile` (map): `name`, `avatar` (a `data:` URL) and `iban`, what this person shows in
 //!   their groups
+//! - `format` (map): format number -> true, as for a group (see "Formats" in `doc`)
 //!
 //! The document is synced through the relay like a group, end-to-end encrypted with the
 //! account key, so every device logged into the account sees the same groups and knows who
@@ -24,6 +25,19 @@ const GROUPS: &str = "groups";
 const IDENTITIES: &str = "identities";
 const PROFILE: &str = "profile";
 const ARCHIVED: &str = "archived";
+
+/// The format of an account this version of the app reads and writes.
+pub const FORMAT: u32 = 1;
+
+/// What changing an account in a newer format answers.
+pub const NEWER_FORMAT: &str =
+    "Your account was changed by a newer version of ezcount. Update the app.";
+
+/// Whether the account is in a format newer than this version of the app knows. It is then
+/// read as well as it can be, and neither changed nor followed (`sync::reconcile`).
+pub fn needs_newer_app(doc: &LoroDoc) -> bool {
+    doc::format_needed(doc) > FORMAT
+}
 
 /// Longest name in a profile, in characters.
 pub const MAX_NAME_CHARS: usize = 50;

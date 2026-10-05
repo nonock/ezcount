@@ -307,6 +307,26 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
         .and_then(|json| serde_json::from_value(json).map_err(|e| e.to_string()))
         .map_err(|e| format!("Group document has no valid metadata: {e}"))?;
 
+    if needs_newer_app(doc) {
+        // Only what every format keeps is read. The rest may no longer mean what this
+        // version thinks: the app asks to be updated rather than show it.
+        return Ok(Group {
+            id: meta.id,
+            name: meta.name,
+            description: String::new(),
+            image: None,
+            currency: meta.currency,
+            participants: Vec::new(),
+            expenses: Vec::new(),
+            created_at: meta.created_at,
+            deleted: meta.deleted,
+            deletion_votes: Vec::new(),
+            trash: Vec::new(),
+            recurring: Vec::new(),
+            needs_update: true,
+        });
+    }
+
     let mut participants: Vec<(i64, Participant)> =
         entries::<DocParticipant>(&doc.get_map(PARTICIPANTS), PARTICIPANTS)
             .into_iter()
@@ -404,5 +424,6 @@ pub fn read_group(doc: &LoroDoc) -> Res<Group> {
         deletion_votes,
         trash,
         recurring,
+        needs_update: false,
     })
 }

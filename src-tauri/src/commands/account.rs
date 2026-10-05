@@ -96,6 +96,17 @@ pub(crate) async fn log_out(state: State<'_, AppState>, force: bool) -> Result<(
     api::log_out(&state, force).await
 }
 
+/// Deletes the account for good, from its relay and from this device. Its groups stay for
+/// their other members, without the user's picture and bank account.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn delete_account(
+    state: State<'_, AppState>,
+    password: String,
+) -> Result<(), String> {
+    api::delete_account(&state, &password).await
+}
+
 /// Records which participant the user is in a group.
 #[tauri::command]
 #[specta::specta]

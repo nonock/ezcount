@@ -97,3 +97,29 @@ fn corrupt_snapshot_is_reported_not_dropped() {
         .unwrap();
     assert_eq!(rows, 1);
 }
+
+#[test]
+fn a_document_in_a_newer_format_is_kept_and_not_changed() {
+    let dir = TempDir::new();
+    let (mut store, _) = dir.open();
+    let group = store
+        .insert(
+            doc::new_group_doc("Trip", "EUR", &["Alice".into()]).unwrap(),
+            None,
+        )
+        .unwrap();
+    // The mark itself is written by a version that knows the format.
+    let doc = store.doc(&group.id).unwrap();
+    doc::require_format(doc, doc::FORMAT + 1).unwrap();
+    doc.commit();
+
+    let refused = store.update(&group.id, |d| {
+        doc::add_participant(d, "Bob", doc::AddedBy::Member(None)).map(|_| ())
+    });
+    assert_eq!(refused.unwrap_err(), doc::NEWER_FORMAT);
+    let listed = store.groups();
+    assert!(listed.len() == 1 && listed[0].needs_update);
+    assert_eq!(listed[0].name, "Trip");
+    // Leaving it is still possible.
+    assert!(store.delete(&group.id).unwrap());
+}

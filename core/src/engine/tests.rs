@@ -50,6 +50,7 @@ fn setup_test_group() -> Group {
         deletion_votes: vec![],
         trash: Vec::new(),
         recurring: Vec::new(),
+        needs_update: false,
     }
 }
 

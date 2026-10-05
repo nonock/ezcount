@@ -399,6 +399,12 @@ pub async fn log_out(state: &AppState, force: bool) -> Res<()> {
     sync::log_out(state, force).await
 }
 
+/// Deletes the account for good, from its relay and from this device. Its groups stay for
+/// their other members, without the user's picture and bank account.
+pub async fn delete_account(state: &AppState, password: &str) -> Res<()> {
+    sync::delete_account(state, password).await
+}
+
 /// Records which participant the user is in a group.
 pub fn set_identity(state: &AppState, group_id: &str, participant_id: &str) -> Res<AccountInfo> {
     sync::set_identity(state, group_id, participant_id)?;

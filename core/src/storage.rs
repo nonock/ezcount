@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use crate::account;
 use crate::crypto::Secret;
 use crate::doc;
 use crate::models::Group;
@@ -247,6 +248,14 @@ impl Store {
             .docs
             .get(id)
             .ok_or_else(|| "Document not found".to_string())?;
+        // A document in a format this version doesn't know is synced, never changed.
+        let (known, refusal) = match self.is_account(id) {
+            true => (account::FORMAT, account::NEWER_FORMAT),
+            false => (doc::FORMAT, doc::NEWER_FORMAT),
+        };
+        if doc::format_needed(doc) > known {
+            return Err(refusal.to_string());
+        }
         change(doc)?;
         doc.commit();
         save_snapshot(&self.conn, id, doc)

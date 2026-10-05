@@ -77,3 +77,16 @@ fn concurrent_join_and_identity_both_survive() {
     assert_eq!(groups(&a).unwrap().len(), 2);
     assert_eq!(identities(&a).unwrap().get("g1").unwrap(), "p-bob");
 }
+
+#[test]
+fn an_account_says_when_it_needs_a_newer_app() {
+    let doc = LoroDoc::new();
+    add_group(&doc, "g1", "http://relay", &Secret::new("s".into())).unwrap();
+    assert!(!needs_newer_app(&doc));
+    doc::require_format(&doc, FORMAT).unwrap();
+    assert!(!needs_newer_app(&doc));
+    doc::require_format(&doc, FORMAT + 1).unwrap();
+    assert!(needs_newer_app(&doc));
+    // It is still read as well as it can be.
+    assert_eq!(groups(&doc).unwrap().len(), 1);
+}

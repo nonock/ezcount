@@ -232,6 +232,10 @@ pub struct Group {
     pub trash: Vec<DeletedExpense>,
     #[serde(default)]
     pub recurring: Vec<RecurringExpense>,
+    // A newer version of the app wrote the group in a format this one doesn't know: only its
+    // name is shown, and nothing in it can be changed, until the app is updated.
+    #[serde(default)]
+    pub needs_update: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
@@ -327,4 +331,8 @@ pub struct AccountInfo {
     pub archived: Vec<String>,
     // Group id -> id of the participant the user is in that group.
     pub identities: std::collections::HashMap<String, String>,
+    // This version of the app is too old: the relay no longer answers it, or a newer version
+    // changed the account. Nothing syncs, or the account can't be changed, until an update.
+    #[serde(default)]
+    pub update_required: bool,
 }
