@@ -8,6 +8,9 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 
 - Pull a group down from its top to bring it up to date with the other devices.
 - A button to go back to the top once you have scrolled far down a page.
+- Delete your account, from the Account window: it takes your password and removes the account, your profile and your list of groups from the server and from all your devices, for good. Your groups stay for their other members, without your picture and your IBAN.
+- The app says when it is too old: for its server, or for a group or an account that a newer version changed in a way it can't read. It then asks to be updated and leaves that data alone, instead of failing to sync or risking to damage it.
+- A privacy policy, on the server (`/privacy`), linked from the login screen and the Account window, and a page on how to delete an account (`/delete-account`).
 
 ### Changed
 

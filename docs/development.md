@@ -7,6 +7,7 @@ bun install
 bun run tauri dev          # desktop app
 bun run tauri android dev  # Android on a connected phone (see "Android toolchain" below)
 bun run android:apk        # installable arm64 APK in src-tauri/gen/android/app/build/outputs/apk/
+bun run android:aab        # the same as an .aab, for Google Play, in …/outputs/bundle/ (see "Google Play")
 bun run relay              # local sync relay on :8787
 bun run test:rust          # core, relay and app tests, including end-to-end sync against a real relay
 bun run test:unit          # Vitest: the interface's functions and components (src/**/*.test.ts)
@@ -42,6 +43,7 @@ Text lives in `src/lib/i18n/en.ts` and `fr.ts`, read with `t("key")`; amounts an
 Every push to `main` that touches the app runs `.github/workflows/packages.yml` (run it by hand from the Actions tab otherwise), which builds:
 
 - **`ezcount-android`**: an optimized APK for arm64 phones. It is somewhat larger than a local `bun run android:apk` (about 15 MB), because CI skips link-time optimization to build faster,
+- **`play-bundle`**: the same Android app as an `.aab`, the form Google Play takes (see "Google Play" below),
 - **`ezcount-linux`**: a `.deb` and an `.AppImage`.
 
 Download them from the run's **Artifacts** section on GitHub. To install the APK, enable USB debugging on the phone and run `adb install -r <file>.apk`, or copy the file to the phone and open it. CI signs every APK with the private release key (below), so a new one installs over the previous one and keeps the app's data.
@@ -69,6 +71,24 @@ git push --follow-tags
 The tag starts `.github/workflows/release.yml`: it checks the tag matches every manifest, builds the APK and Linux packages with full optimization, deploys the relay to Fly.io, and once both succeeded creates the GitHub release with the packages attached and that version's changelog section as its notes. If a step fails, nothing is published; fix it, delete the tag (`git tag -d v0.2.0 && git push origin :v0.2.0`) and release again.
 
 The relay must keep working with the previous app versions, since phones don't all update at once: only add to its API, never change or remove what's there.
+
+## When a change can't stay compatible
+
+Old and new versions of the app live together: phones update when they want, and they all edit the same groups through the same relay. So far every change was made by adding (a new endpoint, a new field that older versions skip), and that stays the first thing to try. For the day it can't be done, the app carries two safeguards. Both only work from the first version that has them (the one after 0.4.0): earlier ones don't look.
+
+- **A group or an account in a new format.** Each document says which format it needs (`doc::FORMAT` for a group, `account::FORMAT` for an account; "Formats" in `core/src/doc.rs`). A version that changes how something is stored, in a way older ones would misread, raises the number and marks the documents it writes that way (`doc::require_format`), when it first does, not all of them at once. Older versions then show such a group with "Update ezcount to open this group", change nothing in it, and keep syncing it for the others. If you can, release a version that reads the new format before the one that writes it: by then most devices already know it.
+- **A relay that asks for a newer app.** The app says its version with every request (the `ezcount-version` header, taken from `package.json`). A relay with `EZCOUNT_MIN_APP_VERSION` set answers older apps with "update required" (HTTP 426) instead of data: they show "Update ezcount", and sync nothing until updated. What they hold stays on the device. Set it in `sync-server/fly.toml` and deploy, but only once the newer version is out everywhere people get the app (the store's review included): until they update, they are cut off. The web version is always the relay's own, so it is never too old; a tab left open is offered to reload.
+
+## Google Play
+
+Google Play takes an app bundle (`.aab`), not an APK. Every Android build in CI makes one next to the APK, signed with the release key: download the **`play-bundle`** artifact of the release's run (Actions → the `Release` run of the tag) and upload it in the Play Console. Locally, `bun run android:aab` builds it, with the test key unless `EZCOUNT_RELEASE_KEYSTORE` and `EZCOUNT_RELEASE_KEYSTORE_PASSWORD` are set. Like the APK it holds the arm64 library only, so phones with a 32-bit processor aren't offered the app.
+
+- **Version:** Play refuses a bundle whose version code it has already seen, and Tauri derives the code from the version (0.4.0 gives 4000). So each upload is a release (`bun run release`).
+- **Signing key:** with Play App Signing, Google signs what people install. When the Console asks, at the first upload, choose to **use your own key** and give it the release key (the Console hands out the tool that exports it from the keystore): the app from Play and the APKs from the releases page then carry the same signature, so one updates over the other and invite links keep opening the app. If you let Google make a key instead, people who installed an APK must uninstall it to move to Play, and Google's fingerprint (Play Console → App integrity) has to be added to `EZCOUNT_ANDROID_CERT_SHA256` in `sync-server/fly.toml`, after a comma.
+- **Privacy policy and account deletion:** the Console asks for two addresses, which the relay serves: `https://<relay>/privacy` and `https://<relay>/delete-account`. Set `EZCOUNT_CONTACT` on the relay first (see [relay.md](relay.md)): the policy must say who to write to. The app links to the policy from the login screen and the Account window, and deletes an account from that window.
+- **Data safety form:** what the relay can read is a username, the dates and sizes of what it stores, and the messages sent with "Suggest a feature" (with the address people add to get an answer). Groups and profiles are encrypted on the devices with keys the relay never gets, which the form doesn't count as collected, and passwords never leave the device. Nothing is shared with third parties, there are no ads and no analytics, data is encrypted in transit, and people can ask for deletion (the address above). The official relay's volume snapshots keep deleted data for 14 days (`snapshot_retention` in `fly.toml`).
+- **16 KB pages:** Play wants native libraries laid out for devices with 16 KB memory pages. The NDK does that by default from version 28 (CI uses the runner's latest); with an older one in `NDK_HOME`, the Console flags the bundle.
+- **App access:** the app is behind a login, so the reviewers need an account. Anyone can create one in the app; giving them a test account's username and password in the Console avoids questions.
 
 ## Upgrading Tauri
 

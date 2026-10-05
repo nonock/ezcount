@@ -18,10 +18,14 @@ cargo run --release --manifest-path sync-server/Cargo.toml
 | `EZCOUNT_WEB_DIR`             | (none)                 | The web version to serve at `/` (`bun run build:web` writes `sync-server/web`) |
 | `EZCOUNT_ADMIN_TOKEN`         | none                   | Lets you read what people sent from "Suggest a feature": open `https://<relay>/feedback` and enter it (or `curl -H "Authorization: Bearer <token>" https://<relay>/v1/feedback`) |
 | `EZCOUNT_RATES_URL`           | Frankfurter            | Where the relay gets the exchange rates the app suggests; `off` for none     |
+| `EZCOUNT_MIN_APP_VERSION`     | (none)                 | The oldest version of the app the relay answers (`0.5.0`). Older ones, and those from before the app said its version (0.4.0 and earlier), are told to update and sync nothing until they do |
+| `EZCOUNT_CONTACT`             | (none)                 | How to reach you (an e-mail address or a page's address), shown on the `/privacy` and `/delete-account` pages |
 
 To keep one client from filling the disk or locking others out, the relay also limits each client network (an IPv4 address, or an IPv6 /64) per hour: 50 MB of uploads, 30 new groups and 10 sign-ups. Failed logins (passwords or recovery keys) are limited per username: 5 per 15 minutes from one network, 50 from all networks together. Past a limit the relay answers 413 (group too big), 507 (relay full) or 429, and the app explains it. The counters are in memory and reset when the relay restarts.
 
 Besides the sync API, the relay serves `/join`, the page invite links open, with both Android variables set, `/.well-known/assetlinks.json` for Android App Links, and with `EZCOUNT_WEB_DIR`, the web version at `/`.
+
+It also has two pages about itself, in English and French, which the app links to and app stores ask for: `/privacy` (what the app and the relay keep, who can read it, for how long) and `/delete-account` (how to delete an account, and what goes with it). Both name `EZCOUNT_CONTACT` as who to write to. They describe what the software does: if you keep backups or logs of your own, say so where your users will read it. Deleting an account removes its row and its encrypted document from the database and overwrites them (`secure_delete`); backups made before keep them until they expire.
 
 The relay itself speaks plain HTTP, so put it behind a TLS reverse proxy (Fly.io, Caddy): the app requires `https://` except for a relay on the same device or a private network.
 
