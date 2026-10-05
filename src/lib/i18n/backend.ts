@@ -338,7 +338,7 @@ const FR: Pattern[] = [
   // Feedback
   [/^Write a message first$/, "Écrivez d'abord un message"],
   [
-    /^This message is too long ((d+) characters at most)$/,
+    /^This message is too long \((\d+) characters at most\)$/,
     (n) => `Ce message est trop long (${n} caractères au plus)`,
   ],
   [

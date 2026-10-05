@@ -19,6 +19,7 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 - "Total spent" on a group and "Your expenses" no longer count the payments between members: they now match the Stats tab.
 - On Android, the status bar and the navigation bar take the app's color, in the light and the dark theme.
 - The relay answers a device catching up on a large group in pages of a few megabytes, instead of holding the whole group in memory.
+- In French, "Suggest a feature" now says in French that a message is too long.
 
 ## 0.4.0 - 2026-10-04
 
