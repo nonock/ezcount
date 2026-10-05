@@ -41,6 +41,11 @@
 //!   `recovery_token`, and replaces the password (`new_login_token`, `new_wrapped_key`), the
 //!   recovery key (`new_recovery_token`, `new_recovery_wrapped_key`), or both. A recovery key
 //!   works once: proving with it requires replacing it. 204, or errors as for login
+//! - `POST /v1/accounts/delete`: `{ username, login_token }` removes the account and its
+//!   document for good. 204, or errors as for login. The document's id is remembered: asking
+//!   for it or uploading to it answers 410 from then on, which tells the account's other
+//!   devices it is gone. Groups are other documents, which the relay can't tie to an account:
+//!   they stay, for their other members
 //!
 //! A logged-in device can log another one in without the password being typed there (see
 //! `links`): it leaves the account's key here, encrypted with a code only the two devices see,
@@ -62,9 +67,17 @@
 //! configured, `GET /.well-known/assetlinks.json` lets that Android app open invite links
 //! directly (Android App Links).
 //!
+//! Two pages say what the relay keeps about people, and how they remove it: `GET /privacy`
+//! and `GET /delete-account` (app stores ask for both addresses), with
+//! [`Settings::contact`] as who to write to.
+//!
 //! With [`Settings::web_dir`] set, the relay also serves the web version of the app (`GET /`, its
 //! files, under a strict Content-Security-Policy), on the same origin as the API so it needs
 //! no CORS, and the join page offers to open invites there.
+//!
+//! The app says its version with every request to `/v1` (`ezcount-version: 0.5.0`). With
+//! [`Settings::min_app_version`], an older app, and one from before versions were sent, gets
+//! 426 instead of an answer, and tells its user to update it (see `versions`).
 //!
 //! [`Limits`] keep one client from filling the disk or locking other people out: per-document
 //! and total sizes (413 and 507 past them), and per-client rates of uploads, new documents,
@@ -77,11 +90,13 @@ mod limits;
 mod links;
 mod rates;
 mod updates;
+mod versions;
 mod web;
 
 pub(crate) use error::ApiError;
 pub use limits::Limits;
 pub use rates::DEFAULT_RATES_URL;
+pub use versions::AppVersion;
 
 use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderName, StatusCode};
@@ -113,6 +128,12 @@ pub struct Settings {
     /// Lets whoever has it read what people sent from the app's feedback form
     /// (`GET /v1/feedback`). Without it the messages are kept, and not served.
     pub admin_token: Option<String>,
+    /// How to reach whoever runs the relay, shown on its privacy pages: an e-mail address or
+    /// a page's address.
+    pub contact: Option<String>,
+    /// The oldest version of the app this relay answers: older ones are told to update.
+    /// Without it, every app is answered.
+    pub min_app_version: Option<AppVersion>,
 }
 
 pub struct Relay {
@@ -130,6 +151,8 @@ pub struct Relay {
     rates: rates::Rates,
     links: links::Links,
     admin_token: Option<String>,
+    contact: Option<String>,
+    min_app_version: Option<AppVersion>,
 }
 
 impl Relay {
@@ -142,6 +165,8 @@ impl Relay {
         db.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = FULL;
+             -- What is deleted (an account) is overwritten, not only unlinked.
+             PRAGMA secure_delete = ON;
              CREATE TABLE IF NOT EXISTS groups (
                  id         TEXT PRIMARY KEY,
                  key_hash   BLOB NOT NULL,
@@ -167,6 +192,10 @@ impl Relay {
                  contact    TEXT,
                  app        TEXT,
                  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE IF NOT EXISTS deleted_documents (
+                 id         TEXT PRIMARY KEY,
+                 deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
              );
              CREATE TABLE IF NOT EXISTS relay_meta (
                  key   TEXT PRIMARY KEY,
@@ -225,6 +254,11 @@ impl Relay {
             rates: rates::Rates::new(settings.rates_url),
             links: links::Links::default(),
             admin_token: settings.admin_token.filter(|token| !token.is_empty()),
+            contact: settings
+                .contact
+                .map(|contact| contact.trim().to_string())
+                .filter(|contact| !contact.is_empty()),
+            min_app_version: settings.min_app_version,
         }))
     }
 }
@@ -256,6 +290,8 @@ pub fn router(relay: Arc<Relay>) -> Router {
     let mut router = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/join", get(move || web::join_page(has_web)))
+        .route("/privacy", get(web::privacy_page))
+        .route("/delete-account", get(web::delete_account_page))
         .route("/.well-known/assetlinks.json", asset_links)
         .route(
             "/v1/groups/{id}/updates",
@@ -268,6 +304,7 @@ pub fn router(relay: Arc<Relay>) -> Router {
             "/v1/accounts/credentials",
             post(accounts::update_credentials),
         )
+        .route("/v1/accounts/delete", post(accounts::delete))
         .route("/v1/accounts/links", post(links::create))
         .route("/v1/accounts/links/claim", post(links::claim))
         .route("/v1/handoffs", post(links::hand_over))
@@ -280,6 +317,10 @@ pub fn router(relay: Arc<Relay>) -> Router {
     }
     router
         .layer(DefaultBodyLimit::max(updates::MAX_UPDATE_BYTES))
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&relay),
+            versions::require,
+        ))
         .with_state(relay)
 }
 

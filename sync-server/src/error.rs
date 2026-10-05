@@ -21,6 +21,10 @@ pub(crate) enum ApiError {
     NoRate,
     /// A login link that was used already, expired, or never existed.
     LinkGone,
+    /// A document that went with its account (`accounts::delete`).
+    DocumentGone,
+    /// An app older than the relay still answers (`versions`).
+    UpdateRequired,
     /// Something the relay depends on didn't answer.
     Unavailable(String),
     Internal(String),
@@ -65,6 +69,14 @@ impl IntoResponse for ApiError {
             }
             ApiError::NoRate => (StatusCode::NOT_FOUND, "no rate").into_response(),
             ApiError::LinkGone => (StatusCode::GONE, "link used or expired").into_response(),
+            ApiError::DocumentGone => {
+                (StatusCode::GONE, "this account was deleted").into_response()
+            }
+            ApiError::UpdateRequired => (
+                StatusCode::UPGRADE_REQUIRED,
+                "this version of the app is too old for this relay",
+            )
+                .into_response(),
             ApiError::Unavailable(e) => {
                 eprintln!("[relay] {e}");
                 (StatusCode::SERVICE_UNAVAILABLE, "try later").into_response()

@@ -28,6 +28,13 @@ EZCOUNT_MAX_STORAGE_MB = "800"
 # signed with the public test key must not receive invite links, which carry group keys.
 EZCOUNT_ANDROID_PACKAGE = "com.ezvany.ezcount"
 EZCOUNT_ANDROID_CERT_SHA256 = "64:BA:09:A3:99:66:5A:79:4C:F6:FC:18:EC:49:82:E0:87:30:9C:2A:05:35:F2:09:D7:F4:35:52:9F:72:48:21"
+# Who to write to about the relay (an e-mail address or a page's address), shown on its
+# /privacy and /delete-account pages. Google Play asks for one on the privacy policy.
+EZCOUNT_CONTACT = "yannick@ezvan.fr"
+# The oldest version of the app this relay answers: older ones are told to update, and sync
+# nothing until they do. Only once the newer version is out wherever people get the app
+# (docs/development.md, "When a change can't stay compatible").
+# EZCOUNT_MIN_APP_VERSION = "0.5.0"
 
 [[mounts]]
 source = "relay_data"

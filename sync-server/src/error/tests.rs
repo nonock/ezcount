@@ -33,6 +33,11 @@ fn each_refusal_has_its_status() {
     );
     assert_eq!(status(ApiError::NoRate), StatusCode::NOT_FOUND);
     assert_eq!(status(ApiError::LinkGone), StatusCode::GONE);
+    assert_eq!(status(ApiError::DocumentGone), StatusCode::GONE);
+    assert_eq!(
+        status(ApiError::UpdateRequired),
+        StatusCode::UPGRADE_REQUIRED
+    );
     assert_eq!(
         status(ApiError::Unavailable("down".to_string())),
         StatusCode::SERVICE_UNAVAILABLE

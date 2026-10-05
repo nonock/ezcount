@@ -58,6 +58,17 @@ pub(crate) fn stored_hash(db: &Connection, group_id: &str) -> rusqlite::Result<O
     .optional()
 }
 
+/// Whether this document went with its account (`accounts::delete`). Its id is kept, so that
+/// a device still logged in can't upload the document again: without it, the relay would
+/// take that upload for a new document.
+pub(crate) fn was_deleted(db: &Connection, id: &str) -> rusqlite::Result<bool> {
+    db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM deleted_documents WHERE id = ?1)",
+        [id],
+        |r| r.get(0),
+    )
+}
+
 #[derive(Serialize)]
 pub(crate) struct PushResponse {
     seq: i64,
@@ -100,6 +111,9 @@ pub(crate) async fn push(
         let stored = match existing {
             // The first push registers the document.
             None => {
+                if was_deleted(&tx, &group_id)? {
+                    return Err(ApiError::DocumentGone);
+                }
                 if !relay
                     .counters
                     .try_add(&creations, 1, limits.new_documents_per_hour, HOUR)
@@ -173,6 +187,7 @@ pub(crate) async fn pull(
 
     with_db(&relay, move |relay, db| {
         match stored_hash(db, &group_id)? {
+            None if was_deleted(db, &group_id)? => return Err(ApiError::DocumentGone),
             None => return Err(ApiError::NotFound),
             Some(stored) if stored != hash => return Err(ApiError::Unauthorized),
             Some(_) => {}

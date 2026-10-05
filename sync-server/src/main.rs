@@ -15,6 +15,11 @@
 //! - `EZCOUNT_RATES_URL`: the service asked for exchange rates, Frankfurter by default
 //!   (`<url>/USD/EUR?date=…` answering `{"date": …, "rate": …}`). Set it to `off` for a relay
 //!   that makes no requests of its own: the app then suggests no rates
+//! - `EZCOUNT_CONTACT`: how to reach whoever runs the relay (an e-mail address or a page's
+//!   address), shown on its `/privacy` and `/delete-account` pages
+//! - `EZCOUNT_MIN_APP_VERSION`: the oldest version of the app the relay answers (`0.5.0`).
+//!   Older ones, and those from before the app said its version, are told to update. Every
+//!   app is answered when unset
 
 use ezcount_sync_server::{AndroidApp, Limits, Settings, DEFAULT_RATES_URL};
 use std::path::PathBuf;
@@ -68,6 +73,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(_) => Some(DEFAULT_RATES_URL.to_string()),
         },
         admin_token: std::env::var("EZCOUNT_ADMIN_TOKEN").ok(),
+        contact: std::env::var("EZCOUNT_CONTACT").ok(),
+        min_app_version: match std::env::var("EZCOUNT_MIN_APP_VERSION") {
+            Ok(version) if version.trim().is_empty() => None,
+            Ok(version) => Some(
+                version
+                    .parse()
+                    .map_err(|e| format!("EZCOUNT_MIN_APP_VERSION: {e}"))?,
+            ),
+            Err(_) => None,
+        },
     };
 
     println!(
@@ -95,6 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .is_some_and(|t| !t.is_empty())
     {
         println!("feedback can be read at /feedback with the admin token");
+    }
+    if let Some(oldest) = settings.min_app_version {
+        println!("apps older than {oldest} are told to update");
     }
     if let Some(app) = &settings.android_app {
         println!("invite links open the Android app {}", app.package);

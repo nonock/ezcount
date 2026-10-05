@@ -18,6 +18,10 @@ services:
       EZCOUNT_CLIENT_IP_HEADER: X-Forwarded-For
       # Stored data in all; keep it under the disk space you give the relay.
       EZCOUNT_MAX_STORAGE_MB: ${EZCOUNT_MAX_STORAGE_MB:-1024}
+      # Who to write to about the relay, on its /privacy and /delete-account pages.
+      EZCOUNT_CONTACT: ${EZCOUNT_CONTACT:-}
+      # The oldest version of the app the relay answers; every one when empty.
+      EZCOUNT_MIN_APP_VERSION: ${EZCOUNT_MIN_APP_VERSION:-}
     # Only Caddy talks to the relay; it is not published on the host.
     expose:
       - "8787"

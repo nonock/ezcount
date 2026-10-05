@@ -87,6 +87,35 @@ fn strict_relay() -> Arc<Relay> {
 }
 
 #[test]
+fn a_deleted_account_leaves_the_id_of_its_document_and_the_groups() {
+    let relay = strict_relay();
+    let db = relay.db.lock().unwrap();
+    db.execute_batch(
+        "INSERT INTO accounts (username, account_id, login_hash, wrapped_key)
+             VALUES ('alice', 'a-1', x'01', x'02');
+         INSERT INTO groups (id, key_hash, bytes) VALUES ('a-1', x'03', 7), ('g-1', x'04', 5);
+         INSERT INTO updates (group_id, data)
+             VALUES ('a-1', x'00000000000000'), ('g-1', x'0000000000');",
+    )
+    .unwrap();
+    let count = |table: &str| -> i64 {
+        db.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    };
+
+    assert_eq!(remove_account(&db, "alice", "a-1").unwrap(), 7);
+    assert_eq!(count("accounts"), 0);
+    // The group is its members': the relay can't tell it was Alice's too.
+    assert_eq!(count("groups"), 1);
+    assert_eq!(count("updates"), 1);
+    assert!(was_deleted(&db, "a-1").unwrap());
+    assert!(!was_deleted(&db, "g-1").unwrap());
+    // Asked twice, nothing more goes.
+    assert_eq!(remove_account(&db, "alice", "a-1").unwrap(), 0);
+    assert_eq!(count("groups"), 1);
+}
+
+#[test]
 fn too_many_failures_lock_one_network_out_of_one_username() {
     let relay = strict_relay();
     let (home, cafe) = (Client("home".to_string()), Client("cafe".to_string()));

@@ -57,3 +57,15 @@ fn the_stored_hash_of_a_group_the_relay_knows() {
     assert_eq!(stored_hash(&db, "g-1").unwrap(), Some(vec![1, 2, 3]));
     assert_eq!(stored_hash(&db, "g-2").unwrap(), None);
 }
+
+#[test]
+fn the_id_of_a_deleted_document_is_remembered() {
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch(
+        "CREATE TABLE deleted_documents (id TEXT PRIMARY KEY);
+         INSERT INTO deleted_documents (id) VALUES ('a-1');",
+    )
+    .unwrap();
+    assert!(was_deleted(&db, "a-1").unwrap());
+    assert!(!was_deleted(&db, "a-2").unwrap());
+}

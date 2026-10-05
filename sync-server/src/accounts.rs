@@ -6,13 +6,14 @@ use axum::http::StatusCode;
 use axum::Json;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use crate::limits::{Client, HOUR, LOGIN_WINDOW};
-use crate::updates::{check_group_id, stored_hash};
+use crate::updates::{check_group_id, stored_hash, was_deleted};
 use crate::{with_db, ApiError, Relay};
 
 /// Same rule as the app: 3 to 32 of `a-z 0-9 . _ -`, starting with a letter or digit.
@@ -119,7 +120,7 @@ pub(crate) async fn sign_up(
         if taken {
             return Err(ApiError::Conflict("username taken"));
         }
-        if stored_hash(&tx, &req.account_id)?.is_some() {
+        if stored_hash(&tx, &req.account_id)?.is_some() || was_deleted(&tx, &req.account_id)? {
             return Err(ApiError::Conflict("account id taken"));
         }
         tx.execute(
@@ -374,6 +375,79 @@ pub(crate) async fn update_credentials(
     } else {
         Err(ApiError::BadLogin)
     }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct DeleteRequest {
+    username: String,
+    /// Proof of the account, as for logging in: deleting it asks for the password.
+    login_token: String,
+}
+
+/// `POST /v1/accounts/delete`: removes the account and its document, for good. The username
+/// is free again; the document's id is remembered (`updates::was_deleted`). The account's
+/// groups are documents of their own, which the relay can't tell from anyone else's: they
+/// stay, for their other members. 204, or errors as for login.
+pub(crate) async fn delete(
+    State(relay): State<Arc<Relay>>,
+    client: Client,
+    Json(req): Json<DeleteRequest>,
+) -> Result<StatusCode, ApiError> {
+    check_username(&req.username)?;
+    relay.check_throttle(&req.username, &client)?;
+    let login_hash = token_hash(&req.login_token)?;
+
+    let username = req.username.clone();
+    let proven = with_db(&relay, move |relay, db| {
+        let tx = db.transaction()?;
+        let found: Option<(String, Vec<u8>)> = tx
+            .query_row(
+                "SELECT account_id, login_hash FROM accounts WHERE username = ?1",
+                [&username],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let account_id = match found {
+            Some((account_id, stored)) if stored == login_hash => account_id,
+            _ => return Ok(false),
+        };
+        let freed = remove_account(&tx, &username, &account_id)?;
+        tx.commit()?;
+        // Still under the database lock, like the count of what an upload adds.
+        let _ = relay
+            .stored_bytes
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |stored| {
+                Some(stored.saturating_sub(freed))
+            });
+        Ok(true)
+    })
+    .await?;
+    relay.record_login(&req.username, &client, proven);
+    if proven {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::BadLogin)
+    }
+}
+
+/// Removes an account and its document, and remembers the document's id. Returns the bytes
+/// the document held.
+fn remove_account(db: &Connection, username: &str, account_id: &str) -> rusqlite::Result<u64> {
+    let held: Option<i64> = db
+        .query_row(
+            "SELECT bytes FROM groups WHERE id = ?1",
+            [account_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    db.execute("DELETE FROM accounts WHERE username = ?1", [username])?;
+    db.execute("DELETE FROM updates WHERE group_id = ?1", [account_id])?;
+    db.execute("DELETE FROM groups WHERE id = ?1", [account_id])?;
+    db.execute(
+        "INSERT OR IGNORE INTO deleted_documents (id) VALUES (?1)",
+        [account_id],
+    )?;
+    Ok(held.unwrap_or(0).max(0) as u64)
 }
 
 #[cfg(test)]
