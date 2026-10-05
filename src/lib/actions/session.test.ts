@@ -8,11 +8,11 @@ import { dialogs } from "../state/dialogs.svelte";
 import { groupList, openGroup } from "../state/groups.svelte";
 import { navigation } from "../state/navigation.svelte";
 import { session } from "../state/session.svelte";
-import { logOut } from "./session";
+import { deleteAccount, logOut } from "./session";
 
-vi.mock("@/services/api", () => ({ api: { logOut: vi.fn() } }));
+vi.mock("@/services/api", () => ({ api: { deleteAccount: vi.fn(), logOut: vi.fn() } }));
 vi.mock("@/services/native.svelte", () => ({ closeTopLayer: () => false }));
-vi.mock("svelte-sonner", () => ({ toast: { error: vi.fn() } }));
+vi.mock("svelte-sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -23,6 +23,8 @@ beforeEach(() => {
   openGroup.group = group();
   navigation.groupId = "g1";
   dialogs.identitySkipped.add("g1");
+  dialogs.createGroup = true;
+  dialogs.expense = { open: true, editing: null };
 });
 
 const loggedOut = () => session.account === null;
@@ -40,6 +42,9 @@ describe("logOut", () => {
     expect(openGroup.group).toBeNull();
     expect(navigation.groupId).toBeNull();
     expect(dialogs.identitySkipped.size).toBe(0);
+    // Nothing is left open to come back with the next account.
+    expect(dialogs.createGroup).toBe(false);
+    expect(dialogs.expense.open).toBe(false);
   });
 
   it("stays logged in when the user says no", async () => {
@@ -86,5 +91,28 @@ describe("logOut", () => {
     session.account = null;
     await logOut();
     expect(confirmation.open).toBe(false);
+  });
+});
+
+describe("deleteAccount", () => {
+  it("deletes the account with its password, then forgets it and its groups", async () => {
+    vi.mocked(api.deleteAccount).mockResolvedValue();
+    await deleteAccount("correct horse");
+    expect(api.deleteAccount).toHaveBeenCalledWith("correct horse");
+    expect(loggedOut()).toBe(true);
+    expect(groupList.all).toEqual([]);
+    expect(openGroup.group).toBeNull();
+    expect(navigation.groupId).toBeNull();
+    expect(dialogs.createGroup).toBe(false);
+    expect(toast.success).toHaveBeenCalled();
+  });
+
+  it("changes nothing when the core refuses, and says why to who asked", async () => {
+    vi.mocked(api.deleteAccount).mockRejectedValue(new Error("Wrong password"));
+    await expect(deleteAccount("nope")).rejects.toThrow("Wrong password");
+    expect(loggedOut()).toBe(false);
+    expect(groupList.all).toHaveLength(1);
+    expect(navigation.groupId).toBe("g1");
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SERVER, rememberedServer, rememberServer } from "./server";
+import { DEFAULT_SERVER, privacyUrl, rememberedServer, rememberServer } from "./server";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -30,5 +30,19 @@ describe("the relay the login screen starts with", () => {
     vi.stubGlobal("localStorage", { getItem: refuse, setItem: refuse, removeItem: refuse });
     expect(() => rememberServer("https://relay.example.com")).not.toThrow();
     expect(rememberedServer()).toBe(DEFAULT_SERVER);
+  });
+});
+
+describe("a relay's privacy policy", () => {
+  it("is its own page, in the app's language", () => {
+    expect(privacyUrl("https://relay.example.com", "fr")).toBe(
+      "https://relay.example.com/privacy?lang=fr"
+    );
+  });
+
+  it("is found whatever ends the address", () => {
+    expect(privacyUrl(" https://relay.example.com/ ", "en")).toBe(
+      "https://relay.example.com/privacy?lang=en"
+    );
   });
 });

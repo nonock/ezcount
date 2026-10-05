@@ -10,6 +10,7 @@
   import ChangePasswordDialog from "./ChangePasswordDialog.svelte";
   import CommentsDialog from "./CommentsDialog.svelte";
   import CreateGroupModal from "./CreateGroupModal.svelte";
+  import DeleteAccountDialog from "./DeleteAccountDialog.svelte";
   import EditGroupModal from "./EditGroupModal.svelte";
   import ExpenseHistoryModal from "./ExpenseHistoryModal.svelte";
   import FeedbackDialog from "./FeedbackDialog.svelte";
@@ -44,6 +45,7 @@
 <JoinGroupModal />
 <AccountDialog />
 <ChangePasswordDialog />
+<DeleteAccountDialog />
 <LinkDeviceDialog />
 <FeedbackDialog />
 <RecoveryKeyDialog

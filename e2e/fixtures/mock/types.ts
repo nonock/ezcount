@@ -88,6 +88,8 @@ export interface MockGroup {
   deletion_votes?: string[];
   trash?: { expense: MockExpense; deleted_at: string; deleted_by?: string | null }[];
   recurring?: MockRecurringExpense[];
+  /** Changed by a newer version of the app: only its name shows. */
+  needs_update?: boolean;
 }
 
 export interface MockAccount {
@@ -98,6 +100,7 @@ export interface MockAccount {
   iban: string | null;
   archived: string[];
   identities: Record<string, string>;
+  update_required?: boolean;
 }
 
 /** A command, with the arguments the app's bindings send it. */

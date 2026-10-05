@@ -22,6 +22,11 @@ export function rememberedServer(): string {
   }
 }
 
+/** A relay's page about what it keeps of its users, in a language of the app. */
+export function privacyUrl(server: string, language: string): string {
+  return `${server.trim().replace(/\/+$/, "")}/privacy?lang=${language}`;
+}
+
 export function rememberServer(server: string) {
   try {
     if (server === DEFAULT_SERVER) localStorage.removeItem(SERVER_KEY);

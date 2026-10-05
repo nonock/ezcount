@@ -517,6 +517,63 @@ test.describe("Account", () => {
     await saveRecoveryKey(page, /^MOCK-KEY1-/);
   });
 
+  test("deletes the account from the account menu, with its password", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Account/ }).click();
+    await page
+      .getByRole("dialog", { name: "Account" })
+      .getByRole("button", { name: "Delete account" })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Delete the account alice?" });
+    await expect(dialog).toContainText("Your groups stay for their other members");
+    const confirm = dialog.getByRole("button", { name: "Delete Account" });
+    await expect(confirm).toBeDisabled();
+
+    await dialog.getByLabel("Password").fill("not my password");
+    await confirm.click();
+    await expect(dialog.getByText("Wrong password")).toBeVisible();
+
+    await dialog.getByLabel("Password").fill(MOCK_PASSWORD);
+    await confirm.click();
+    await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+    await expect(page.getByText("Your account was deleted")).toBeVisible();
+
+    // Nothing is left to log in to.
+    await page.getByLabel("Username").fill("alice");
+    await page.getByLabel("Password").fill(MOCK_PASSWORD);
+    await page.getByRole("button", { name: "Log In" }).click();
+    await expect(page.getByText("Wrong username or password")).toBeVisible();
+  });
+
+  test("says when the server can't delete accounts yet", async ({ page }) => {
+    await seed(page, { __OLD_RELAY__: true });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Menu", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Account/ }).click();
+    await page
+      .getByRole("dialog", { name: "Account" })
+      .getByRole("button", { name: "Delete account" })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Delete the account alice?" });
+    await dialog.getByLabel("Password").fill(MOCK_PASSWORD);
+    await dialog.getByRole("button", { name: "Delete Account" }).click();
+    await expect(dialog.getByText("This server can't delete accounts yet")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Menu", exact: true })).toBeVisible();
+  });
+
+  test("the server's privacy policy opens in the browser", async ({ page }) => {
+    await seed(page, { __LOGGED_OUT__: true });
+    await page.goto("/");
+    await page.getByRole("link", { name: "Privacy policy" }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__opened))
+      .toEqual(["http://localhost:8787/privacy?lang=en"]);
+    // The app stays where it was.
+    await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+  });
+
   test("logging in doesn't rate the password", async ({ page }) => {
     await seed(page, { __LOGGED_OUT__: true });
     await page.goto("/");

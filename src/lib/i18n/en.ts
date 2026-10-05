@@ -43,6 +43,15 @@ export const en = {
   "app.refreshing": "Updating…",
   "app.refreshFailed": "Could not update the group",
   "app.removedElsewhere": "This group was removed from your account on another device",
+  "app.accountDeleted": "Your account was deleted on another device",
+
+  "update.title": "Update ezcount",
+  "update.account":
+    "This version is too old for your account. Until the app is updated, your groups may stop syncing, and what you change may stay on this device.",
+  "update.group":
+    "This group was changed by a newer version of ezcount. Update the app to open it: nothing is lost meanwhile.",
+  "update.groupShort": "Update ezcount to open this group",
+  "update.reload": "Reload to update",
   "app.storageWarnings": "Some saved data could not be loaded",
   "app.storageKept": "Nothing was deleted. The data is still on disk.",
   "app.otherTab":
@@ -68,6 +77,8 @@ export const en = {
   "feedback.send": "Send",
   "feedback.sent": "Thank you, your message was sent",
   "menu.logOut": "Log out",
+  "menu.deleteAccount": "Delete account",
+  "menu.privacy": "Privacy policy",
 
   "date.today": "Today",
   "date.yesterday": "Yesterday",
@@ -178,6 +189,15 @@ export const en = {
   "logout.anyway": "Log out anyway?",
   "logout.confirmAnyway": "Log Out Anyway",
   "logout.failed": "Could not log out",
+
+  "deleteAccount.title": (username: string) => `Delete the account ${username}?`,
+  "deleteAccount.intro": "It is removed for good, at once. Nobody can bring it back.",
+  "deleteAccount.removed":
+    "Your account, your profile and your list of groups go from the server and from all your devices.",
+  "deleteAccount.kept":
+    "Your groups stay for their other members, with your name on the expenses, and without your picture and your IBAN.",
+  "deleteAccount.submit": "Delete Account",
+  "deleteAccount.done": "Your account was deleted",
 
   "groups.empty": "No groups yet",
   "groups.emptyHelp":

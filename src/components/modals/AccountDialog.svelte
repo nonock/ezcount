@@ -3,9 +3,11 @@
   import LockKeyholeIcon from "@lucide/svelte/icons/lock-keyhole";
   import LogOutIcon from "@lucide/svelte/icons/log-out";
   import SmartphoneIcon from "@lucide/svelte/icons/smartphone";
+  import TrashIcon from "@lucide/svelte/icons/trash-2";
   import { untrack } from "svelte";
   import { toast } from "svelte-sonner";
   import PictureField from "@/components/common/PictureField.svelte";
+  import PrivacyLink from "@/components/common/PrivacyLink.svelte";
   import { Button } from "@/components/ui/button";
   import * as Dialog from "@/components/ui/dialog";
   import * as Field from "@/components/ui/field";
@@ -192,10 +194,21 @@
       </Field.Field>
 
       <Separator />
-      <Button variant="ghost" class="justify-start text-destructive" onclick={() => go(logOut)}>
-        <LogOutIcon data-icon="inline-start" />
-        {t("menu.logOut")}
-      </Button>
+      <div class="flex flex-col gap-2">
+        <Button variant="ghost" class="justify-start text-destructive" onclick={() => go(logOut)}>
+          <LogOutIcon data-icon="inline-start" />
+          {t("menu.logOut")}
+        </Button>
+        <Button
+          variant="ghost"
+          class="justify-start text-destructive"
+          onclick={() => go(() => (dialogs.deleteAccount = true))}
+        >
+          <TrashIcon data-icon="inline-start" />
+          {t("menu.deleteAccount")}
+        </Button>
+      </div>
+      <PrivacyLink serverUrl={account.server_url} class="text-xs text-muted-foreground" />
     {/if}
   </Dialog.Content>
 </Dialog.Root>

@@ -1,6 +1,6 @@
 // What the device does for the app: its features, saving and sharing files, the camera, the
-// link the app was opened with, and the feedback form. What the app saved, shared or sent
-// lands on `window` for the tests to read.
+// link the app was opened with, and the feedback form. What the app saved, shared, sent or
+// opened in the browser lands on `window` for the tests to read.
 
 import { clone, requireAccount, w } from "../state";
 import type { Commands } from "../types";
@@ -19,6 +19,11 @@ export const deviceCommands: Commands = {
     format: "QR_CODE",
     bounds: null,
   }),
+
+  "plugin:opener|open_url"(args) {
+    w.__opened = [...(w.__opened || []), args.url];
+    return null;
+  },
 
   save_download(args) {
     w.__saved = [...(w.__saved || []), { name: args.fileName, text: args.text }];

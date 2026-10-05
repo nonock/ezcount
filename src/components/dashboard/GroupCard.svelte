@@ -14,7 +14,10 @@
     onSelect: (groupId: string) => void;
   }
 
-  /** A group in the list: what it spent, what the user owes or is owed, and a way in. */
+  /**
+   * A group in the list: what it spent, what the user owes or is owed, and a way in. Of a
+   * group a newer version of the app changed, only the name is known.
+   */
   let { group, net, onSelect }: Props = $props();
 
   const totalCents = $derived(spentCents(group));
@@ -53,27 +56,33 @@
       {/if}
       <Badge variant="soft" class="w-fit">{group.currency}</Badge>
     </Card.Header>
-    <Card.Content class="flex items-end justify-between gap-2">
-      <div>
-        <div class="text-xs text-muted-foreground">{t("groups.totalSpent")}</div>
-        <Amount cents={totalCents} currency={group.currency} class="text-lg font-semibold" />
-        {#if net !== 0}
-          <div class="text-xs" data-testid="group-net">
-            <span class="text-muted-foreground">
-              {net > 0 ? t("groups.youGetBack") : t("groups.youOwe")}
-            </span>
-            <Amount
-              cents={Math.abs(net)}
-              currency={group.currency}
-              class={net > 0 ? "text-positive" : "text-negative"}
-            />
-          </div>
-        {/if}
-      </div>
-      <div class="flex items-center gap-1 text-xs text-muted-foreground">
-        {t("groups.summary", members, group.expenses.length)}
-        <ChevronRightIcon class="size-4" aria-hidden="true" />
-      </div>
-    </Card.Content>
+    {#if group.needs_update}
+      <Card.Content class="text-sm text-muted-foreground" data-testid="group-needs-update">
+        {t("update.groupShort")}
+      </Card.Content>
+    {:else}
+      <Card.Content class="flex items-end justify-between gap-2">
+        <div>
+          <div class="text-xs text-muted-foreground">{t("groups.totalSpent")}</div>
+          <Amount cents={totalCents} currency={group.currency} class="text-lg font-semibold" />
+          {#if net !== 0}
+            <div class="text-xs" data-testid="group-net">
+              <span class="text-muted-foreground">
+                {net > 0 ? t("groups.youGetBack") : t("groups.youOwe")}
+              </span>
+              <Amount
+                cents={Math.abs(net)}
+                currency={group.currency}
+                class={net > 0 ? "text-positive" : "text-negative"}
+              />
+            </div>
+          {/if}
+        </div>
+        <div class="flex items-center gap-1 text-xs text-muted-foreground">
+          {t("groups.summary", members, group.expenses.length)}
+          <ChevronRightIcon class="size-4" aria-hidden="true" />
+        </div>
+      </Card.Content>
+    {/if}
   </Card.Root>
 </li>

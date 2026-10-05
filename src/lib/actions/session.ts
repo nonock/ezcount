@@ -1,4 +1,4 @@
-// Leaving the account.
+// Leaving the account: logging out of it, or deleting it.
 
 import { toast } from "svelte-sonner";
 import { api } from "@/services/api";
@@ -36,9 +36,24 @@ export async function logOut() {
       return;
     }
   }
+  leaveSession();
+}
+
+/**
+ * Deletes the account for good, which takes its password, and goes back to the login screen.
+ * Throws what the core refuses (a wrong password, a server out of reach).
+ */
+export async function deleteAccount(password: string) {
+  await api.deleteAccount(password);
+  leaveSession();
+  toast.success(t("deleteAccount.done"));
+}
+
+/** Forgets the account and its groups, once the core has: the login screen is next. */
+export function leaveSession() {
   navigation.close();
   openGroup.clear();
   groupList.all = [];
-  dialogs.identitySkipped.clear();
+  dialogs.reset();
   session.account = null;
 }

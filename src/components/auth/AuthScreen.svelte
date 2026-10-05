@@ -3,6 +3,7 @@
   import QrCodeIcon from "@lucide/svelte/icons/qr-code";
   import ScanQrCodeIcon from "@lucide/svelte/icons/scan-qr-code";
   import LogoMark from "@/components/common/LogoMark.svelte";
+  import PrivacyLink from "@/components/common/PrivacyLink.svelte";
   import ReceiveCode from "@/components/common/ReceiveCode.svelte";
   import Wordmark from "@/components/common/Wordmark.svelte";
   import * as Alert from "@/components/ui/alert";
@@ -257,5 +258,8 @@
     </Dialog.Root>
 
     <LanguageLinks />
+    <p class="text-center text-sm text-muted-foreground">
+      <PrivacyLink serverUrl={form.serverUrl} />
+    </p>
   </div>
 </main>

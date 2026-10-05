@@ -60,6 +60,7 @@ export function getAccount() {
         iban: w.__PROFILE__?.iban ?? null,
         archived: [...(w.__ARCHIVED__ ?? [])],
         identities: w.__SEED_IDENTITIES__ ? { ...w.__SEED_IDENTITIES__ } : identities,
+        update_required: Boolean(w.__UPDATE_REQUIRED__),
       };
     }
   }

@@ -223,6 +223,14 @@ export const api = {
     unwrap(await commands.logOut(force));
   },
 
+  /**
+   * Deletes the account for good, from its server and from this device. Its groups stay for
+   * their other members.
+   */
+  async deleteAccount(password: string): Promise<void> {
+    unwrap(await commands.deleteAccount(password));
+  },
+
   async setIdentity(groupId: string, participantId: string): Promise<AccountInfo> {
     return unwrap(await commands.setIdentity(groupId, participantId));
   },

@@ -238,6 +238,23 @@ const FR: Pattern[] = [
     /^This server can't change passwords or recovery keys yet\. Update the ezcount relay\.$/,
     "Ce serveur ne sait pas encore changer les mots de passe ni les clés de récupération. Mettez à jour le relais ezcount.",
   ],
+  [
+    /^This server can't delete accounts yet\. Update the ezcount relay\.$/,
+    "Ce serveur ne sait pas encore supprimer les comptes. Mettez à jour le relais ezcount.",
+  ],
+  [/^This account was deleted$/, "Ce compte a été supprimé"],
+  [
+    /^This version of ezcount is too old for this server\. Update the app\.$/,
+    "Cette version d'ezcount est trop ancienne pour ce serveur. Mettez l'application à jour.",
+  ],
+  [
+    /^This group was changed by a newer version of ezcount\. Update the app to open it\.$/,
+    "Ce groupe a été modifié par une version plus récente d'ezcount. Mettez l'application à jour pour l'ouvrir.",
+  ],
+  [
+    /^Your account was changed by a newer version of ezcount\. Update the app\.$/,
+    "Votre compte a été modifié par une version plus récente d'ezcount. Mettez l'application à jour.",
+  ],
   [/^This group is not shared$/, "Ce groupe n'est pas partagé"],
   [/^Sharing is not available on this device$/, "Le partage n'est pas disponible sur cet appareil"],
 

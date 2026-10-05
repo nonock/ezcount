@@ -177,6 +177,19 @@ export const accountCommands: Commands = {
     return null;
   },
 
+  delete_account(args) {
+    requireAccount();
+    if (w.__OLD_RELAY__) {
+      throw new Error("This server can't delete accounts yet. Update the ezcount relay.");
+    }
+    if (args.password !== state.password) throw new Error("Wrong password");
+    state.account = null;
+    state.groups = [];
+    // Nothing logs in to it any more.
+    state.password = "";
+    return null;
+  },
+
   set_identity(args) {
     const acc = requireAccount();
     const g = findGroup(args?.groupId);

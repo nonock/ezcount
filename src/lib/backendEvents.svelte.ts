@@ -4,6 +4,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { toast } from "svelte-sonner";
 import { api } from "@/services/api";
+import type { AccountInfo } from "@/types";
+import { leaveSession } from "./actions/session";
 import { t } from "./i18n/index.svelte";
 import { groupList, openGroup } from "./state/groups.svelte";
 import { navigation } from "./state/navigation.svelte";
@@ -48,9 +50,26 @@ export function syncUpdated(payload: SyncUpdatedEvent) {
     .catch(() => {});
 }
 
-/** Another device of this account joined or left a group, or changed who the user is. */
+/**
+ * Another device of this account joined or left a group, or changed who the user is. Or it
+ * deleted the account, and the core logged this device out.
+ */
 export async function accountUpdated() {
-  await session.refresh();
+  let account: AccountInfo | null;
+  try {
+    account = await api.getAccount();
+  } catch (err) {
+    console.error("Failed to load the account:", err);
+    return;
+  }
+  if (!account) {
+    if (session.loggedIn) {
+      leaveSession();
+      toast.info(t("app.accountDeleted"));
+    }
+    return;
+  }
+  session.account = account;
   const list = await api.getGroups();
   groupList.all = list;
   const selected = navigation.groupId;

@@ -140,3 +140,17 @@ describe("GroupPage", () => {
     expect(load).toHaveBeenCalledWith("g1");
   });
 });
+
+describe("GroupPage, for a group a newer version of the app changed", () => {
+  it("shows its name and asks for an update, with nothing to read or change", () => {
+    const newer = group({ name: "Ski", participants: [], needs_update: true });
+    openGroup.group = newer;
+    render(GroupPage, { group: newer });
+    expect(screen.getByRole("heading", { name: "Ski" })).toBeTruthy();
+    expect(screen.getByTestId("update-notice").textContent).toContain(t("update.group"));
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(rows()).toHaveLength(0);
+    // The way back to the other groups stays.
+    expect(screen.getAllByRole("button", { name: t("group.back") }).length).toBeGreaterThan(0);
+  });
+});

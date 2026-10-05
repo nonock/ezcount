@@ -7,10 +7,13 @@ const PASSWORD = "tangerine kayak mosaic";
 
 /** Uncaught errors and console errors (Content-Security-Policy violations among them). */
 let problems: string[] = [];
+/** What the browser logs for requests a test has the relay refuse on purpose. */
+let refusals: RegExp | null = null;
 
 test.afterEach(() => {
-  const found = problems;
+  const found = problems.filter((problem) => !refusals?.test(problem));
   problems = [];
+  refusals = null;
   expect(found).toEqual([]);
 });
 
@@ -164,4 +167,51 @@ test("hands an invite opened in a new tab to the open one", async ({ browser }) 
   await tab.goto(`/${new URL(invite).hash}`);
   await expect(tab.getByText("the invite was sent there")).toBeVisible();
   await joinFromDialog(bob, "Ski");
+});
+
+test("deletes an account for good, as the relay's pages say", async ({ browser }) => {
+  // A wrong password, then the account's document and its login once they are gone.
+  refusals = /the server responded with a status of (401|410)/;
+  // The privacy policy leads to how to delete an account, and that page to the web version.
+  const reader = await device(browser);
+  await reader.goto("/privacy");
+  await expect(reader.getByRole("heading", { name: "Privacy policy" })).toBeVisible();
+  await reader.getByRole("link", { name: "Français" }).click();
+  await expect(reader.getByRole("heading", { name: "Politique de confidentialité" })).toBeVisible();
+  await reader.getByRole("link", { name: "comment supprimer votre compte" }).click();
+  await expect(
+    reader.getByRole("heading", { name: "Supprimer votre compte ezcount" })
+  ).toBeVisible();
+  await expect(
+    reader.getByRole("link", { name: "ouvrez ezcount dans votre navigateur" })
+  ).toHaveAttribute("href", "./");
+
+  const username = `dave${Date.now()}`;
+  const laptop = await device(browser);
+  await signUp(laptop, username);
+  const phone = await device(browser);
+  await logIn(phone, username);
+  await expect(phone.getByText("No groups yet")).toBeVisible();
+
+  await laptop.getByRole("button", { name: "Menu", exact: true }).click();
+  await laptop.getByRole("menuitem", { name: /Account/ }).click();
+  await laptop
+    .getByRole("dialog", { name: "Account" })
+    .getByRole("button", { name: "Delete account" })
+    .click();
+  const dialog = laptop.getByRole("dialog", { name: `Delete the account ${username}?` });
+  await dialog.getByLabel("Password").fill("not my password");
+  await dialog.getByRole("button", { name: "Delete Account" }).click();
+  await expect(dialog.getByText("Wrong password")).toBeVisible();
+  await dialog.getByLabel("Password").fill(PASSWORD);
+  await dialog.getByRole("button", { name: "Delete Account" }).click();
+  await expect(laptop.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+
+  // The other device finds out at its next sync, and nothing is left to log in to.
+  await expect(phone.getByText("Your account was deleted on another device")).toBeVisible({
+    timeout: 45_000,
+  });
+  await expect(phone.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+  await logIn(phone, username);
+  await expect(phone.getByText("Wrong username or password")).toBeVisible();
 });

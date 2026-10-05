@@ -8,11 +8,18 @@ import { api } from "@/services/api";
 import { account } from "@/test/fixtures";
 import type { PasswordStrength } from "@/types";
 import ChangePasswordDialog from "./ChangePasswordDialog.svelte";
+import DeleteAccountDialog from "./DeleteAccountDialog.svelte";
 import RecoveryKeyDialog from "./RecoveryKeyDialog.svelte";
 
 vi.mock("@/services/api", () => ({
-  api: { changePassword: vi.fn(), passwordStrength: vi.fn(), replaceRecoveryKey: vi.fn() },
+  api: {
+    changePassword: vi.fn(),
+    deleteAccount: vi.fn(),
+    passwordStrength: vi.fn(),
+    replaceRecoveryKey: vi.fn(),
+  },
 }));
+vi.mock("@/services/native.svelte", () => ({ closeTopLayer: () => false }));
 vi.mock("svelte-sonner", () => ({ toast: { success: vi.fn(), info: vi.fn() } }));
 
 const strong: PasswordStrength = { score: 4, acceptable: true, warning: null, suggestions: [] };
@@ -31,6 +38,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   session.account = account();
   dialogs.changePassword = false;
+  dialogs.deleteAccount = false;
   vi.mocked(api.passwordStrength).mockResolvedValue(strong);
 });
 
@@ -82,6 +90,47 @@ describe("ChangePasswordDialog", () => {
     const dialog = await screen.findByRole("dialog");
     await vi.waitFor(() => expect(dialog.textContent).toContain("Your current password is wrong"));
     expect(dialogs.changePassword).toBe(true);
+  });
+});
+
+describe("DeleteAccountDialog", () => {
+  const deleteButton = () => screen.findByRole("button", { name: t("deleteAccount.submit") });
+
+  it("says what goes and what stays, and waits for the password", async () => {
+    dialogs.deleteAccount = true;
+    render(DeleteAccountDialog);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain(t("deleteAccount.title", "alice"));
+    expect(dialog.textContent).toContain(t("deleteAccount.removed"));
+    expect(dialog.textContent).toContain(t("deleteAccount.kept"));
+    expect(await deleteButton()).toHaveProperty("disabled", true);
+    await type(screen.getByLabelText(t("common.password")), "correct horse");
+    expect(await deleteButton()).toHaveProperty("disabled", false);
+  });
+
+  it("deletes the account with its password, then leaves it", async () => {
+    vi.mocked(api.deleteAccount).mockResolvedValue(undefined);
+    dialogs.deleteAccount = true;
+    render(DeleteAccountDialog);
+    await type(await screen.findByLabelText(t("common.password")), "correct horse");
+    await submit();
+    expect(api.deleteAccount).toHaveBeenCalledWith("correct horse");
+    await vi.waitFor(() => expect(session.account).toBeNull());
+    expect(dialogs.deleteAccount).toBe(false);
+    expect(toast.success).toHaveBeenCalledWith(t("deleteAccount.done"));
+  });
+
+  it("keeps the account when the password is wrong", async () => {
+    vi.mocked(api.deleteAccount).mockRejectedValue(new Error("Wrong password"));
+    dialogs.deleteAccount = true;
+    render(DeleteAccountDialog);
+    await type(await screen.findByLabelText(t("common.password")), "nope");
+    await submit();
+    const dialog = await screen.findByRole("dialog");
+    await vi.waitFor(() => expect(dialog.textContent).toContain("Wrong password"));
+    expect(session.account).not.toBeNull();
+    expect(dialogs.deleteAccount).toBe(true);
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });
 

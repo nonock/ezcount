@@ -4,6 +4,7 @@ import { api } from "@/services/api";
 import { account, group } from "@/test/fixtures";
 import type { SyncInfo } from "@/types";
 import { accountUpdated, syncUpdated } from "./backendEvents.svelte";
+import { t } from "./i18n/index.svelte";
 import { groupList, openGroup } from "./state/groups.svelte";
 import { navigation } from "./state/navigation.svelte";
 import { session } from "./state/session.svelte";
@@ -79,6 +80,34 @@ describe("accountUpdated", () => {
     vi.mocked(api.getGroups).mockResolvedValue([group({ id: "g2" })]);
     await accountUpdated();
     expect(navigation.groupId).toBeNull();
-    expect(toast.info).toHaveBeenCalled();
+    expect(toast.info).toHaveBeenCalledWith(t("app.removedElsewhere"));
+  });
+
+  it("leaves the account when another device deleted it", async () => {
+    session.account = account();
+    groupList.all = [group()];
+    vi.mocked(api.getAccount).mockResolvedValue(null);
+    await accountUpdated();
+    expect(session.account).toBeNull();
+    expect(groupList.all).toEqual([]);
+    expect(navigation.groupId).toBeNull();
+    expect(toast.info).toHaveBeenCalledWith(t("app.accountDeleted"));
+    expect(api.getGroups).not.toHaveBeenCalled();
+  });
+
+  it("says nothing of it on a device that was already logged out", async () => {
+    session.account = null;
+    vi.mocked(api.getAccount).mockResolvedValue(null);
+    await accountUpdated();
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it("stays as it is when the account can't be read", async () => {
+    session.account = account();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(api.getAccount).mockRejectedValue(new Error("Database is locked"));
+    await accountUpdated();
+    expect(session.account).not.toBeNull();
+    expect(toast.info).not.toHaveBeenCalled();
   });
 });

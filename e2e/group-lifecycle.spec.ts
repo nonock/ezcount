@@ -161,3 +161,52 @@ test("a dialog taller than the window scrolls", async ({ page }) => {
   await logOut.scrollIntoViewIfNeeded();
   await expect(logOut).toBeInViewport();
 });
+
+test("a group a newer version of the app changed asks for an update", async ({ page }) => {
+  await seed(page, {
+    __SEED_GROUPS__: [
+      { ...settled, participants: members },
+      // As the core reads it: its name, and nothing else.
+      {
+        id: "g-ski",
+        name: "Ski",
+        currency: "EUR",
+        created_at: now,
+        participants: [],
+        expenses: [],
+        needs_update: true,
+      },
+    ],
+    __SEED_IDENTITIES__: { "g-flat": "p-alice" },
+  });
+  // The account itself is fine: nothing asks to update the whole app.
+  await expect(page.getByRole("button", { name: "Flat" })).toBeVisible();
+  await expect(page.getByText("This version is too old for your account")).toHaveCount(0);
+
+  const card = page.getByRole("listitem").filter({ hasText: "Ski" });
+  await expect(card).toContainText("Update ezcount to open this group");
+  await expect(card).not.toContainText("Total spent");
+
+  await card.getByRole("button", { name: "Ski" }).click();
+  await expect(page.getByRole("heading", { name: "Ski" })).toBeVisible();
+  await expect(
+    page.getByText("This group was changed by a newer version of ezcount")
+  ).toBeVisible();
+  // Nothing to read or change, and nobody is asked who they are in it.
+  await expect(page.getByRole("tablist")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Add Expense" })).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("an app too old for its account says so above the groups", async ({ page }) => {
+  await seed(page, {
+    __SEED_GROUPS__: [{ ...settled, participants: members }],
+    __UPDATE_REQUIRED__: true,
+  });
+  await expect(page.getByRole("button", { name: "Flat" })).toBeVisible();
+  const notice = page.getByTestId("update-notice");
+  await expect(notice).toContainText("Update ezcount");
+  await expect(notice).toContainText("This version is too old for your account");
+  // An app is updated where it came from: only the web version offers to reload.
+  await expect(notice.getByRole("button")).toHaveCount(0);
+});

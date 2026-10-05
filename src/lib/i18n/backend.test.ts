@@ -28,6 +28,21 @@ describe("backendText", () => {
     );
   });
 
+  it("says in French that the app is too old", () => {
+    i18n.choose("fr");
+    expect(backendText("This version of ezcount is too old for this server. Update the app.")).toBe(
+      "Cette version d'ezcount est trop ancienne pour ce serveur. Mettez l'application à jour."
+    );
+    expect(
+      backendText(
+        "This group was changed by a newer version of ezcount. Update the app to open it."
+      )
+    ).toContain("Mettez l'application à jour pour l'ouvrir");
+    expect(
+      backendText("Your account was changed by a newer version of ezcount. Update the app.")
+    ).toContain("Votre compte a été modifié");
+  });
+
   it("shows what it doesn't know in English", () => {
     i18n.choose("fr");
     expect(backendText("Something new went wrong")).toBe("Something new went wrong");

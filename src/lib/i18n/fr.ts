@@ -43,6 +43,15 @@ export const fr: Messages = {
   "app.loadingGroups": "Chargement des groupes…",
   "app.newGroup": "Nouveau groupe",
   "app.removedElsewhere": "Ce groupe a été retiré de votre compte depuis un autre appareil",
+  "app.accountDeleted": "Votre compte a été supprimé depuis un autre appareil",
+
+  "update.title": "Mettez ezcount à jour",
+  "update.account":
+    "Cette version est trop ancienne pour votre compte. Tant que l'application n'est pas mise à jour, vos groupes peuvent ne plus se synchroniser, et vos modifications rester sur cet appareil.",
+  "update.group":
+    "Ce groupe a été modifié par une version plus récente d'ezcount. Mettez l'application à jour pour l'ouvrir : rien n'est perdu entre-temps.",
+  "update.groupShort": "Mettez ezcount à jour pour ouvrir ce groupe",
+  "update.reload": "Recharger pour mettre à jour",
   "app.storageWarnings": "Certaines données enregistrées n'ont pas pu être chargées",
   "app.storageKept": "Rien n'a été supprimé. Les données sont toujours sur le disque.",
   "app.otherTab":
@@ -69,6 +78,8 @@ export const fr: Messages = {
   "feedback.send": "Envoyer",
   "feedback.sent": "Merci, votre message est envoyé",
   "menu.logOut": "Se déconnecter",
+  "menu.deleteAccount": "Supprimer le compte",
+  "menu.privacy": "Politique de confidentialité",
 
   "date.today": "Aujourd'hui",
   "date.yesterday": "Hier",
@@ -183,6 +194,16 @@ export const fr: Messages = {
   "logout.anyway": "Se déconnecter quand même ?",
   "logout.confirmAnyway": "Se déconnecter quand même",
   "logout.failed": "Déconnexion impossible",
+
+  "deleteAccount.title": (username) => `Supprimer le compte ${username} ?`,
+  "deleteAccount.intro":
+    "Il est retiré définitivement, tout de suite. Personne ne peut le rétablir.",
+  "deleteAccount.removed":
+    "Votre compte, votre profil et la liste de vos groupes disparaissent du serveur et de tous vos appareils.",
+  "deleteAccount.kept":
+    "Vos groupes restent pour leurs autres membres, avec votre nom sur les dépenses, et sans votre photo ni votre IBAN.",
+  "deleteAccount.submit": "Supprimer le compte",
+  "deleteAccount.done": "Votre compte a été supprimé",
 
   "groups.empty": "Aucun groupe pour l'instant",
   "groups.emptyHelp":

@@ -44,6 +44,17 @@ describe("GroupCard", () => {
     expect(onSelect).toHaveBeenCalledWith("trip");
   });
 
+  it("of a group a newer version of the app changed, shows the name and asks for an update", async () => {
+    const onSelect = vi.fn();
+    const newer = group({ id: "ski", name: "Ski", participants: [], needs_update: true });
+    const { container } = render(GroupCard, { group: newer, net: 0, onSelect });
+    expect(screen.getByTestId("group-needs-update").textContent).toContain(t("update.groupShort"));
+    // Nothing is said of money that can't be read.
+    expect(container.textContent).not.toContain(t("groups.totalSpent"));
+    await fireEvent.click(screen.getByRole("button", { name: "Ski" }));
+    expect(onSelect).toHaveBeenCalledWith("ski");
+  });
+
   it("says what the user gets back, or owes", () => {
     const owed = render(GroupCard, { group: trip, net: 1500, onSelect: vi.fn() });
     expect(screen.getByTestId("group-net").textContent).toContain(t("groups.youGetBack"));

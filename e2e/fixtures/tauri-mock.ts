@@ -35,10 +35,12 @@ export const MOCK_BUNDLE = fileURLToPath(
  * - `__UNSYNCED__`: log out fails unless forced
  * - `__OPENED_WITH__`: the link the app was opened with (deep link)
  * - `__RECOVERY_KEY__`: the account's recovery key; new ones are `MOCK-KEY<n>-AAAA-…`
- * - `__OLD_RELAY__`: sign-up gets no recovery key, like on a relay from before them
+ * - `__OLD_RELAY__`: sign-up gets no recovery key, like on a relay from before them, and
+ *   the account can't be deleted
  * - `__NATIVE__`: `{ share, scan, save }` features, none by default; shared texts land in
  *   `window.__shared`, saved files in `window.__saved` (with `text`, or `bytes` for a PDF)
  * - `__SCANNED__`: what the camera "scans"
+ * - pages the app opened in the device's browser land in `window.__opened`
  * - messages sent from the feedback form land in `window.__feedback`; with `__OLD_RELAY__`
  *   the relay doesn't take them
  * - `__LINK_SECONDS__`: how long a login link works, 120 by default
@@ -50,5 +52,7 @@ export const MOCK_BUNDLE = fileURLToPath(
  * - `__PROFILE__`: the account's `{ display_name, avatar, iban }`
  * - `__STORAGE_WARNINGS__`
  * - `__TAKEN_USERNAMES__`: usernames signing up refuses
+ * - `__UPDATE_REQUIRED__`: this version of the app is too old for the account's relay or
+ *   data. A seeded group with `needs_update` is one a newer version changed
  */
 export const installTauriMock = { path: MOCK_BUNDLE };

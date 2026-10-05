@@ -39,6 +39,36 @@ class Dialogs {
   linkDevice = $state(false);
   /** An idea or a problem to send to whoever runs the server. */
   feedback = $state(false);
+  /** Asks for the password, then deletes the account for good. */
+  deleteAccount = $state(false);
+
+  /** Closes them all and forgets the rest: the account they were opened in is gone. */
+  reset() {
+    for (const dialog of [
+      "createGroup",
+      "addMember",
+      "editGroup",
+      "activity",
+      "trash",
+      "recurring",
+      "share",
+      "who",
+      "account",
+      "changePassword",
+      "newRecoveryKey",
+      "linkDevice",
+      "feedback",
+      "deleteAccount",
+    ] as const) {
+      this[dialog] = false;
+    }
+    for (const dialog of ["join", "renameMember", "expense", "pay", "reimburse"] as const) {
+      this[dialog].open = false;
+    }
+    this.history = null;
+    this.comments = null;
+    this.identitySkipped.clear();
+  }
 
   openJoin(code = "", error: string | null = null) {
     this.join = { open: true, code, error };

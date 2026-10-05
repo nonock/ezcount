@@ -11,6 +11,7 @@
   import QrScanOverlay from "@/components/common/QrScanOverlay.svelte";
   import Splash from "@/components/common/Splash.svelte";
   import StorageWarnings from "@/components/common/StorageWarnings.svelte";
+  import UpdateNotice from "@/components/common/UpdateNotice.svelte";
   import GroupDashboard from "@/components/dashboard/GroupDashboard.svelte";
   import AppDialogs from "@/components/modals/AppDialogs.svelte";
   import { Button } from "@/components/ui/button";
@@ -116,6 +117,7 @@
   const needsIdentity = $derived(
     Boolean(
       openGroup.group &&
+      !openGroup.group.needs_update &&
       session.account &&
       !openGroup.currentUserId &&
       !dialogs.identitySkipped.has(openGroup.group.id)
@@ -174,6 +176,9 @@
         class="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:pb-[max(1.5rem,env(safe-area-inset-bottom))]"
       >
         <StorageWarnings bind:warnings={storageWarnings} />
+        {#if account.update_required}
+          <UpdateNotice text={t("update.account")} />
+        {/if}
 
         {#if groupList.loading}
           <div class="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
