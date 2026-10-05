@@ -167,3 +167,6 @@ pub(crate) async fn rate(
     known.insert(key, (rate.clone(), Instant::now()));
     Ok(Json(rate))
 }
+
+#[cfg(test)]
+mod tests;

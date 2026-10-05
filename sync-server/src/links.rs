@@ -23,8 +23,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::accounts::{check_username, token_hash};
 use crate::limits::{Client, HOUR};
-use crate::{check_username, token_hash, with_db, ApiError, Relay};
+use crate::{with_db, ApiError, Relay};
 
 /// Links waiting at once. Each needs a password, so this is only reached under abuse.
 const MAX_WAITING: usize = 1000;
@@ -216,3 +217,6 @@ pub(crate) async fn claim(
         data: STANDARD.encode(data),
     }))
 }
+
+#[cfg(test)]
+mod tests;

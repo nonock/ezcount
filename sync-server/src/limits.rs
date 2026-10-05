@@ -109,10 +109,11 @@ impl Counters {
         if entry.1.elapsed() >= window {
             *entry = (0, Instant::now());
         }
-        if entry.0.saturating_add(amount) > limit {
+        let total = entry.0.saturating_add(amount);
+        if total > limit {
             return false;
         }
-        entry.0 += amount;
+        entry.0 = total;
         true
     }
 
@@ -161,3 +162,6 @@ fn client_ip(parts: &Parts, header: Option<&HeaderName>) -> Option<IpAddr> {
             .map(|info| info.0.ip()),
     }
 }
+
+#[cfg(test)]
+mod tests;

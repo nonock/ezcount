@@ -154,3 +154,6 @@ fn kept(db: &Connection) -> rusqlite::Result<Vec<Kept>> {
     })?;
     rows.collect()
 }
+
+#[cfg(test)]
+mod tests;
