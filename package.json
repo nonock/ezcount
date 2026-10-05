@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "android:apk": "tauri android build --apk --target aarch64",
+    "android:aab": "tauri android build --aab --target aarch64",
     "build:wasm": "bun scripts/build-wasm.ts",
     "lint:wasm": "bun scripts/build-wasm.ts --lint",
     "dev:web": "bun scripts/build-wasm.ts --dev && vite --mode web",
