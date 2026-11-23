@@ -1,5 +1,5 @@
-//! The background sync loop: `sync::sync_all_noticing` right after local edits and on a
-//! timer, with its findings sent to the frontend as events and, on Android, shown as
+//! The background sync loop: `sync::sync_all_noticing` at startup, right after local edits
+//! and on a timer, with its findings sent to the frontend as events and, on Android, shown as
 //! notifications when the app isn't on screen (see `notify`).
 
 use ezcount_core::notices::Notice;
@@ -41,19 +41,21 @@ pub async fn sync_once(app: &AppHandle) -> Vec<Notice> {
 
 pub fn spawn_sync(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
+        // A pass at once, then after each wake-up or poll: edits made just before the app
+        // last closed haven't gone out yet, and the other devices' may be waiting.
         loop {
+            let notices = sync_once(&app).await;
+            #[cfg(target_os = "android")]
+            crate::notify::post(&app, &notices);
+            #[cfg(not(target_os = "android"))]
+            drop(notices);
+
             let state = app.state::<AppState>();
             tokio::select! {
                 _ = state.sync_wakeup.notified() => {}
                 _ = tokio::time::sleep(POLL_INTERVAL) => {}
             }
             tokio::time::sleep(DEBOUNCE).await;
-
-            let notices = sync_once(&app).await;
-            #[cfg(target_os = "android")]
-            crate::notify::post(&app, &notices);
-            #[cfg(not(target_os = "android"))]
-            drop(notices);
         }
     });
 }

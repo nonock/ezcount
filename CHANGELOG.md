@@ -4,6 +4,10 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 
 ## Unreleased
 
+### Fixed
+
+- An expense added just before closing or reloading the app (or its browser tab) reaches the other devices as soon as it is opened again, instead of up to 20 seconds later.
+
 ## 0.5.0 - 2026-10-05
 
 ### Added

@@ -73,13 +73,9 @@ async fn background_sync(state: &'static AppState, on_event: js_sys::Function) {
             &JsValue::from_str(&payload),
         );
     };
+    // A pass at once, then after each wake-up or poll: an edit made just before the tab last
+    // closed or reloaded hasn't gone out yet, and the other devices' may be waiting.
     loop {
-        select(
-            pin!(state.sync_wakeup.notified()),
-            pin!(sleep(POLL_INTERVAL)),
-        )
-        .await;
-        sleep(DEBOUNCE).await;
         sync::sync_all(state, |event| match event {
             SyncEvent::Account => emit("account-updated", "null".to_string()),
             SyncEvent::Group { group_id, changed } => emit(
@@ -88,5 +84,11 @@ async fn background_sync(state: &'static AppState, on_event: js_sys::Function) {
             ),
         })
         .await;
+        select(
+            pin!(state.sync_wakeup.notified()),
+            pin!(sleep(POLL_INTERVAL)),
+        )
+        .await;
+        sleep(DEBOUNCE).await;
     }
 }
