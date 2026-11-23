@@ -4,6 +4,11 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 
 ## Unreleased
 
+### Security
+
+- The SQLite database built into the app, the web version and the server is updated for a security flaw (CVE-2026-119375).
+- The connection to the server uses an updated TLS library, which fixes several published flaws, and the other components with security advisories are updated too.
+
 ### Fixed
 
 - An expense added just before closing or reloading the app (or its browser tab) reaches the other devices as soon as it is opened again, instead of up to 20 seconds later.
