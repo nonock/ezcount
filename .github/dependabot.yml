@@ -23,7 +23,9 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: cargo
-    directories: [/src-tauri, /sync-server]
+    # Every Cargo project has its own lock file (no workspace), and core's and web's hold most of
+    # the app's crates (rusqlite, loro, the crypto), so all four are watched.
+    directories: [/core, /src-tauri, /web, /sync-server]
     schedule:
       interval: weekly
     cooldown:
@@ -43,6 +45,23 @@ updates:
       # 0.13's rustls backend pulls aws-lc-rs and the platform verifier, which break Android builds.
       - dependency-name: reqwest
         versions: [">=0.13"]
+
+  # The Android project Tauri generated: the AndroidX libraries, the Gradle wrapper and plugins.
+  # Android Gradle Plugin and Kotlin majors follow Tauri's template, so they are done by hand.
+  - package-ecosystem: gradle
+    directory: /src-tauri/gen/android
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      android:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "com.android.tools.build:gradle"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.jetbrains.kotlin*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /sync-server
