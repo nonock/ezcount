@@ -4,6 +4,8 @@ What changed for people using ezcount, newest first. Add to "Unreleased" as you 
 
 ## Unreleased
 
+## 0.5.0 - 2026-10-05
+
 ### Added
 
 - Pull a group down from its top to bring it up to date with the other devices.

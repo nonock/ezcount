@@ -52,8 +52,9 @@ export default defineConfig(({ mode }) => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri`, and the other crates' build output: tens of
+      //    thousands of files it would go through before answering its first page
+      ignored: ["**/src-tauri/**", "**/target/**"],
     },
     proxy: mode === "web" ? relayProxy : undefined,
   },

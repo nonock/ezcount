@@ -413,12 +413,12 @@ pub(crate) async fn delete(
         };
         let freed = remove_account(&tx, &username, &account_id)?;
         tx.commit()?;
-        // Still under the database lock, like the count of what an upload adds.
-        let _ = relay
+        // Still under the database lock, like the count of what an upload adds: nothing
+        // else changes it between reading and writing.
+        let stored = relay.stored_bytes.load(Ordering::Relaxed);
+        relay
             .stored_bytes
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |stored| {
-                Some(stored.saturating_sub(freed))
-            });
+            .store(stored.saturating_sub(freed), Ordering::Relaxed);
         Ok(true)
     })
     .await?;
