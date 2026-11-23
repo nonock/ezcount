@@ -11,9 +11,9 @@
 use ezcount_core::notices::Notice;
 use ezcount_core::storage::Store;
 use ezcount_core::{sync, AppState};
+use jni::errors::LogErrorAndDefault;
 use jni::objects::{JObject, JString};
-use jni::sys::jstring;
-use jni::JNIEnv;
+use jni::EnvUnowned;
 use serde::Serialize;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -79,30 +79,31 @@ fn sync_alone(data_dir: &str) -> Result<Vec<Notice>, String> {
 /// `Notifier.kt` reads. `[]` when there is nothing, or when it failed.
 #[no_mangle]
 pub extern "system" fn Java_com_ezvany_ezcount_SyncWorker_backgroundSync<'local>(
-    mut env: JNIEnv<'local>,
+    mut env: EnvUnowned<'local>,
     _worker: JObject<'local>,
     data_dir: JString<'local>,
-) -> jstring {
-    let data_dir: Option<String> = env.get_string(&data_dir).ok().map(Into::into);
-    // A panic must not cross into the Java side.
-    let found = std::panic::catch_unwind(|| match (APP.get(), data_dir) {
-        (Some(app), _) => Ok(tauri::async_runtime::block_on(
-            crate::background::sync_once(app),
-        )),
-        (None, Some(dir)) => sync_alone(&dir),
-        (None, None) => Err("No data folder".to_string()),
-    });
-    let notices = match found {
-        Ok(Ok(notices)) => notices,
-        Ok(Err(e)) => {
-            eprintln!("[notify] background sync failed: {e}");
-            Vec::new()
-        }
-        Err(_) => Vec::new(),
-    };
-    let json = serde_json::to_string(&notices).unwrap_or_else(|_| "[]".to_string());
-    match env.new_string(json) {
-        Ok(text) => text.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
+) -> JObject<'local> {
+    // `with_env` keeps a panic from crossing into the Java side; one here returns null.
+    env.with_env(|env| -> jni::errors::Result<JObject<'local>> {
+        let data_dir = data_dir.try_to_string(env).ok();
+        // A panic in the sync still answers `[]`.
+        let found = std::panic::catch_unwind(|| match (APP.get(), data_dir) {
+            (Some(app), _) => Ok(tauri::async_runtime::block_on(
+                crate::background::sync_once(app),
+            )),
+            (None, Some(dir)) => sync_alone(&dir),
+            (None, None) => Err("No data folder".to_string()),
+        });
+        let notices = match found {
+            Ok(Ok(notices)) => notices,
+            Ok(Err(e)) => {
+                eprintln!("[notify] background sync failed: {e}");
+                Vec::new()
+            }
+            Err(_) => Vec::new(),
+        };
+        let json = serde_json::to_string(&notices).unwrap_or_else(|_| "[]".to_string());
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
 }
